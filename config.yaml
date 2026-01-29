@@ -1,0 +1,146 @@
+# SQLite Database Configuration
+# ==============================
+# This file configures the application to work with your SQLite database.
+# Customize the table names, column mappings, and features below.
+
+# Database Configuration
+database:
+  # Path to SQLite database (relative to project root or absolute path)
+  path: "./alerts.db"
+
+# Table Configuration
+# ===================
+# Define your database tables and map column names to the expected UI fields.
+
+tables:
+  # Primary alerts table (required)
+  alerts:
+    name: "alerts"  # Actual table name in your database
+    columns:
+      # Required columns - these must exist in your database
+      id: "Alert ID"                     # Unique identifier for each alert
+      ticker: "Ticker"                   # Stock ticker symbol
+      status: "status"                   # Current status (Pending/Approved/Rejected)
+      
+      # Optional columns - leave empty string "" if not available
+      isin: "ISIN"                       # ISIN for linking alerts to news
+      instrument_name: "Instrument Name" # Full name of the instrument
+      buy_quantity: "Sum of buy quantity"
+      sell_quantity: "Sum of sell quantity"
+      execution_date: "Trade execution date"
+      trade_type: "trade type"
+      alert_date: "Alert date"
+      start_date: "Start date"
+      end_date: "End date"
+
+  # News/Articles table (required)
+  articles:
+    name: "articles"  # Actual table name in your database
+    columns:
+      id: "art_id"
+      isin: "isin"                       # Links to alerts via ISIN
+      created_date: "art_created_date"
+      title: "art_title"
+      body: "art_body"
+      sentiment: "sentiment"
+      theme: "theme"
+      summary: "art_summary"
+      # Optional: materiality column (leave empty if not available)
+      materiality: "Materiality"
+
+  # Price cache table (auto-created if doesn't exist)
+  prices:
+    name: "prices"
+    columns:
+      ticker: "ticker"
+      date: "date"
+      open: "opening price"
+      close: "closing price"
+      volume: "volume"
+      industry: "industry"
+
+# Display Configuration
+# =====================
+# Customize how data is displayed in the UI
+
+display:
+  # Columns to show in the alerts table (use the keys from alerts.columns above)
+  table_columns:
+    - id
+    - ticker
+    - instrument_name
+    - trade_type
+    - execution_date
+    - alert_date
+    - status
+
+  # Human-readable labels for table headers
+  column_labels:
+    id: "Alert ID"
+    ticker: "Ticker"
+    isin: "ISIN"
+    instrument_name: "Instrument"
+    buy_quantity: "Buy Qty"
+    sell_quantity: "Sell Qty"
+    execution_date: "Execution Date"
+    trade_type: "Trade Type"
+    alert_date: "Alert Date"
+    start_date: "Start Date"
+    end_date: "End Date"
+    status: "Status"
+
+# Valid status values for alerts
+valid_statuses:
+  - Pending
+  - Approved
+  - Rejected
+
+# Materiality Color Configuration
+# ===============================
+# Colors for materiality indicators (only used if materiality column exists)
+# Format: Three-letter code (High/Medium/Low for each dimension) -> hex color
+materiality_colors:
+  HHH: "#8B0000"
+  HHM: "#A00000"
+  HHL: "#B50000"
+  HMH: "#C41E3A"
+  HMM: "#CD5C5C"
+  HML: "#DC143C"
+  HLH: "#E34234"
+  HLM: "#E57373"
+  HLL: "#EF5350"
+  MHH: "#C62828"
+  MHM: "#D32F2F"
+  MHL: "#E53935"
+  MMH: "#F44336"
+  MMM: "#EF5350"
+  MML: "#E57373"
+  MLH: "#EF9A9A"
+  MLM: "#FFCDD2"
+  MLL: "#EF9A9A"
+  LHH: "#EF5350"
+  LHM: "#E57373"
+  LHL: "#EF9A9A"
+  LMH: "#FF5252"
+  LMM: "#FF8A80"
+  LML: "#FFB74D"
+  LLH: "#FF8A65"
+  LLM: "#FF7043"
+  LLL: "#FF5722"
+  DEFAULT: "#607D8B"
+
+# Sector to ETF Mapping
+# =====================
+# Maps stock sectors to corresponding sector ETFs for comparison charts
+sector_etf_mapping:
+  Technology: "XLK"
+  Financial Services: "XLF"
+  Healthcare: "XLV"
+  Consumer Cyclical: "XLY"
+  Industrials: "XLI"
+  Communication Services: "XLC"
+  Energy: "XLE"
+  Consumer Defensive: "XLP"
+  Utilities: "XLU"
+  Real Estate: "XLRE"
+  Basic Materials: "XLB"
