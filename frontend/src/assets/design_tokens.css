@@ -1,0 +1,101 @@
+/* Design Tokens - Light Clean Theme */
+:root {
+  /* Colors */
+  --color-primary: #0f172a; /* Slate 900 */
+  --color-primary-light: #334155; /* Slate 700 */
+  
+  --color-accent: #3b82f6; /* Blue 500 */
+  --color-accent-hover: #2563eb; /* Blue 600 */
+  --color-accent-subtle: #eff6ff; /* Blue 50 */
+  
+  --color-background: #f8fafc; /* Slate 50 */
+  --color-surface: #ffffff;
+  --color-surface-hover: #f1f5f9; /* Slate 100 */
+  
+  --color-text-main: #0f172a; /* Slate 900 */
+  --color-text-muted: #64748b; /* Slate 500 */
+  --color-text-subtle: #94a3b8; /* Slate 400 */
+  
+  --color-border: #e2e8f0; /* Slate 200 */
+  --color-divider: #f1f5f9; /* Slate 100 */
+  
+  /* Semantic Colors */
+  --color-success: #10b981; /* Emerald 500 */
+  --color-success-bg: #ecfdf5; /* Emerald 50 */
+  --color-success-text: #065f46; /* Emerald 800 */
+  
+  --color-danger: #ef4444; /* Rose 500 */
+  --color-danger-bg: #fef2f2; /* Rose 50 */
+  --color-danger-text: #991b1b; /* Rose 800 */
+  
+  --color-warning: #f59e0b; /* Amber 500 */
+  --color-warning-bg: #fffbeb; /* Amber 50 */
+  --color-warning-text: #92400e; /* Amber 800 */
+  
+  /* Typography */
+  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  
+  --font-size-xs: 0.75rem;   /* 12px */
+  --font-size-sm: 0.875rem;  /* 14px */
+  --font-size-base: 1rem;    /* 16px */
+  --font-size-lg: 1.125rem;  /* 18px */
+  --font-size-xl: 1.25rem;   /* 20px */
+  --font-size-2xl: 1.5rem;   /* 24px */
+  
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  
+  /* Spacing */
+  --spacing-1: 0.25rem; /* 4px */
+  --spacing-2: 0.5rem;  /* 8px */
+  --spacing-3: 0.75rem; /* 12px */
+  --spacing-4: 1rem;    /* 16px */
+  --spacing-5: 1.25rem; /* 20px */
+  --spacing-6: 1.5rem;  /* 24px */
+  --spacing-8: 2rem;    /* 32px */
+  
+  /* Layout */
+  --header-height: 64px;
+  --sidebar-width: 400px;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  
+  /* Shadows */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+}
+
+body {
+  font-family: var(--font-family);
+  background-color: var(--color-background);
+  color: var(--color-text-main);
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: #94a3b8;
+}
