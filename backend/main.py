@@ -197,6 +197,22 @@ def fetch_and_cache_prices(ticker: str, period: str, is_etf: bool = False):
     volume_col = config.get_column("prices", "volume")
     industry_col = config.get_column("prices", "industry")
 
+    # Ensure table exists
+    # We create it dynamically to support any user-provided database
+    create_table_query = f'''
+        CREATE TABLE IF NOT EXISTS "{table_name}" (
+            "{ticker_col}" TEXT,
+            "{date_col}" TEXT,
+            "{open_col}" REAL,
+            "{close_col}" REAL,
+            "{volume_col}" INTEGER,
+            "{industry_col}" TEXT,
+            PRIMARY KEY ("{ticker_col}", "{date_col}")
+        )
+    '''
+    cursor.execute(create_table_query)
+    conn.commit()
+
     # Check if we have data for this range
     cursor.execute(
         f'SELECT MIN("{date_col}") as min_date, MAX("{date_col}") as max_date '
