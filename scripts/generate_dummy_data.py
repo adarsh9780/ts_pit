@@ -109,6 +109,7 @@ def generate_dummy_data(num_records=50):
                     "sentiment": f"{sentiment_prefix}: This {theme['theme']} event could significantly impact investor sentiment.",
                     "theme": theme["theme"],
                     "art_summary": art_summary,
+                    "Materiality": "".join(random.choices(["H", "M", "L"], k=3)),
                 }
                 articles_data.append(article_record)
             current_date += timedelta(days=1)
