@@ -144,3 +144,28 @@ sector_etf_mapping:
   Utilities: "XLU"
   Real Estate: "XLRE"
   Basic Materials: "XLB"
+
+# LLM Configuration
+# =================
+# Configure the Language Model Provider (azure or gemini)
+llm:
+  # Provider to use: "azure" or "gemini"
+  provider: "gemini"
+  
+  # Azure OpenAI Configuration
+  azure:
+    deployment: "gpt-4o-2024-08-06"
+    endpoint: "https://llm-multitenancy-exp.jpmchase.net/ver2/"
+    api_version: "2024-12-01-preview"
+    tenant_id: "79C738E8-25CD-4C36-ADF6-6EA2ED78F6A4"
+    client_id: "63030A68-E1C0-47FB-A06D-E0DFF88AC352"
+    cert_path: "cert/azure_openai_cert.pem"
+    scope: "https://cognitiveservices.azure.com/.default"
+    api_key: "c71e58c6331340f0af8343a42bd32899"
+
+  # Google Gemini Configuration
+  gemini:
+    model: "gemini-2.0-flash-lite"
+    # API Key should be set in environment variable GEMINI_API_KEY
+    # But can be hardcoded here for testing if needed
+    api_key: "${GEMINI_API_KEY}"

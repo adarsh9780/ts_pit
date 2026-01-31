@@ -25,6 +25,7 @@ const selectedPeriod = ref('1mo');
 const isLoadingPrices = ref(false);
 const config = ref(null);
 const viewMode = ref('chart');
+const isGeneratingSummary = ref(false);
 
 // Chart refs
 const chartRef = shallowRef(null);
@@ -283,6 +284,30 @@ const fetchAlertDetail = async () => {
     }
 };
 
+const generateSummary = async () => {
+    isGeneratingSummary.value = true;
+    try {
+        const response = await axios.post(`http://localhost:8000/alerts/${props.alertId}/summary`);
+        // Update local state with new summary data
+        if (alertData.value) {
+            alertData.value.narrative_theme = response.data.narrative_theme;
+            alertData.value.narrative_summary = response.data.narrative_summary;
+            alertData.value.summary_generated_at = response.data.summary_generated_at;
+        }
+    } catch (error) {
+        console.error('Error generating summary:', error);
+        alert('Failed to generate summary. Please check backend logs.');
+    } finally {
+        isGeneratingSummary.value = false;
+    }
+};
+
+const refreshSummary = () => {
+    if (confirm("Are you sure you want to regenerate the summary? This will use AI credits.")) {
+        generateSummary();
+    }
+};
+
 const updateStatus = async (newStatus) => {
     try {
         await axios.patch(`http://localhost:8000/alerts/${props.alertId}/status`, { status: newStatus });
@@ -420,9 +445,6 @@ const prepareChartData = () => {
                 const offset = stackIndex * 4;
                 
                 bubbleData.push({
-                    value: [dateLabel, yBase + offset],
-                    materiality: mat,
-                    count: count,
                     value: [dateLabel, yBase + offset],
                     materiality: mat,
                     count: count,
@@ -565,6 +587,10 @@ const loadData = async () => {
                            <span class="tag isin">{{ alertData.isin }}</span>
                            <span class="tag type" :class="alertData.trade_type.toLowerCase()">{{ alertData.trade_type }}</span>
                            <span class="status-badge" :class="getStatusClass(alertData.status)">{{ alertData.status }}</span>
+                           <!-- Cluster Theme Badge -->
+                           <span v-if="alertData.narrative_theme" class="tag theme-badge" title="AI Generated Theme">
+                               {{ alertData.narrative_theme }}
+                           </span>
                         </div>
                         <div class="alert-metrics">
                             <span class="metric-item"><strong>Alert Date:</strong> {{ alertData.alert_date }}</span>
@@ -647,6 +673,28 @@ const loadData = async () => {
                     </div>
                 </div>
                 <div class="card-body scrollable">
+                    
+                    <!-- Executive Summary Card -->
+                    <div class="executive-summary-wrapper">
+                        <div v-if="alertData.narrative_summary" class="executive-summary">
+                            <div class="summary-header">
+                                <h4><span class="ai-icon">AI</span> Investigation Summary</h4>
+                                <button class="refresh-btn" @click="refreshSummary" :disabled="isGeneratingSummary" title="Regenerate Summary">
+                                    {{ isGeneratingSummary ? '...' : '↻' }}
+                                </button>
+                            </div>
+                            <p>{{ alertData.narrative_summary }}</p>
+                            <span class="summary-meta">Generated: {{ new Date(alertData.summary_generated_at).toLocaleString() }}</span>
+                        </div>
+                        
+                        <div v-else class="summary-placeholder">
+                             <button class="generate-btn" @click="generateSummary" :disabled="isGeneratingSummary">
+                                <span v-if="isGeneratingSummary" class="spinner-sm"></span>
+                                <span v-else>Generate AI Summary</span>
+                            </button>
+                        </div>
+                    </div>
+
                     <div v-if="filteredNews.length > 0" class="news-feed">
                         <div v-for="article in filteredNews" :key="article.art_id" class="news-item">
                             <div class="news-meta">
@@ -767,5 +815,123 @@ h1 { margin: 0; font-size: 1.5rem; color: #0f172a; display: flex; align-items: b
 .data-table th.count-header { text-align: center !important; } /* Need to adjust th above if matching */
 .count-badge { color: white; border-radius: 12px; padding: 2px 8px; font-size: 0.7rem; font-weight: bold; min-width: 20px; display: inline-block; }
 .empty-cell { color: #cbd5e1; }
+
+/* AI Summary Styles */
+.theme-badge {
+    background-color: #f3e8ff;
+    color: #7e22ce;
+    border: 1px solid #d8b4fe;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.executive-summary-wrapper {
+    border-bottom: 1px solid #e2e8f0;
+    background: #f8fafc;
+}
+
+.executive-summary {
+    background: linear-gradient(to right, #fbf7ff, #f8fafc);
+    padding: 1.25rem;
+}
+
+.summary-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+.executive-summary h4 {
+    margin: 0;
+    color: #4c1d95;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 700;
+}
+
+.ai-icon {
+    background: linear-gradient(135deg, #4c1d95, #7c3aed);
+    color: white;
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    letter-spacing: 0.5px;
+}
+
+.executive-summary p {
+    margin: 0;
+    font-size: 0.9rem;
+    color: #334155;
+    line-height: 1.6;
+}
+
+.summary-meta {
+    display: block;
+    margin-top: 8px;
+    font-size: 0.7rem;
+    color: #94a3b8;
+}
+
+.refresh-btn {
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    cursor: pointer;
+    font-size: 1rem;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.refresh-btn:hover {
+    background: #e2e8f0;
+    color: #64748b;
+}
+
+.summary-placeholder {
+    padding: 1rem;
+    display: flex;
+    justify-content: center;
+    background: #fff;
+}
+
+.generate-btn {
+    background: linear-gradient(135deg, #7c3aed, #6d28d9);
+    color: white;
+    border: none;
+    padding: 0.6rem 1.2rem;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 0.85rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 2px 4px rgba(124, 58, 237, 0.2);
+    transition: all 0.2s;
+}
+
+.generate-btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 6px rgba(124, 58, 237, 0.3);
+}
+
+.generate-btn:disabled {
+    opacity: 0.7;
+    cursor: wait;
+}
+
+.spinner-sm {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
 
 </style>
