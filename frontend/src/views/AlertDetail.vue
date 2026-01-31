@@ -500,7 +500,7 @@ const priceMap = computed(() => {
 
 const getPriceChange = (date) => {
     const price = priceMap.value.get(date);
-    if (!price || !price.open) return null;
+    if (!price || price.open == null || price.close == null) return null;
     // Calculate intraday change: (Close - Open) / Open
     const change = ((price.close - price.open) / price.open) * 100;
     return {
@@ -558,9 +558,9 @@ const tableData = computed(() => {
         
         return {
             date,
-            tickerClose: price ? price.close.toFixed(2) : '-',
-            tickerRebased: hasTicker ? tickerSeriesData.value[index].toFixed(2) : '-',
-            industryRebased: hasIndustry ? industrySeriesData.value[index].toFixed(2) : '-',
+            tickerClose: price?.close != null ? price.close.toFixed(2) : '-',
+            tickerRebased: tickerSeriesData.value[index] != null ? tickerSeriesData.value[index].toFixed(2) : '-',
+            industryRebased: industrySeriesData.value[index] != null ? industrySeriesData.value[index].toFixed(2) : '-',
             counts
         };
     }).reverse(); // Show newest first
