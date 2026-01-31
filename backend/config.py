@@ -153,6 +153,10 @@ class Config:
             },
         )
 
+    def get_llm_config(self) -> Dict[str, Any]:
+        """Get LLM configuration."""
+        return self._config.get("llm", {})
+
     def get_mappings_for_api(self) -> Dict[str, Any]:
         """
         Get configuration in a format compatible with the /config API endpoint.

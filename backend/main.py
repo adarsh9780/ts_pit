@@ -10,12 +10,43 @@ from fastapi.responses import FileResponse
 from typing import Optional
 from pydantic import BaseModel
 from .database import get_db_connection
+from .database import get_db_connection
 from .config import get_config
+from .llm import generate_cluster_summary
 
 app = FastAPI()
 
 # Load configuration
+# Load configuration
 config = get_config()
+
+
+# Ensure DB schema is up to date (Migration)
+def run_migrations():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    table_name = config.get_table_name("alerts")
+
+    # Check for new columns
+    cursor.execute(f'PRAGMA table_info("{table_name}")')
+    columns = [row["name"] for row in cursor.fetchall()]
+
+    new_cols = {
+        "narrative_theme": "TEXT",
+        "narrative_summary": "TEXT",
+        "summary_generated_at": "TEXT",
+    }
+
+    for col, dtype in new_cols.items():
+        if col not in columns:
+            print(f"Migrating: Adding {col} to {table_name}")
+            cursor.execute(f'ALTER TABLE "{table_name}" ADD COLUMN "{col}" {dtype}')
+
+    conn.commit()
+    conn.close()
+
+
+run_migrations()
 
 # Add CORS middleware
 app.add_middleware(
@@ -159,6 +190,79 @@ def get_alert_detail(alert_id: str):
         raise HTTPException(status_code=404, detail="Alert not found")
 
     return remap_row(dict(row), "alerts")
+
+
+@app.post("/alerts/{alert_id}/summary")
+def generate_summary(alert_id: str):
+    """Generate AI summary for the alert."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # 1. Get Alert Details
+    alerts_table = config.get_table_name("alerts")
+    alert_id_col = config.get_column("alerts", "id")
+    isin_col = config.get_column("alerts", "isin")
+    start_col = config.get_column("alerts", "start_date")
+    end_col = config.get_column("alerts", "end_date")
+
+    cursor.execute(
+        f'SELECT * FROM "{alerts_table}" WHERE "{alert_id_col}" = ?', (alert_id,)
+    )
+    alert = cursor.fetchone()
+
+    if not alert:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    start_date = alert[start_col]
+    end_date = alert[end_col]
+    isin = alert[isin_col]
+
+    # 2. Fetch news
+    articles_table = config.get_table_name("articles")
+    art_isin_col = config.get_column("articles", "isin")
+    date_col = config.get_column("articles", "created_date")
+    title_col = config.get_column("articles", "title")
+    summary_col = config.get_column("articles", "summary")
+
+    query = f'SELECT "{title_col}" as title, "{summary_col}" as summary FROM "{articles_table}" WHERE "{art_isin_col}" = ?'
+    params = [isin]
+
+    if start_date:
+        query += f' AND "{date_col}" >= ?'
+        params.append(start_date)
+    if end_date:
+        query += f' AND "{date_col}" <= ?'
+        params.append(end_date)
+
+    query += f' ORDER BY "{date_col}" DESC'
+
+    cursor.execute(query, params)
+    articles = [dict(row) for row in cursor.fetchall()]
+
+    # 3. Generate Summary via LLM
+    try:
+        result = generate_cluster_summary(articles)
+    except Exception as e:
+        conn.close()
+        print(f"LLM Error: {e}")
+        raise HTTPException(status_code=500, detail=f"LLM Generation Failed: {str(e)}")
+
+    # 4. Save to DB
+    now_str = datetime.now().isoformat()
+
+    cursor.execute(
+        f'UPDATE "{alerts_table}" SET "narrative_theme" = ?, "narrative_summary" = ?, "summary_generated_at" = ? WHERE "{alert_id_col}" = ?',
+        (result["narrative_theme"], result["narrative_summary"], now_str, alert_id),
+    )
+    conn.commit()
+    conn.close()
+
+    return {
+        "narrative_theme": result["narrative_theme"],
+        "narrative_summary": result["narrative_summary"],
+        "summary_generated_at": now_str,
+    }
 
 
 def fetch_and_cache_prices(ticker: str, period: str, is_etf: bool = False):
