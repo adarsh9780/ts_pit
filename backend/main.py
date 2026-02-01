@@ -10,7 +10,6 @@ from fastapi.responses import FileResponse
 from typing import Optional
 from pydantic import BaseModel
 from .database import get_db_connection
-from .database import get_db_connection
 from .config import get_config
 from .llm import generate_cluster_summary
 

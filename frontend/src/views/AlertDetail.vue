@@ -94,7 +94,7 @@ const chartOptions = computed(() => {
             name: alertData.value ? alertData.value.ticker : 'Ticker',
             type: 'line',
             data: tickerSeriesData.value,
-            smooth: 0.3,
+            smooth: false,
             symbol: 'none',
             lineStyle: { color: '#3b82f6', width: 2 },
             itemStyle: { color: '#3b82f6' },
@@ -114,12 +114,14 @@ const chartOptions = computed(() => {
             name: `${prices.value.industry_name || 'Industry'} Index`,
             type: 'line',
             data: industrySeriesData.value,
-            smooth: 0.3,
+            smooth: false,
+            yAxisIndex: 1,
             symbol: 'none',
-            lineStyle: { color: '#94a3b8', width: 2.5, type: 'dashed' },
+            lineStyle: { color: '#94a3b8', width: 2, type: 'dashed' },
             itemStyle: { color: '#94a3b8' },
             emphasis: { focus: 'series' }
         }
+
     ];
     
     // Add scatter series for bubbles if we have data
@@ -137,24 +139,7 @@ const chartOptions = computed(() => {
         });
     }
     
-    // Add volume bar series
-    if (volumeSeriesData.value.length > 0) {
-        series.push({
-            name: 'Volume',
-            type: 'bar',
-            data: volumeSeriesData.value,
-            yAxisIndex: 1,
-            barWidth: '60%',
-            itemStyle: {
-                color: 'rgba(156, 163, 175, 0.4)'
-            },
-            emphasis: {
-                itemStyle: {
-                    color: 'rgba(156, 163, 175, 0.7)'
-                }
-            }
-        });
-    }
+    // Volume is shown in tooltip only (no bar series)
     
     return {
         animation: true,
@@ -196,13 +181,18 @@ const chartOptions = computed(() => {
                         </div>`;
                     }
                     // Show volume
-                    if (p.seriesType === 'bar' && p.seriesName === 'Volume' && p.value !== null) {
-                        const formatted = p.value >= 1000000 ? (p.value / 1000000).toFixed(2) + 'M' : p.value >= 1000 ? (p.value / 1000).toFixed(1) + 'K' : p.value;
-                        html += `<div style="display: flex; align-items: center; gap: 8px; margin: 4px 0;">
-                            <span style="width: 20px; height: 10px; background: rgba(156, 163, 175, 0.6);"></span>
-                            <span>Volume:</span>
-                            <span style="font-weight: 600; margin-left: auto;">${formatted}</span>
-                        </div>`;
+                    if (p.seriesType === 'line' && p.seriesName.includes(alertData.value?.ticker)) {
+                        // Get volume for this date from volumeSeriesData
+                        const dateIndex = chartLabels.value.indexOf(date);
+                        if (dateIndex >= 0 && volumeSeriesData.value[dateIndex]) {
+                            const vol = volumeSeriesData.value[dateIndex];
+                            const formatted = vol >= 1000000 ? (vol / 1000000).toFixed(2) + 'M' : vol >= 1000 ? (vol / 1000).toFixed(1) + 'K' : vol;
+                            html += `<div style="display: flex; align-items: center; gap: 8px; margin: 4px 0; color: #aaa;">
+                                <span style="width: 20px; height: 10px; background: rgba(156, 163, 175, 0.6);"></span>
+                                <span>Volume:</span>
+                                <span style="font-weight: 600; margin-left: auto;">${formatted}</span>
+                            </div>`;
+                        }
                     }
                 });
                 
@@ -256,17 +246,15 @@ const chartOptions = computed(() => {
             },
             {
                 type: 'value',
-                name: 'Volume',
+                name: 'Industry',
                 position: 'right',
                 axisLine: { show: false },
                 axisTick: { show: false },
                 axisLabel: { 
-                    color: '#999', 
-                    fontSize: 10,
-                    formatter: (value) => value >= 1000000 ? (value / 1000000).toFixed(0) + 'M' : value >= 1000 ? (value / 1000).toFixed(0) + 'K' : value
+                    color: '#94a3b8', 
+                    fontSize: 10
                 },
-                splitLine: { show: false },
-                max: (value) => value.max * 3 // Make volume bars smaller by extending the axis
+                splitLine: { show: false }
             }
         ],
         series
@@ -365,28 +353,25 @@ const prepareChartData = () => {
     
     const industryPrices = prices.value.industry;
     const labels = tickerPrices.map(p => p.date);
-    const tickerStart = tickerPrices[0].close;
     
-    // Prepare ticker data
-    const tickerData = tickerPrices.map(p => (p.close / tickerStart) * 100);
+    // Prepare ticker data - actual close prices (not rebased)
+    const tickerData = tickerPrices.map(p => p.close);
     
-    // Prepare volume data
+    // Prepare volume data (for tooltip, not bars)
     const volumeData = tickerPrices.map(p => p.volume || 0);
     
+    // Map for quick lookups
     const tickerMap = new Map();
-    tickerPrices.forEach(p => tickerMap.set(p.date, (p.close / tickerStart) * 100));
+    tickerPrices.forEach(p => tickerMap.set(p.date, p.close));
 
-    // Prepare industry data
+    // Prepare industry data - actual close prices on secondary y-axis
     let industryData = [];
     if (industryPrices && industryPrices.length > 0) {
         const indMap = new Map(industryPrices.map(p => [p.date, p.close]));
-        let industryStart = industryPrices[0].close;
-        const matchingStart = indMap.get(labels[0]);
-        if (matchingStart) industryStart = matchingStart;
 
         industryData = labels.map(date => {
             const val = indMap.get(date);
-            return val ? (val / industryStart) * 100 : null;
+            return val ?? null;  // Actual price, not rebased
         });
     }
 
@@ -613,7 +598,7 @@ const loadData = async () => {
         <div class="dashboard-grid">
             <div class="card chart-panel">
                 <div class="card-header chart-header">
-                    <h3>Price Performance (rebased to 100)</h3>
+                    <h3>Price Performance</h3>
                     <div class="header-controls">
                         <div class="view-toggle">
                             <button :class="{ active: viewMode === 'chart' }" @click="viewMode = 'chart'">Chart</button>
