@@ -38,6 +38,19 @@ except ImportError:
         )
 
 
+def _resolve_env_var(value: str) -> str:
+    """Resolve ${VAR_NAME} syntax to actual environment variable value."""
+    if (
+        value
+        and isinstance(value, str)
+        and value.startswith("${")
+        and value.endswith("}")
+    ):
+        var_name = value[2:-1]
+        return os.environ.get(var_name, "")
+    return value or ""
+
+
 def get_llm_model():
     """
     Factory to return the configured LLM model instance.
@@ -50,28 +63,22 @@ def get_llm_model():
         # Use user's custom class logic
         azure_conf = llm_config.get("azure", {})
 
-        # Map config to arguments expected by their class (assumption)
-        # They showed: client_id, tenant_id, cert_path, scope, refresh_buffer
+        # Resolve all environment variables from config
         return AzureOpenAIModel(
-            client_id=azure_conf.get("client_id"),
-            tenant_id=azure_conf.get("tenant_id"),
-            cert_path=azure_conf.get("cert_path"),
-            scope=azure_conf.get("scope"),
+            client_id=_resolve_env_var(azure_conf.get("client_id")),
+            tenant_id=_resolve_env_var(azure_conf.get("tenant_id")),
+            cert_path=azure_conf.get("cert_path"),  # Not sensitive, no env var
+            scope=azure_conf.get("scope"),  # Not sensitive
             deployment=azure_conf.get("deployment"),
             endpoint=azure_conf.get("endpoint"),
             api_version=azure_conf.get("api_version"),
-            api_key=azure_conf.get("api_key"),
+            api_key=_resolve_env_var(azure_conf.get("api_key")),
         )
 
     elif provider == "gemini":
         gemini_conf = llm_config.get("gemini", {})
         model_name = gemini_conf.get("model", "gemini-1.5-pro")
-        api_key = gemini_conf.get("api_key")
-
-        # Resolve env var if needed
-        if api_key and api_key.startswith("${") and api_key.endswith("}"):
-            var_name = api_key[2:-1]
-            api_key = os.environ.get(var_name)
+        api_key = _resolve_env_var(gemini_conf.get("api_key"))
 
         if not api_key:
             raise ValueError(

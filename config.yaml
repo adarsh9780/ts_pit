@@ -157,11 +157,11 @@ llm:
     deployment: "gpt-4o-2024-08-06"
     endpoint: "https://llm-multitenancy-exp.jpmchase.net/ver2/"
     api_version: "2024-12-01-preview"
-    tenant_id: "***REMOVED***"
-    client_id: "***REMOVED***"
+    tenant_id: "${AZURE_TENANT_ID}"
+    client_id: "${AZURE_CLIENT_ID}"
     cert_path: "cert/azure_openai_cert.pem"
     scope: "https://cognitiveservices.azure.com/.default"
-    api_key: "***REMOVED***"
+    api_key: "${AZURE_API_KEY}"
 
   # Google Gemini Configuration
   gemini:
