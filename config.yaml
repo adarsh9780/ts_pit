@@ -74,6 +74,8 @@ display:
     - trade_type
     - execution_date
     - alert_date
+    - start_date
+    - end_date
     - status
 
   # Human-readable labels for table headers

@@ -11,7 +11,7 @@ const availableDates = ref([]);
 
 // Display columns from config (with fallback)
 const displayColumns = computed(() => {
-  return config.value.display_columns || ['id', 'ticker', 'instrument_name', 'trade_type', 'execution_date', 'alert_date', 'status'];
+  return config.value.display_columns || ['id', 'ticker', 'instrument_name', 'trade_type', 'execution_date', 'alert_date', 'start_date', 'end_date', 'status'];
 });
 
 const fetchConfig = async () => {
