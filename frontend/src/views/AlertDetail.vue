@@ -4,11 +4,12 @@ import axios from 'axios';
 import VChart from 'vue-echarts';
 import { use } from 'echarts/core';
 import { CanvasRenderer } from 'echarts/renderers';
-import { LineChart, ScatterChart, BarChart } from 'echarts/charts';
+import { LineChart, ScatterChart, BarChart, CandlestickChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent, LegendComponent, MarkAreaComponent } from 'echarts/components';
 
 // Register ECharts components
-use([CanvasRenderer, LineChart, ScatterChart, BarChart, GridComponent, TooltipComponent, LegendComponent, MarkAreaComponent]);
+use([CanvasRenderer, LineChart, ScatterChart, BarChart, CandlestickChart, GridComponent, TooltipComponent, LegendComponent, MarkAreaComponent]);
+
 
 const props = defineProps({
   alertId: {
@@ -21,7 +22,7 @@ const alertData = ref(null);
 const prices = ref({ ticker: [], industry: [], industry_name: '' });
 const news = ref([]);
 const activeTheme = ref('All');
-const selectedPeriod = ref('1mo');
+const selectedPeriod = ref('alert');  // Default to alert-centered view
 const isLoadingPrices = ref(false);
 const config = ref(null);
 const viewMode = ref('chart');
@@ -31,11 +32,17 @@ const isGeneratingSummary = ref(false);
 const chartRef = shallowRef(null);
 const chartLabels = ref([]);
 const tickerSeriesData = ref([]);
+const tickerRebasedSeriesData = ref([]);  // Rebased to 100 for comparison
 const industrySeriesData = ref([]);
+const industryRebasedSeriesData = ref([]);  // Rebased to 100 for comparison
 const volumeSeriesData = ref([]);
 const bubbleSeriesData = ref([]);
+const candlestickSeriesData = ref([]);  // OHLC data for candlestick chart
+const chartType = ref('line');  // 'line' or 'candle'
+const priceMode = ref('actual');  // 'actual' or 'rebased' - controls which pair of lines to show
 
 const periods = [
+    { label: 'Alert', value: 'alert' },  // Custom: start_date-10 to end_date+10
     { label: '1M', value: '1mo' },
     { label: '3M', value: '3mo' },
     { label: '6M', value: '6mo' },
@@ -89,16 +96,20 @@ const chartOptions = computed(() => {
         ]];
     }
     
-    const series = [
-        {
+    const series = [];
+    
+    // Ticker series - Candlestick or Line based on chartType
+    if (chartType.value === 'candle') {
+        series.push({
             name: alertData.value ? alertData.value.ticker : 'Ticker',
-            type: 'line',
-            data: tickerSeriesData.value,
-            smooth: false,
-            symbol: 'none',
-            lineStyle: { color: '#3b82f6', width: 2 },
-            itemStyle: { color: '#3b82f6' },
-            emphasis: { focus: 'series' },
+            type: 'candlestick',
+            data: candlestickSeriesData.value,
+            itemStyle: {
+                color: '#16a34a',       // Up candle fill (green)
+                color0: '#dc2626',      // Down candle fill (red)
+                borderColor: '#16a34a', // Up candle border
+                borderColor0: '#dc2626' // Down candle border
+            },
             markArea: {
                 silent: true,
                 itemStyle: {
@@ -109,23 +120,84 @@ const chartOptions = computed(() => {
                 },
                 data: markAreaData
             }
-        },
-        {
-            name: `${prices.value.industry_name || 'Industry'} Index`,
-            type: 'line',
-            data: industrySeriesData.value,
-            smooth: false,
-            yAxisIndex: 1,
-            symbol: 'none',
-            lineStyle: { color: '#94a3b8', width: 2, type: 'dashed' },
-            itemStyle: { color: '#94a3b8' },
-            emphasis: { focus: 'series' }
+        });
+    } else {
+        // Line mode - show either Actual or Rebased pair based on priceMode
+        if (priceMode.value === 'actual') {
+            // ACTUAL MODE: Stock Actual + Industry Actual
+            series.push({
+                name: alertData.value ? alertData.value.ticker : 'Ticker',
+                type: 'line',
+                data: tickerSeriesData.value,
+                smooth: false,
+                symbol: 'none',
+                lineStyle: { color: '#3b82f6', width: 2 },
+                itemStyle: { color: '#3b82f6' },
+                emphasis: { focus: 'series' },
+                markArea: {
+                    silent: true,
+                    itemStyle: {
+                        color: 'rgba(250, 204, 21, 0.15)',
+                        borderColor: '#eab308',
+                        borderWidth: 2,
+                        borderType: 'dashed'
+                    },
+                    data: markAreaData
+                }
+            });
+            
+            // Industry Actual (on secondary y-axis for different scale)
+            series.push({
+                name: `${prices.value.industry_name || 'Industry'}`,
+                type: 'line',
+                data: industrySeriesData.value,
+                smooth: false,
+                yAxisIndex: 1,
+                symbol: 'none',
+                lineStyle: { color: '#94a3b8', width: 2, type: 'dashed' },
+                itemStyle: { color: '#94a3b8' },
+                emphasis: { focus: 'series' }
+            });
+        } else {
+            // REBASED MODE: Stock Rebased + Industry Rebased (both start at 100)
+            series.push({
+                name: `${alertData.value ? alertData.value.ticker : 'Ticker'} (Rebased)`,
+                type: 'line',
+                data: tickerRebasedSeriesData.value,
+                smooth: false,
+                symbol: 'none',
+                lineStyle: { color: '#3b82f6', width: 2 },
+                itemStyle: { color: '#3b82f6' },
+                emphasis: { focus: 'series' },
+                markArea: {
+                    silent: true,
+                    itemStyle: {
+                        color: 'rgba(250, 204, 21, 0.15)',
+                        borderColor: '#eab308',
+                        borderWidth: 2,
+                        borderType: 'dashed'
+                    },
+                    data: markAreaData
+                }
+            });
+            
+            // Industry Rebased (same y-axis since both start at 100)
+            series.push({
+                name: `${prices.value.industry_name || 'Industry'} (Rebased)`,
+                type: 'line',
+                data: industryRebasedSeriesData.value,
+                smooth: false,
+                symbol: 'none',
+                lineStyle: { color: '#94a3b8', width: 2, type: 'dashed' },
+                itemStyle: { color: '#94a3b8' },
+                emphasis: { focus: 'series' }
+            });
         }
+    }
 
-    ];
     
-    // Add scatter series for bubbles if we have data
-    if (bubbleSeriesData.value.length > 0) {
+    // Add scatter series for bubbles if we have data (only show in line mode)
+    if (chartType.value !== 'candle' && bubbleSeriesData.value.length > 0) {
         series.push({
             name: 'News Events',
             type: 'scatter',
@@ -242,11 +314,13 @@ const chartOptions = computed(() => {
                 axisLine: { show: false },
                 axisTick: { show: false },
                 axisLabel: { color: '#666', fontSize: 11 },
-                splitLine: { lineStyle: { color: '#f0f0f0' } }
+                splitLine: { lineStyle: { color: '#f0f0f0' } },
+                scale: true  // Scale axis to data range for better visualization
             },
-            {
+            // Secondary axis only when not in candlestick mode
+            ...(chartType.value !== 'candle' ? [{
                 type: 'value',
-                name: 'Industry',
+                name: 'Rebased',
                 position: 'right',
                 axisLine: { show: false },
                 axisTick: { show: false },
@@ -254,8 +328,9 @@ const chartOptions = computed(() => {
                     color: '#94a3b8', 
                     fontSize: 10
                 },
-                splitLine: { show: false }
-            }
+                splitLine: { show: false },
+                scale: true  // Scale to data range for better visualization
+            }] : [])
         ],
         series
     };
@@ -313,7 +388,28 @@ const getStatusClass = (status) => {
 const fetchPrices = async (ticker, period) => {
     isLoadingPrices.value = true;
     try {
-        const response = await axios.get(`http://localhost:8000/prices/${ticker}`, { params: { period } });
+        let params = { period };
+        
+        // For 'alert' period, calculate custom date range: start_date-10 to end_date+10
+        if (period === 'alert' && alertData.value) {
+            const startDate = new Date(alertData.value.start_date);
+            const endDate = new Date(alertData.value.end_date);
+            
+            // Subtract 10 days from start
+            startDate.setDate(startDate.getDate() - 10);
+            // Add 10 days to end
+            endDate.setDate(endDate.getDate() + 10);
+            
+            // Format as YYYY-MM-DD
+            const formatDate = (d) => d.toISOString().split('T')[0];
+            
+            params = { 
+                start_date: formatDate(startDate),
+                end_date: formatDate(endDate)
+            };
+        }
+        
+        const response = await axios.get(`http://localhost:8000/prices/${ticker}`, { params });
         prices.value = response.data;
         prepareChartData();
     } catch (error) {
@@ -360,18 +456,37 @@ const prepareChartData = () => {
     // Prepare volume data (for tooltip, not bars)
     const volumeData = tickerPrices.map(p => p.volume || 0);
     
+    // Prepare candlestick OHLC data - format: [open, close, low, high]
+    const candlestickData = tickerPrices.map(p => [
+        p.open ?? p.close,
+        p.close,
+        p.low ?? Math.min(p.open || p.close, p.close),
+        p.high ?? Math.max(p.open || p.close, p.close)
+    ]);
+    
     // Map for quick lookups
     const tickerMap = new Map();
     tickerPrices.forEach(p => tickerMap.set(p.date, p.close));
 
-    // Prepare industry data - actual close prices on secondary y-axis
+    // Prepare rebased ticker data (rebased to 100 for comparison with industry)
+    const tickerStart = tickerPrices[0].close;
+    const tickerRebasedData = tickerPrices.map(p => (p.close / tickerStart) * 100);
+
+    // Prepare industry data - REBASED to 100 for comparison
     let industryData = [];
+    let industryRebasedData = [];
     if (industryPrices && industryPrices.length > 0) {
         const indMap = new Map(industryPrices.map(p => [p.date, p.close]));
+        const industryStart = industryPrices[0].close;
 
         industryData = labels.map(date => {
             const val = indMap.get(date);
-            return val ?? null;  // Actual price, not rebased
+            return val ?? null;  // Actual price
+        });
+        
+        industryRebasedData = labels.map(date => {
+            const val = indMap.get(date);
+            return val ? (val / industryStart) * 100 : null;  // Rebased to 100
         });
     }
 
@@ -413,7 +528,7 @@ const prepareChartData = () => {
             matMap.set(mat, (matMap.get(mat) || 0) + 1);
         });
 
-        // For each date, create bubbles sorted by materiality
+        // For each date, create bubbles: TOP 3 + "rest" with count
         dateMatGroups.forEach((matMap, dateLabel) => {
             const yBase = tickerMap.get(dateLabel);
             if (yBase === undefined) return;
@@ -425,7 +540,14 @@ const prepareChartData = () => {
                     return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
                 });
             
-            sortedMats.reverse().forEach((entry, stackIndex) => {
+            // Take top 3
+            const top3 = sortedMats.slice(0, 3);
+            // Combine rest into one "Others" category
+            const restMats = sortedMats.slice(3);
+            const restCount = restMats.reduce((sum, [, cnt]) => sum + cnt, 0);
+            
+            // Add top 3 bubbles (reversed for stacking order)
+            top3.reverse().forEach((entry, stackIndex) => {
                 const [mat, count] = entry;
                 const offset = stackIndex * 4;
                 
@@ -436,15 +558,29 @@ const prepareChartData = () => {
                     itemStyle: { color: getMaterialityColor(mat) }
                 });
             });
+            
+            // Add "Others" bubble if there are more categories
+            if (restCount > 0) {
+                const offset = top3.length * 4;
+                bubbleData.push({
+                    value: [dateLabel, yBase + offset],
+                    materiality: 'Others',
+                    count: restCount,
+                    itemStyle: { color: getMaterialityColor('DEFAULT') }
+                });
+            }
         });
     }
     
     // Update reactive refs
     chartLabels.value = labels;
     tickerSeriesData.value = tickerData;
+    tickerRebasedSeriesData.value = tickerRebasedData;
     industrySeriesData.value = industryData;
+    industryRebasedSeriesData.value = industryRebasedData;
     volumeSeriesData.value = volumeData;
     bubbleSeriesData.value = bubbleData;
+    candlestickSeriesData.value = candlestickData;
 };
 
 const uniqueThemes = computed(() => {
@@ -501,17 +637,22 @@ const activeMaterialityColumns = computed(() => {
     if (!news.value) return [];
     // Get all unique materiality codes present in the current news set
     const mats = new Set(news.value.map(a => a.materiality || 'DEFAULT'));
-    // Sort them based on some priority if needed, or just alphabetically
+    // Sort them based on priority
     const order = [
         'HHH', 'HHM', 'HHL', 'HMH', 'HMM', 'HML', 'HLH', 'HLM', 'HLL',
         'MHH', 'MHM', 'MHL', 'MMH', 'MMM', 'MML', 'MLH', 'MLM', 'MLL',
         'LHH', 'LHM', 'LHL', 'LMH', 'LMM', 'LML', 'LLH', 'LLM', 'LLL'
     ];
-    return Array.from(mats).sort((a, b) => {
+    const sorted = Array.from(mats).sort((a, b) => {
         const idxA = order.indexOf(a);
         const idxB = order.indexOf(b);
         return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
     });
+    // Return top 3 + 'Others' if more exist
+    if (sorted.length > 3) {
+        return [...sorted.slice(0, 3), 'Others'];
+    }
+    return sorted;
 });
 
 const tableData = computed(() => {
@@ -524,7 +665,7 @@ const tableData = computed(() => {
         // Find Ticker Price (Close)
         const price = priceMap.value.get(date);
         
-        // Get Article Counts for this date
+        // Get Article Counts for this date - top 3 + Others
         const counts = {};
         activeMaterialityColumns.value.forEach(mat => {
             counts[mat] = 0;
@@ -532,11 +673,18 @@ const tableData = computed(() => {
 
         // Populate counts
         if (news.value) {
+            // Get which materialities are "top 3" (not Others)
+            const top3Mats = activeMaterialityColumns.value.filter(m => m !== 'Others');
+            
             news.value.forEach(article => {
                 // Approximate date matching (simple string match)
                 if (article.created_date === date || article.created_date.startsWith(date)) {
                     const mat = article.materiality || 'DEFAULT';
-                    if (counts[mat] !== undefined) counts[mat]++;
+                    if (top3Mats.includes(mat)) {
+                        counts[mat]++;
+                    } else if (counts['Others'] !== undefined) {
+                        counts['Others']++;
+                    }
                 }
             });
         }
@@ -601,8 +749,14 @@ const loadData = async () => {
                     <h3>Price Performance</h3>
                     <div class="header-controls">
                         <div class="view-toggle">
-                            <button :class="{ active: viewMode === 'chart' }" @click="viewMode = 'chart'">Chart</button>
+                            <button :class="{ active: viewMode === 'chart' && chartType === 'line' }" @click="viewMode = 'chart'; chartType = 'line'">Line</button>
+                            <button :class="{ active: viewMode === 'chart' && chartType === 'candle' }" @click="viewMode = 'chart'; chartType = 'candle'">Candle</button>
                             <button :class="{ active: viewMode === 'table' }" @click="viewMode = 'table'">Table</button>
+                        </div>
+                        <!-- Price Mode Toggle - only shown for line charts -->
+                        <div v-if="viewMode === 'chart' && chartType === 'line'" class="view-toggle">
+                            <button :class="{ active: priceMode === 'actual' }" @click="priceMode = 'actual'">Actual</button>
+                            <button :class="{ active: priceMode === 'rebased' }" @click="priceMode = 'rebased'">Rebased</button>
                         </div>
                         <div class="period-selector">
                             <button v-for="period in periods" :key="period.value" :class="{ active: selectedPeriod === period.value }" @click="selectedPeriod = period.value">{{ period.label }}</button>

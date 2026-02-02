@@ -55,6 +55,8 @@ tables:
       ticker: "ticker"
       date: "date"
       open: "opening price"
+      high: "high price"
+      low: "low price"
       close: "closing price"
       volume: "volume"
       industry: "industry"

@@ -264,29 +264,39 @@ def generate_summary(alert_id: str):
     }
 
 
-def fetch_and_cache_prices(ticker: str, period: str, is_etf: bool = False):
+def fetch_and_cache_prices(
+    ticker: str,
+    period: str,
+    custom_start: str = None,
+    custom_end: str = None,
+    is_etf: bool = False,
+):
     """Fetches missing price data from yfinance and caches it in the database."""
     # Convert period to start date
     end_date = datetime.now()
     start_date = None
 
-    if period == "1mo":
-        start_date = end_date - pd.DateOffset(months=1)
-    elif period == "3mo":
-        start_date = end_date - pd.DateOffset(months=3)
-    elif period == "6mo":
-        start_date = end_date - pd.DateOffset(months=6)
-    elif period == "1y":
-        start_date = end_date - pd.DateOffset(years=1)
-    elif period == "ytd":
-        start_date = datetime(end_date.year, 1, 1)
-    elif period == "max":
-        start_date = datetime(1900, 1, 1)  # Effectively max
+    if custom_start and custom_end:
+        start_str = custom_start
+        end_str = custom_end
     else:
-        start_date = end_date - pd.DateOffset(months=1)  # Default
+        if period == "1mo":
+            start_date = end_date - pd.DateOffset(months=1)
+        elif period == "3mo":
+            start_date = end_date - pd.DateOffset(months=3)
+        elif period == "6mo":
+            start_date = end_date - pd.DateOffset(months=6)
+        elif period == "1y":
+            start_date = end_date - pd.DateOffset(years=1)
+        elif period == "ytd":
+            start_date = datetime(end_date.year, 1, 1)
+        elif period == "max":
+            start_date = datetime(1900, 1, 1)  # Effectively max
+        else:
+            start_date = end_date - pd.DateOffset(months=1)  # Default
 
-    start_str = start_date.strftime("%Y-%m-%d")
-    end_str = end_date.strftime("%Y-%m-%d")
+        start_str = start_date.strftime("%Y-%m-%d")
+        end_str = end_date.strftime("%Y-%m-%d")
 
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -296,17 +306,20 @@ def fetch_and_cache_prices(ticker: str, period: str, is_etf: bool = False):
     ticker_col = config.get_column("prices", "ticker")
     date_col = config.get_column("prices", "date")
     open_col = config.get_column("prices", "open")
+    high_col = config.get_column("prices", "high")
+    low_col = config.get_column("prices", "low")
     close_col = config.get_column("prices", "close")
     volume_col = config.get_column("prices", "volume")
     industry_col = config.get_column("prices", "industry")
 
-    # Ensure table exists
-    # We create it dynamically to support any user-provided database
+    # Ensure table exists with high/low columns for candlestick charts
     create_table_query = f'''
         CREATE TABLE IF NOT EXISTS "{table_name}" (
             "{ticker_col}" TEXT,
             "{date_col}" TEXT,
             "{open_col}" REAL,
+            "{high_col}" REAL,
+            "{low_col}" REAL,
             "{close_col}" REAL,
             "{volume_col}" INTEGER,
             "{industry_col}" TEXT,
@@ -315,6 +328,18 @@ def fetch_and_cache_prices(ticker: str, period: str, is_etf: bool = False):
     '''
     cursor.execute(create_table_query)
     conn.commit()
+
+    # Migration: Add high/low columns to existing tables (SQLite ignores if column exists)
+    try:
+        cursor.execute(f'ALTER TABLE "{table_name}" ADD COLUMN "{high_col}" REAL')
+        conn.commit()
+    except:
+        pass  # Column already exists
+    try:
+        cursor.execute(f'ALTER TABLE "{table_name}" ADD COLUMN "{low_col}" REAL')
+        conn.commit()
+    except:
+        pass  # Column already exists
 
     # Check if we have data for this range
     cursor.execute(
@@ -331,6 +356,25 @@ def fetch_and_cache_prices(ticker: str, period: str, is_etf: bool = False):
         db_min = row["min_date"]
         # If DB start is significantly after requested start, fetch more.
         if db_min > start_str:
+            need_fetch = True
+
+    # Check if existing data is missing high/low (needed for candlestick charts)
+    if not need_fetch:
+        cursor.execute(
+            f'SELECT COUNT(*) as cnt FROM "{table_name}" '
+            f'WHERE "{ticker_col}" = ? AND ("{high_col}" IS NULL OR "{low_col}" IS NULL)',
+            (ticker,),
+        )
+        missing_row = cursor.fetchone()
+        if missing_row and missing_row["cnt"] > 0:
+            # Delete old data and re-fetch with high/low
+            print(
+                f"Re-fetching {ticker} to get high/low data for candlestick charts..."
+            )
+            cursor.execute(
+                f'DELETE FROM "{table_name}" WHERE "{ticker_col}" = ?', (ticker,)
+            )
+            conn.commit()
             need_fetch = True
 
     if need_fetch:
@@ -358,7 +402,7 @@ def fetch_and_cache_prices(ticker: str, period: str, is_etf: bool = False):
                 else:
                     industry = "ETF"
 
-                # Insert into DB
+                # Insert into DB with High/Low for candlestick charts
                 data_to_insert = []
                 for _, r in hist.iterrows():
                     data_to_insert.append(
@@ -366,18 +410,20 @@ def fetch_and_cache_prices(ticker: str, period: str, is_etf: bool = False):
                             ticker,
                             r["Date"],
                             r["Open"],
+                            r["High"],
+                            r["Low"],
                             r["Close"],
                             r["Volume"],
                             industry,
                         )
                     )
 
-                # UPSERT logic
+                # UPSERT logic with high/low columns
                 cursor.executemany(
                     f'''
                     INSERT OR IGNORE INTO "{table_name}" 
-                    ("{ticker_col}", "{date_col}", "{open_col}", "{close_col}", "{volume_col}", "{industry_col}")
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    ("{ticker_col}", "{date_col}", "{open_col}", "{high_col}", "{low_col}", "{close_col}", "{volume_col}", "{industry_col}")
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ''',
                     data_to_insert,
                 )
@@ -391,11 +437,17 @@ def fetch_and_cache_prices(ticker: str, period: str, is_etf: bool = False):
 
 @app.get("/prices/{ticker}")
 def get_prices(
-    ticker: str, period: str = Query("1y", pattern="^(1mo|3mo|6mo|1y|ytd|max)$")
+    ticker: str,
+    period: str = Query(None, pattern="^(1mo|3mo|6mo|1y|ytd|max)$"),
+    start_date: str = Query(None),
+    end_date: str = Query(None),
 ):
     """Get price data for a ticker with industry comparison."""
-    # 1. Ensure data exists for ticker
-    start_date_str = fetch_and_cache_prices(ticker, period)
+    # Use custom date range if provided, otherwise use period
+    if start_date and end_date:
+        start_date_str = fetch_and_cache_prices(ticker, "1y", start_date, end_date)
+    else:
+        start_date_str = fetch_and_cache_prices(ticker, period or "1y")
 
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -405,11 +457,19 @@ def get_prices(
     date_col = config.get_column("prices", "date")
 
     # 2. Get Ticker Data
-    cursor.execute(
+    # 2. Get Ticker Data
+    query = (
         f'SELECT * FROM "{table_name}" WHERE "{ticker_col}" = ? AND "{date_col}" >= ? '
-        f'ORDER BY "{date_col}" ASC',
-        (ticker, start_date_str),
     )
+    params = [ticker, start_date_str]
+
+    if end_date:
+        query += f'AND "{date_col}" <= ? '
+        params.append(end_date)
+
+    query += f'ORDER BY "{date_col}" ASC'
+
+    cursor.execute(query, tuple(params))
     rows = cursor.fetchall()
     conn.close()
 
@@ -441,16 +501,27 @@ def get_prices(
 
         if etf_ticker:
             # Fetch ETF data
-            fetch_and_cache_prices(etf_ticker, period, is_etf=True)
+            if start_date and end_date:
+                fetch_and_cache_prices(
+                    etf_ticker, "1y", start_date, end_date, is_etf=True
+                )
+            else:
+                fetch_and_cache_prices(etf_ticker, period, is_etf=True)
 
             # Query ETF data
             conn = get_db_connection()
             cursor = conn.cursor()
-            cursor.execute(
-                f'SELECT * FROM "{table_name}" WHERE "{ticker_col}" = ? AND "{date_col}" >= ? '
-                f'ORDER BY "{date_col}" ASC',
-                (etf_ticker, start_date_str),
-            )
+
+            query_etf = f'SELECT * FROM "{table_name}" WHERE "{ticker_col}" = ? AND "{date_col}" >= ? '
+            params_etf = [etf_ticker, start_date_str]
+
+            if end_date:
+                query_etf += f'AND "{date_col}" <= ? '
+                params_etf.append(end_date)
+
+            query_etf += f'ORDER BY "{date_col}" ASC'
+
+            cursor.execute(query_etf, tuple(params_etf))
             etf_rows = cursor.fetchall()
             conn.close()
 
