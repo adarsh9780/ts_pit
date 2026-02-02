@@ -619,17 +619,48 @@ const priceMap = computed(() => {
     return map;
 });
 
-const getPriceChange = (date) => {
-    const price = priceMap.value.get(date);
+const getPriceChange = (dateStr) => {
+    if (!dateStr) return null;
+    
+    // Extract YYYY-MM-DD from timestamp
+    const targetDate = dateStr.split(' ')[0].split('T')[0];
+    
+    let price = priceMap.value.get(targetDate);
+    
+    // If no exact match (e.g. holiday/weekend), find closest available date
+    if (!price && prices.value.ticker && prices.value.ticker.length > 0) {
+        const targetTime = new Date(targetDate).getTime();
+        let minDiff = Infinity;
+        let closestPrice = null;
+        
+        for (const p of prices.value.ticker) {
+            const pTime = new Date(p.date).getTime();
+            const diff = Math.abs(targetTime - pTime);
+            
+            if (diff < minDiff) {
+                minDiff = diff;
+                closestPrice = p;
+            }
+        }
+        
+        // Only use if within reasonable range (e.g. 7 days) to avoid completely irrelevant data
+        if (minDiff <= 7 * 24 * 60 * 60 * 1000) {
+            price = closestPrice;
+        }
+    }
+    
     if (!price || price.open == null || price.close == null) return null;
+    
     // Calculate intraday change: (Close - Open) / Open
     const change = ((price.close - price.open) / price.open) * 100;
+    
     return {
         value: change.toFixed(2),
         isPositive: change >= 0,
         open: price.open.toFixed(2),
         close: price.close.toFixed(2),
-        diff: Math.abs(price.close - price.open).toFixed(2)
+        diff: Math.abs(price.close - price.open).toFixed(2),
+        actualDate: price.date // useful for debugging or UI tooltip
     };
 };
 
