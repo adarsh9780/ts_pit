@@ -1,5 +1,6 @@
 import os
 import yfinance as yf
+import requests
 import pandas as pd
 from datetime import datetime
 from pathlib import Path
@@ -264,6 +265,31 @@ def generate_summary(alert_id: str):
     }
 
 
+def get_ticker_from_isin(isin: str) -> str | None:
+    """
+    Fetches the Yahoo Finance Ticker symbol for a given ISIN.
+    """
+    url = "https://query2.finance.yahoo.com/v1/finance/search"
+    params = {"q": isin, "quotesCount": 1, "newsCount": 0}
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    }
+
+    try:
+        response = requests.get(url, params=params, headers=headers)
+        data = response.json()
+
+        # Check if we got any quotes back
+        if "quotes" in data and len(data["quotes"]) > 0:
+            return data["quotes"][0]["symbol"]  # Return the first matching ticker
+        else:
+            return None
+    except Exception as e:
+        print(f"Error looking up ISIN {isin}: {e}")
+        return None
+
+
 def fetch_and_cache_prices(
     ticker: str,
     period: str,
@@ -386,6 +412,40 @@ def fetch_and_cache_prices(
             else:
                 hist = yf.Ticker(ticker).history(start=start_str, end=end_str)
 
+            if hist.empty and not is_etf:
+                print(f"No data for {ticker}, trying ISIN lookup...")
+                # Attempt to find ISIN and lookup correct ticker
+                alerts_table = config.get_table_name("alerts")
+                ticker_col_alerts = config.get_column("alerts", "ticker")
+                isin_col_alerts = config.get_column("alerts", "isin")
+
+                cursor.execute(
+                    f'SELECT "{isin_col_alerts}" FROM "{alerts_table}" WHERE "{ticker_col_alerts}" = ?',
+                    (ticker,),
+                )
+                row = cursor.fetchone()
+
+                if row and row[isin_col_alerts]:
+                    isin = row[isin_col_alerts]
+                    new_ticker = get_ticker_from_isin(isin)
+
+                    if new_ticker and new_ticker != ticker:
+                        print(
+                            f"Found new ticker for ISIN {isin}: {ticker} -> {new_ticker}"
+                        )
+                        # Update alerts table with new ticker
+                        cursor.execute(
+                            f'UPDATE "{alerts_table}" SET "{ticker_col_alerts}" = ? WHERE "{isin_col_alerts}" = ?',
+                            (new_ticker, isin),
+                        )
+                        conn.commit()
+                        conn.close()  # Close before recursive call
+
+                        # Recursive call with new ticker
+                        return fetch_and_cache_prices(
+                            new_ticker, period, custom_start, custom_end, is_etf
+                        )
+
             if not hist.empty:
                 hist = hist.reset_index()
                 # Ensure Date is string
@@ -432,7 +492,7 @@ def fetch_and_cache_prices(
             print(f"Error fetching data for {ticker}: {e}")
 
     conn.close()
-    return start_str
+    return start_str, ticker
 
 
 @app.get("/prices/{ticker}")
@@ -445,9 +505,11 @@ def get_prices(
     """Get price data for a ticker with industry comparison."""
     # Use custom date range if provided, otherwise use period
     if start_date and end_date:
-        start_date_str = fetch_and_cache_prices(ticker, "1y", start_date, end_date)
+        start_date_str, actual_ticker = fetch_and_cache_prices(
+            ticker, "1y", start_date, end_date
+        )
     else:
-        start_date_str = fetch_and_cache_prices(ticker, period or "1y")
+        start_date_str, actual_ticker = fetch_and_cache_prices(ticker, period or "1y")
 
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -457,11 +519,10 @@ def get_prices(
     date_col = config.get_column("prices", "date")
 
     # 2. Get Ticker Data
-    # 2. Get Ticker Data
     query = (
         f'SELECT * FROM "{table_name}" WHERE "{ticker_col}" = ? AND "{date_col}" >= ? '
     )
-    params = [ticker, start_date_str]
+    params = [actual_ticker, start_date_str]
 
     if end_date:
         query += f'AND "{date_col}" <= ? '
@@ -484,7 +545,7 @@ def get_prices(
         sector_etf_mapping = config.get_sector_etf_mapping()
 
         try:
-            info = yf.Ticker(ticker).info
+            info = yf.Ticker(actual_ticker).info
             sector = info.get("sector")
             industry_name = sector
 
