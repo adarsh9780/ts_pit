@@ -764,6 +764,10 @@ const loadData = async () => {
                             <span class="metric-item"><strong>End:</strong> {{ alertData.end_date }}</span>
                             <span class="separator">•</span>
                             <span class="metric-item"><strong>Articles:</strong> {{ news ? news.length : 0 }}</span>
+                            <span class="separator">•</span>
+                            <span class="metric-item"><strong>Buy Qty:</strong> {{ alertData.buy_quantity?.toLocaleString() || '-' }}</span>
+                            <span class="separator">•</span>
+                            <span class="metric-item"><strong>Sell Qty:</strong> {{ alertData.sell_quantity?.toLocaleString() || '-' }}</span>
                         </div>
                     </div>
                     <div class="header-actions">

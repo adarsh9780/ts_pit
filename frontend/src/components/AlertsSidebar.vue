@@ -125,6 +125,10 @@ const getTypeClass = (type) => {
         
         <div class="card-body">
             <span class="instrument">{{ alert.instrument_name }}</span>
+            <div class="date-range">
+                <span class="range-date">Start: {{ alert.start_date || '-' }}</span>
+                <span class="range-date">End: {{ alert.end_date || '-' }}</span>
+            </div>
         </div>
         
         <div class="card-footer">
@@ -299,6 +303,20 @@ const getTypeClass = (type) => {
     text-overflow: ellipsis;
     white-space: nowrap;
     display: block;
+    margin-bottom: 4px;
+}
+
+.date-range {
+    display: flex;
+    gap: 8px;
+    font-size: 10px;
+    color: var(--color-text-subtle);
+}
+
+.range-date {
+    background: var(--color-background);
+    padding: 1px 4px;
+    border-radius: 4px;
 }
 
 .card-footer {
