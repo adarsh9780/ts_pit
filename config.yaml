@@ -47,6 +47,9 @@ tables:
       summary: "art_summary"
       # Optional: materiality column (leave empty if not available)
       materiality: "Materiality"
+      # Event Impact Scoring columns
+      impact_score: "impact_score"     # Numeric Z-Score
+      impact_label: "impact_label"     # Text label (High/Medium/Low/Noise)
 
   # Price cache table (auto-created if doesn't exist)
   prices:
@@ -60,6 +63,18 @@ tables:
       close: "closing price"
       volume: "volume"
       industry: "industry"
+
+  # Hourly Price cache table (for Impact Scoring)
+  prices_hourly:
+    name: "prices_hourly"
+    columns:
+      ticker: "ticker"
+      date: "date"
+      open: "open"
+      high: "high"
+      low: "low"
+      close: "close"
+      volume: "volume"
 
 # Display Configuration
 # =====================
