@@ -272,6 +272,9 @@ def fetch_and_cache_prices(
                 conn.commit()
         except Exception as e:
             print(f"Error fetching data for {ticker}: {e}")
+            import traceback
+
+            traceback.print_exc()
 
     conn.close()
     return start_str, ticker
