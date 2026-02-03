@@ -12,7 +12,7 @@ from typing import Optional
 from pydantic import BaseModel
 from .database import get_db_connection
 from .config import get_config
-from .llm import generate_cluster_summary
+from .llm import generate_cluster_summary, generate_article_analysis
 from .prices import fetch_and_cache_prices, get_ticker_from_isin
 
 app = FastAPI()
@@ -42,6 +42,23 @@ def run_migrations():
         if col not in columns:
             print(f"Migrating: Adding {col} to {table_name}")
             cursor.execute(f'ALTER TABLE "{table_name}" ADD COLUMN "{col}" {dtype}')
+
+    # Ensure 'article_themes' table exists
+    themes_table = config.get_table_name("article_themes")
+    art_id_col = config.get_column("article_themes", "art_id")
+    theme_col = config.get_column("article_themes", "theme")
+    summary_col = config.get_column("article_themes", "summary")
+    analysis_col = config.get_column("article_themes", "analysis")
+
+    cursor.execute(f'''
+        CREATE TABLE IF NOT EXISTS "{themes_table}" (
+            "{art_id_col}" TEXT PRIMARY KEY,
+            "{theme_col}" TEXT,
+            "{summary_col}" TEXT,
+            "{analysis_col}" TEXT,
+            FOREIGN KEY("{art_id_col}") REFERENCES "articles"(id)
+        )
+    ''')
 
     conn.commit()
     conn.close()
@@ -102,6 +119,78 @@ def remap_row(row, table_key: str):
             result[k] = row[k]
 
     return result
+
+
+@app.post("/articles/{id}/analyze")
+def analyze_article(id: str):
+    """
+    Generate AI analysis for a specific article using its price impact context.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # Get table info
+    articles_table = config.get_table_name("articles")
+    article_id_col = config.get_column("articles", "id")
+
+    # Fetch article and its calculated impact score
+    cursor.execute(
+        f'SELECT * FROM "{articles_table}" WHERE "{article_id_col}" = ?', (id,)
+    )
+    row = cursor.fetchone()
+
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    article = dict(row)
+
+    # Extract context
+    title = article.get("title", "")
+    summary = article.get("summary", "")
+    z_score = article.get("impact_score") or 0.0
+    # Price change isn't directly in articles table usually, but we can imply intensity from z-score
+    # Or we could fetch it from prices if we had the timestamp logic here.
+    # For now, let's use z_score as the primary proxy for "Price Movement".
+    # We can pass a dummy price_change or 0 if not available, relying on Z-score for magnitude.
+    price_change = 0.0  # Placeholder, LLM will rely on Z-Score
+
+    # 2. Generate Analysis
+    analysis_result = generate_article_analysis(title, summary, z_score, price_change)
+
+    if analysis_result.get("theme") == "Error":
+        conn.close()
+        raise HTTPException(status_code=500, detail=analysis_result.get("analysis"))
+
+    # 3. Save to article_themes
+    themes_table = config.get_table_name("article_themes")
+    art_id_col = config.get_column("article_themes", "art_id")
+    theme_col = config.get_column("article_themes", "theme")
+    summary_col = config.get_column("article_themes", "summary")
+    analysis_col = config.get_column("article_themes", "analysis")
+
+    try:
+        cursor.execute(
+            f'''
+            INSERT OR REPLACE INTO "{themes_table}" 
+            ("{art_id_col}", "{theme_col}", "{summary_col}", "{analysis_col}")
+            VALUES (?, ?, ?, ?)
+        ''',
+            (
+                id,
+                analysis_result["theme"],
+                analysis_result["summary"],
+                analysis_result["analysis"],
+            ),
+        )
+        conn.commit()
+    except Exception as e:
+        print(f"Error saving analysis: {e}")
+        # Return result even if save fails
+
+    conn.close()
+
+    return analysis_result
 
 
 class StatusUpdate(BaseModel):

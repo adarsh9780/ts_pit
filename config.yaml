@@ -64,6 +64,15 @@ tables:
       volume: "volume"
       industry: "industry"
 
+  # AI Analysis table (linked to articles)
+  article_themes:
+    name: "article_themes"
+    columns:
+      art_id: "art_id"             # Foreign key to articles
+      theme: "narrative_theme"     # AI generated theme
+      summary: "narrative_summary" # AI generated summary
+      analysis: "narrative_analysis" # Detailed reasoning
+
   # Hourly Price cache table (for Impact Scoring)
   prices_hourly:
     name: "prices_hourly"

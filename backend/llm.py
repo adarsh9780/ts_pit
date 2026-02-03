@@ -143,3 +143,40 @@ def generate_cluster_summary(articles: list) -> Dict[str, str]:
             "narrative_theme": "Error",
             "narrative_summary": f"Failed to generate summary: {str(e)}",
         }
+
+
+def generate_article_analysis(
+    article_title: str, article_summary: str, z_score: float, price_change: float
+) -> Dict[str, str]:
+    """
+    Analyze an article with price context to generate theme and reasoning.
+    """
+    from .prompts import ANALYSIS_SYSTEM_PROMPT
+    from .schemas import ArticleAnalysisOutput
+
+    llm = get_llm_model()
+    structured_llm = llm.with_structured_output(ArticleAnalysisOutput)
+
+    content = f"""
+    Title: {article_title}
+    Summary: {article_summary}
+    
+    Price Change: {price_change}%
+    Impact Score (Z-Score): {z_score:.2f}
+    """
+
+    messages = [
+        SystemMessage(content=ANALYSIS_SYSTEM_PROMPT),
+        HumanMessage(content=content),
+    ]
+
+    try:
+        result = structured_llm.invoke(messages)
+        return {
+            "theme": result.theme,
+            "summary": result.summary,
+            "analysis": result.analysis,
+        }
+    except Exception as e:
+        print(f"LLM Analysis Error: {e}")
+        return {"theme": "Error", "summary": "Failed to analyze.", "analysis": str(e)}

@@ -29,3 +29,11 @@ class ClusterSummaryOutput(BaseModel):
 # class RiskAssessmentOutput(BaseModel):
 #     risk_level: str = Field(description="LOW, MEDIUM, or HIGH")
 #     rationale: str = Field(description="Brief explanation of risk assessment")
+
+
+class ArticleAnalysisOutput(BaseModel):
+    theme: str = Field(description="A concise 3-5 word label for the event")
+    summary: str = Field(description="A summary of the event")
+    analysis: str = Field(
+        description="Brief reasoning connecting the news to the price impact"
+    )

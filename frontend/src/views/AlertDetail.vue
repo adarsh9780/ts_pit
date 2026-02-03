@@ -347,6 +347,45 @@ const fetchAlertDetail = async () => {
     }
 };
 
+const analyzeArticles = async () => {
+    if (!filteredNews.value || filteredNews.value.length === 0) return;
+    
+    isGeneratingSummary.value = true; // Use loading state to show spinner
+    
+    try {
+        // Iterate through all visible articles and analyze them
+        // We use Promise.all to run them in parallel (or sequential if prefer less load)
+        // Parallel is better for UX speed.
+        const promises = filteredNews.value.map(async (article) => {
+            try {
+                const response = await axios.post(`http://localhost:8000/articles/${article.id}/analyze`);
+                const result = response.data;
+                
+                // Update local state immediately
+                article.theme = result.theme;
+                article.summary = result.summary; // Overwrite summary with AI version
+                article.analysis = result.analysis; // New field
+                
+                return true;
+            } catch (err) {
+                console.error(`Failed to analyze article ${article.id}:`, err);
+                return false;
+            }
+        });
+        
+        await Promise.all(promises);
+        
+        // Refresh cluster summary as well? No, let's focus on articles first.
+        // Maybe refresh alert details to persist changes if needed
+        // await fetchNews(alertData.value.isin, ...); 
+        
+    } catch (error) {
+        console.error('Error in analysis batch:', error);
+    } finally {
+        isGeneratingSummary.value = false;
+    }
+};
+
 const generateSummary = async () => {
     isGeneratingSummary.value = true;
     try {
@@ -819,21 +858,29 @@ const loadData = async () => {
                         </div>
                         
                         <div v-else class="summary-placeholder">
-                             <button class="generate-btn" @click="generateSummary" :disabled="isGeneratingSummary">
+                             <button class="generate-btn" @click="analyzeArticles" :disabled="isGeneratingSummary">
                                 <span v-if="isGeneratingSummary" class="spinner-sm"></span>
-                                <span v-else>Generate AI Summary</span>
+                                <span v-else>Analyze with AI</span>
                             </button>
                         </div>
                     </div>
 
                     <div v-if="filteredNews.length > 0" class="news-feed">
-                        <div v-for="article in filteredNews" :key="article.art_id" class="news-item">
+                        <div v-for="article in filteredNews" :key="article.art_id" class="news-item" :class="{ 'analyzed': article.analysis }">
                             <div class="news-meta">
                                 <span class="news-date">{{ article.created_date }}</span>
                                 <span class="news-theme">{{ article.theme.replace(/_/g, ' ') }}</span>
                             </div>
                             <h4 class="news-title">{{ article.title }}</h4>
+                            
+                            <!-- AI Analysis Block -->
+                            <div v-if="article.analysis" class="analysis-block">
+                                <div class="analysis-label">AI Logic:</div>
+                                <p class="analysis-content">{{ article.analysis }}</p>
+                            </div>
+                            
                             <p v-if="article.summary" class="news-summary">{{ article.summary }}</p>
+                            
                             <div class="news-footer">
                                 <span class="sentiment-indicator" :class="article.sentiment.split(':')[0].toLowerCase()">{{ article.sentiment.split(':')[0] }}</span>
                                 <template v-if="config && config.has_materiality && article.materiality">
@@ -860,6 +907,36 @@ const loadData = async () => {
 </template>
 
 <style scoped>
+/* Added analysis styles */
+.news-item.analyzed {
+    border-left: 3px solid #7c3aed;
+    background: #fdfbff;
+}
+
+.analysis-block {
+    margin: 8px 0 12px 0;
+    padding: 8px 12px;
+    background: #f3e8ff;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    border: 1px solid #e9d5ff;
+}
+
+.analysis-label {
+    font-weight: 700;
+    color: #6b21a8;
+    margin-bottom: 4px;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+}
+
+.analysis-content {
+    margin: 0;
+    color: #581c87;
+    line-height: 1.5;
+}
+
+/* Original styles below */
 .detail-container { background-color: #f8fafc; height: 100%; width: 100%; display: flex; flex-direction: column; overflow-y: auto; font-family: 'Inter', sans-serif; }
 .header { background: white; border-bottom: 1px solid #e2e8f0; padding: 1rem 2rem; box-shadow: 0 1px 2px rgba(0,0,0,0.05); flex-shrink: 0; }
 .header-main { display: flex; justify-content: space-between; align-items: flex-start; margin-top: 0.5rem; }
