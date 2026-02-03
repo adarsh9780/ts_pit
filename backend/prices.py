@@ -203,9 +203,17 @@ def fetch_and_cache_prices(
                         # Accessing info property triggers the network call that might fail
                         info = ticker_obj.info
                         industry = info.get("industry", "Unknown")
+                        print(
+                            f"DEBUG: Successfully fetched industry for {ticker}: {industry}"
+                        )
                     except Exception as e:
                         # Don't let metadata failure stop price data caching
-                        print(f"Warning: Could not fetch industry for {ticker}: {e}")
+                        print(
+                            f"DEBUG: PATCH ACTIVE - Could not fetch industry for {ticker}. Error: {e}"
+                        )
+                        print(
+                            f"DEBUG: Proceeding with industry='Unknown' to prevent crash."
+                        )
                         industry = "Unknown"
                 else:
                     industry = "ETF"
