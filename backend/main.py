@@ -4,18 +4,33 @@ import requests
 import pandas as pd
 from datetime import datetime
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, Query
+from contextlib import asynccontextmanager
+from typing import Optional
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from typing import Optional
 from pydantic import BaseModel
 from .database import get_db_connection
 from .config import get_config
-from .llm import generate_cluster_summary, generate_article_analysis
+from .llm import get_llm_model, generate_cluster_summary, generate_article_analysis
 from .prices import fetch_and_cache_prices, get_ticker_from_isin
 
-app = FastAPI()
+# Load configuration
+config = get_config()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Initialize LLM
+    print("Initializing LLM Model...")
+    app.state.llm = get_llm_model()
+    yield
+    # Shutdown: Clean up if needed
+    print("Shutting down...")
+
+
+app = FastAPI(lifespan=lifespan)
 
 # Load configuration
 # Load configuration
@@ -122,7 +137,7 @@ def remap_row(row, table_key: str):
 
 
 @app.post("/articles/{id}/analyze")
-def analyze_article(id: str):
+def analyze_article(id: str, request: Request):
     """
     Generate AI analysis for a specific article using its price impact context.
     """
@@ -155,8 +170,11 @@ def analyze_article(id: str):
     # We can pass a dummy price_change or 0 if not available, relying on Z-score for magnitude.
     price_change = 0.0  # Placeholder, LLM will rely on Z-Score
 
-    # 2. Generate Analysis
-    analysis_result = generate_article_analysis(title, summary, z_score, price_change)
+    # 2. Generate Analysis using Singleton LLM
+    llm = request.app.state.llm
+    analysis_result = generate_article_analysis(
+        title, summary, z_score, price_change, llm=llm
+    )
 
     if analysis_result.get("theme") == "Error":
         conn.close()
@@ -283,7 +301,7 @@ def get_alert_detail(alert_id: str):
 
 
 @app.post("/alerts/{alert_id}/summary")
-def generate_summary(alert_id: str):
+def generate_summary(alert_id: str, request: Request):
     """Generate AI summary for the alert."""
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -292,6 +310,7 @@ def generate_summary(alert_id: str):
     alerts_table = config.get_table_name("alerts")
     alert_id_col = config.get_column("alerts", "id")
     isin_col = config.get_column("alerts", "isin")
+    ticker_col = config.get_column("alerts", "ticker")  # Add ticker col
     start_col = config.get_column("alerts", "start_date")
     end_col = config.get_column("alerts", "end_date")
 
@@ -307,32 +326,90 @@ def generate_summary(alert_id: str):
     start_date = alert[start_col]
     end_date = alert[end_col]
     isin = alert[isin_col]
+    ticker = alert[ticker_col] if ticker_col in alert.keys() else None
 
-    # 2. Fetch news
+    # 1.5 Fetch Price History for context
+    price_history = []
+    if ticker and start_date and end_date:
+        prices_table = config.get_table_name("prices")
+        price_ticker_col = config.get_column("prices", "ticker")
+        price_date_col = config.get_column("prices", "date")
+        price_close_col = config.get_column("prices", "close")
+
+        try:
+            cursor.execute(
+                f'SELECT "{price_date_col}" as date, "{price_close_col}" as close FROM "{prices_table}" WHERE "{price_ticker_col}" = ? AND "{price_date_col}" BETWEEN ? AND ? ORDER BY "{price_date_col}" ASC',
+                (ticker, start_date, end_date),
+            )
+            price_history = [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            print(f"Error fetching price history for summary: {e}")
+
+    # 2. Fetch news with AI Analysis fallback
     articles_table = config.get_table_name("articles")
+    themes_table = config.get_table_name("article_themes")
+
+    art_id_col = config.get_column("articles", "id")
     art_isin_col = config.get_column("articles", "isin")
     date_col = config.get_column("articles", "created_date")
     title_col = config.get_column("articles", "title")
     summary_col = config.get_column("articles", "summary")
+    impact_score_col = config.get_column("articles", "impact_score")
 
-    query = f'SELECT "{title_col}" as title, "{summary_col}" as summary FROM "{articles_table}" WHERE "{art_isin_col}" = ?'
+    # Theme columns
+    theme_art_id_col = config.get_column("article_themes", "art_id")
+    ai_theme_col = config.get_column("article_themes", "theme")
+    ai_summary_col = config.get_column("article_themes", "summary")
+    ai_analysis_col = config.get_column("article_themes", "analysis")
+
+    # Join query to prefer AI analysis if available
+    query = f'''
+        SELECT 
+            a."{title_col}" as title, 
+            a."{summary_col}" as original_summary,
+            a."{impact_score_col}" as impact_score,
+            t."{ai_theme_col}" as ai_theme,
+            t."{ai_summary_col}" as ai_summary,
+            t."{ai_analysis_col}" as ai_analysis
+        FROM "{articles_table}" a
+        LEFT JOIN "{themes_table}" t ON a."{art_id_col}" = t."{theme_art_id_col}"
+        WHERE a."{art_isin_col}" = ?
+    '''
     params = [isin]
 
     if start_date:
-        query += f' AND "{date_col}" >= ?'
+        query += f' AND a."{date_col}" >= ?'
         params.append(start_date)
     if end_date:
-        query += f' AND "{date_col}" <= ?'
+        query += f' AND a."{date_col}" <= ?'
         params.append(end_date)
 
-    query += f' ORDER BY "{date_col}" DESC'
+    query += f' ORDER BY a."{date_col}" DESC'
 
     cursor.execute(query, params)
-    articles = [dict(row) for row in cursor.fetchall()]
 
-    # 3. Generate Summary via LLM
+    # Construct list for LLM, preferring AI versions
+    articles = []
+    for row in cursor.fetchall():
+        r = dict(row)
+        articles.append(
+            {
+                "title": r["title"],
+                "summary": r["ai_summary"]
+                if r["ai_summary"]
+                else r["original_summary"],
+                "theme": r["ai_theme"],
+                "analysis": r["ai_analysis"],
+                "impact_score": r["impact_score"],
+            }
+        )
+
+    # 3. Generate Summary via Singleton LLM
     try:
-        result = generate_cluster_summary(articles)
+        llm = request.app.state.llm
+        result = generate_cluster_summary(
+            articles, price_history=price_history, llm=llm
+        )
     except Exception as e:
         conn.close()
         print(f"LLM Error: {e}")

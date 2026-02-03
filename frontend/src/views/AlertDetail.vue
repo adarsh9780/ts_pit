@@ -375,9 +375,9 @@ const analyzeArticles = async () => {
         
         await Promise.all(promises);
         
-        // Refresh cluster summary as well? No, let's focus on articles first.
-        // Maybe refresh alert details to persist changes if needed
-        // await fetchNews(alertData.value.isin, ...); 
+        // After correcting all article themes, generate the MASTER summary
+        // This will now use the enriched data from the backend to create a unified narrative
+        await generateSummary();
         
     } catch (error) {
         console.error('Error in analysis batch:', error);

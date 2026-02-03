@@ -94,7 +94,9 @@ def get_llm_model():
         raise ValueError(f"Unknown LLM provider: {provider}")
 
 
-def generate_cluster_summary(articles: list) -> Dict[str, str]:
+def generate_cluster_summary(
+    articles: list, price_history: list = None, llm=None
+) -> Dict[str, str]:
     """
     Generate a formatted summary and theme from a list of articles.
 
@@ -102,6 +104,8 @@ def generate_cluster_summary(articles: list) -> Dict[str, str]:
 
     Args:
         articles: List of dicts with 'title' and 'summary' keys.
+        price_history: Optional list of daily price records.
+        llm: Optional pre-initialized LLM instance.
 
     Returns:
         Dict with keys: 'narrative_theme', 'narrative_summary'
@@ -112,22 +116,50 @@ def generate_cluster_summary(articles: list) -> Dict[str, str]:
             "narrative_summary": "No articles available to summarize.",
         }
 
-    llm = get_llm_model()
+    if llm is None:
+        llm = get_llm_model()
 
     # Use structured output for guaranteed format
     structured_llm = llm.with_structured_output(ClusterSummaryOutput)
 
     # Prepare article text
-    article_text = "\n\n".join(
-        [
-            f"Title: {a.get('title', 'No Title')}\nSummary: {a.get('summary', 'No Summary')}"
-            for a in articles[:15]  # Limit to 15 to fit context/cost
-        ]
-    )
+    # Prioritize AI Theme/Analysis if available
+    article_lines = []
+    for a in articles[:15]:
+        title = a.get("title", "No Title")
+        summary = a.get("summary", "No Summary")
+        theme = a.get("theme")
+        analysis = a.get("analysis")
+        impact = a.get("impact_score")
+
+        entry = f"Title: {title}\nSummary: {summary}"
+        if theme:
+            entry += f"\nCONFIRMED THEME: {theme}"
+        if analysis:
+            entry += f"\nAI ANALYSIS: {analysis}"
+        if impact:
+            entry += f"\nIMPACT SCORE (Z-Score): {impact}"
+
+        article_lines.append(entry)
+
+    article_text = "\n\n".join(article_lines)
+
+    # Prepare Price History Context
+    price_context = ""
+    if price_history:
+        price_lines = ["\n\n**Daily Price History (Correlate with News):**"]
+        for p in price_history:
+            # Format: Date: Close
+            date = p.get("date", "N/A")
+            close = p.get("close", 0)
+            price_lines.append(f"{date}: {close}")
+        price_context = "\n".join(price_lines)
 
     messages = [
         SystemMessage(content=CLUSTER_SUMMARY_SYSTEM_PROMPT),
-        HumanMessage(content=f"Here are the articles:\n\n{article_text}"),
+        HumanMessage(
+            content=f"Here are the articles:\n\n{article_text}{price_context}"
+        ),
     ]
 
     try:
@@ -146,7 +178,11 @@ def generate_cluster_summary(articles: list) -> Dict[str, str]:
 
 
 def generate_article_analysis(
-    article_title: str, article_summary: str, z_score: float, price_change: float
+    article_title: str,
+    article_summary: str,
+    z_score: float,
+    price_change: float,
+    llm=None,
 ) -> Dict[str, str]:
     """
     Analyze an article with price context to generate theme and reasoning.
@@ -154,7 +190,8 @@ def generate_article_analysis(
     from .prompts import ANALYSIS_SYSTEM_PROMPT
     from .schemas import ArticleAnalysisOutput
 
-    llm = get_llm_model()
+    if llm is None:
+        llm = get_llm_model()
     structured_llm = llm.with_structured_output(ArticleAnalysisOutput)
 
     content = f"""
