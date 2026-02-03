@@ -225,15 +225,24 @@ def main():
                     f"  Processed {index + 1}/{len(df_articles)}: {ticker} Z={z} ({label})"
                 )
 
-    # 4. Bulk Update
+    # 4. Bulk Update (Batched)
     if updates:
         print(f"Updating {len(updates)} articles in database...")
         cursor = conn.cursor()
-        cursor.executemany(
-            f'UPDATE "{articles_table}" SET impact_score = ?, impact_label = ? WHERE "{c_id}" = ?',
-            updates,
-        )
-        conn.commit()
+
+        batch_size = 1000
+        total = len(updates)
+
+        for i in range(0, total, batch_size):
+            batch = updates[i : i + batch_size]
+            cursor.executemany(
+                f'UPDATE "{articles_table}" SET impact_score = ?, impact_label = ? WHERE "{c_id}" = ?',
+                batch,
+            )
+            conn.commit()
+            print(
+                f"  -> Committed batch {i + 1}-{min(i + batch_size, total)} of {total}"
+            )
 
     print("Done!")
     conn.close()
