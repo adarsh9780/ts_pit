@@ -27,144 +27,9 @@ def get_db_connection():
     return sqlite3.connect(db_path)
 
 
-def ensure_hourly_table(conn):
-    """Ensure prices_hourly table exists based on config."""
-    cursor = conn.cursor()
+from market_data import ensure_hourly_table, fetch_hourly_data_with_fallback
 
-    # Get table config
-    try:
-        table_name = config.get_table_name("prices_hourly")
-        cols = config.get_columns("prices_hourly")
-    except KeyError:
-        print("Error: 'prices_hourly' not configured in config.yaml")
-        return None
-
-    # explicit column names from config
-    ticker_col = cols["ticker"]
-    date_col = cols["date"]
-    open_col = cols["open"]
-    high_col = cols["high"]
-    low_col = cols["low"]
-    close_col = cols["close"]
-    volume_col = cols["volume"]
-
-    create_query = f'''
-        CREATE TABLE IF NOT EXISTS "{table_name}" (
-            "{ticker_col}" TEXT,
-            "{date_col}" TEXT,
-            "{open_col}" REAL,
-            "{high_col}" REAL,
-            "{low_col}" REAL,
-            "{close_col}" REAL,
-            "{volume_col}" INTEGER,
-            PRIMARY KEY ("{ticker_col}", "{date_col}")
-        )
-    '''
-    cursor.execute(create_query)
-
-    # Add impact columns to articles if they don't exist
-    articles_table = config.get_table_name("articles")
-    try:
-        cursor.execute(f'ALTER TABLE "{articles_table}" ADD COLUMN impact_score REAL')
-    except sqlite3.OperationalError:
-        pass  # Column exists
-
-    try:
-        cursor.execute(f'ALTER TABLE "{articles_table}" ADD COLUMN impact_label TEXT')
-    except sqlite3.OperationalError:
-        pass  # Column exists
-
-    conn.commit()
-    return table_name
-
-
-def fetch_hourly_data(conn, ticker, force_refresh=False):
-    """Fetch 730 days of 1h data for ticker and cache it."""
-    table_name = config.get_table_name("prices_hourly")
-    cols = config.get_columns("prices_hourly")
-    ticker_col = cols["ticker"]
-    date_col_db = cols["date"]
-
-    # Check if we have data
-    if not force_refresh:
-        cursor = conn.cursor()
-        cursor.execute(
-            f'SELECT COUNT(*) FROM "{table_name}" WHERE "{ticker_col}" = ?', (ticker,)
-        )
-        count = cursor.fetchone()[0]
-
-        if count > 100:
-            print(f"  -> Found {count} cached hourly candles for {ticker}")
-            return
-
-    print(f"  -> Fetching ONE HOUR data for {ticker} (Last 730 days)...")
-    try:
-        # yfinance allows max 730 days for 1h interval
-        df = yf.Ticker(ticker).history(period="730d", interval="1h")
-
-        if df.empty:
-            print(f"  !! No 1h data found for {ticker}")
-            return
-
-        df = df.reset_index()
-
-        # Check available columns to avoid KeyError
-        source_date_col = None
-        for col in ["Datetime", "Date"]:
-            if col in df.columns:
-                source_date_col = col
-                break
-
-        if not source_date_col:
-            print(
-                f"  !! Error: Could not find Date/Datetime column. Columns: {df.columns.tolist()}"
-            )
-            return
-
-        # Convert timezone-aware to naive string (UTC-like)
-        if hasattr(df[source_date_col].dt, "strftime"):
-            df["DateStr"] = df[source_date_col].dt.strftime("%Y-%m-%d %H:%M:%S")
-        else:
-            df["DateStr"] = pd.to_datetime(df[source_date_col]).dt.strftime(
-                "%Y-%m-%d %H:%M:%S"
-            )
-
-        data_to_insert = []
-        for _, row in df.iterrows():
-            data_to_insert.append(
-                (
-                    ticker,
-                    row["DateStr"],
-                    row["Open"],
-                    row["High"],
-                    row["Low"],
-                    row["Close"],
-                    int(row["Volume"]),
-                )
-            )
-
-        # Delete existing if forcing refresh
-        if force_refresh:
-            cursor = conn.cursor()
-            cursor.execute(
-                f'DELETE FROM "{table_name}" WHERE "{ticker_col}" = ?', (ticker,)
-            )
-            conn.commit()
-
-        cursor = conn.cursor()
-        cursor.executemany(
-            f'''
-            INSERT OR IGNORE INTO "{table_name}" 
-            ("{ticker_col}", "{date_col_db}", "{cols["open"]}", "{cols["high"]}", "{cols["low"]}", "{cols["close"]}", "{cols["volume"]}")
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''',
-            data_to_insert,
-        )
-        conn.commit()
-        print(f"  -> Cached {len(data_to_insert)} candles.")
-
-    except Exception as e:
-        print(f"  !! Error fetching {ticker}: {e}")
+# ensure_hourly_table and fetch_hourly_data moved to market_data.py
 
 
 def calculate_z_score(conn, ticker, article_date_str):
@@ -335,12 +200,23 @@ def main():
             continue
 
         # Ensure Data (Once per ticker)
+        actual_ticker = ticker
         if ticker not in checked_tickers:
-            fetch_hourly_data(conn, ticker, force_refresh=args.force_refresh_prices)
+            resolved_ticker = fetch_hourly_data_with_fallback(
+                conn, ticker, force_refresh=args.force_refresh_prices
+            )
+            if resolved_ticker:
+                actual_ticker = resolved_ticker
+            else:
+                # Failed to get data even with fallback
+                continue
             checked_tickers.add(ticker)
+            # Also add actual_ticker to avoid re-checking if different
+            if actual_ticker != ticker:
+                checked_tickers.add(actual_ticker)
 
         # Calculate
-        z, label = calculate_z_score(conn, ticker, row["date"])
+        z, label = calculate_z_score(conn, actual_ticker, row["date"])
 
         if z is not None:
             updates.append((z, label, row["id"]))
