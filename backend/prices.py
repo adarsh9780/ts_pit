@@ -198,10 +198,15 @@ def fetch_and_cache_prices(
                 industry = "Unknown"
                 if not is_etf:
                     try:
-                        info = yf.Ticker(ticker).info
+                        # yfinance .info can raise exceptions or return partial data
+                        ticker_obj = yf.Ticker(ticker)
+                        # Accessing info property triggers the network call that might fail
+                        info = ticker_obj.info
                         industry = info.get("industry", "Unknown")
-                    except:
-                        pass
+                    except Exception as e:
+                        # Don't let metadata failure stop price data caching
+                        print(f"Warning: Could not fetch industry for {ticker}: {e}")
+                        industry = "Unknown"
                 else:
                     industry = "ETF"
 
