@@ -37,10 +37,14 @@ def process_chunk(df, alerts_table):
     # ==========================================================================
     # 2. Temporal Proximity (P2) - VECTORIZED
     # ==========================================================================
-    # Convert all dates to datetime
-    df["dt_art"] = pd.to_datetime(df["art_created_date"], errors="coerce")
-    df["dt_start"] = pd.to_datetime(df["start_date"], errors="coerce")
-    df["dt_end"] = pd.to_datetime(df["end_date"], errors="coerce")
+    # Convert all dates to datetime and normalize to timezone-naive to avoid subtraction errors
+    df["dt_art"] = pd.to_datetime(
+        df["art_created_date"], errors="coerce"
+    ).dt.tz_localize(None)
+    df["dt_start"] = pd.to_datetime(df["start_date"], errors="coerce").dt.tz_localize(
+        None
+    )
+    df["dt_end"] = pd.to_datetime(df["end_date"], errors="coerce").dt.tz_localize(None)
 
     # Calculate total duration and elapsed time in seconds
     df["duration"] = (df["dt_end"] - df["dt_start"]).dt.total_seconds()
