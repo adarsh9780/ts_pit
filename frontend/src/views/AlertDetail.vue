@@ -619,50 +619,7 @@ const priceMap = computed(() => {
     return map;
 });
 
-const getPriceChange = (dateStr) => {
-    if (!dateStr) return null;
-    
-    // Extract YYYY-MM-DD from timestamp
-    const targetDate = dateStr.split(' ')[0].split('T')[0];
-    
-    let price = priceMap.value.get(targetDate);
-    
-    // If no exact match (e.g. holiday/weekend), find closest available date
-    if (!price && prices.value.ticker && prices.value.ticker.length > 0) {
-        const targetTime = new Date(targetDate).getTime();
-        let minDiff = Infinity;
-        let closestPrice = null;
-        
-        for (const p of prices.value.ticker) {
-            const pTime = new Date(p.date).getTime();
-            const diff = Math.abs(targetTime - pTime);
-            
-            if (diff < minDiff) {
-                minDiff = diff;
-                closestPrice = p;
-            }
-        }
-        
-        // Only use if within reasonable range (e.g. 7 days) to avoid completely irrelevant data
-        if (minDiff <= 7 * 24 * 60 * 60 * 1000) {
-            price = closestPrice;
-        }
-    }
-    
-    if (!price || price.open == null || price.close == null) return null;
-    
-    // Calculate intraday change: (Close - Open) / Open
-    const change = ((price.close - price.open) / price.open) * 100;
-    
-    return {
-        value: change.toFixed(2),
-        isPositive: change >= 0,
-        open: price.open.toFixed(2),
-        close: price.close.toFixed(2),
-        diff: Math.abs(price.close - price.open).toFixed(2),
-        actualDate: price.date // useful for debugging or UI tooltip
-    };
-};
+// getPriceChange removed - using backend impact score instead
 
 const activeMaterialityColumns = computed(() => {
     if (!news.value) return [];
@@ -884,12 +841,11 @@ const loadData = async () => {
                                     <span class="materiality-indicator" :style="{ color: getMaterialityColor(article.materiality) }">{{ article.materiality }}</span>
                                 </template>
                                 
-                                <template v-if="getPriceChange(article.created_date)">
+                                <template v-if="article.impact_label">
                                     <span class="separator">•</span>
-                                    <span class="price-change" 
-                                          :class="getPriceChange(article.created_date).isPositive ? 'positive' : 'negative'"
-                                          :title="`Open: ${getPriceChange(article.created_date).open} | Close: ${getPriceChange(article.created_date).close} | Diff: ${getPriceChange(article.created_date).diff}`">
-                                        {{ getPriceChange(article.created_date).isPositive ? '+' : '' }}{{ getPriceChange(article.created_date).value }}%
+                                    <span class="impact-badge" :class="article.impact_label.toLowerCase()">
+                                        <span class="impact-label">{{ article.impact_label }}</span>
+                                        <span class="impact-score" v-if="article.impact_score">({{ article.impact_score.toFixed(1) }}σ)</span>
                                     </span>
                                 </template>
                             </div>
@@ -968,6 +924,13 @@ h1 { margin: 0; font-size: 1.5rem; color: #0f172a; display: flex; align-items: b
 .price-change { font-size: 0.75rem; font-weight: 600; }
 .price-change.positive { color: #16a34a; }
 .price-change.negative { color: #dc2626; }
+
+/* Impact Badges */
+.impact-badge { font-size: 0.75rem; font-weight: 600; display: inline-flex; gap: 4px; align-items: center; }
+.impact-badge.noise { color: #94a3b8; }
+.impact-badge.significant { color: #d97706; }
+.impact-badge.extreme { color: #7c3aed; background: #f3e8ff; padding: 0 4px; border-radius: 4px; }
+.impact-score { font-weight: 400; font-size: 0.7rem; opacity: 0.8; }
 .loading-screen, .loading-state { display: flex; align-items: center; justify-content: center; height: 100%; color: #64748b; font-weight: 500; gap: 10px; }
 .spinner { width: 20px; height: 20px; border: 3px solid #e2e8f0; border-top-color: #3b82f6; border-radius: 50%; animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
