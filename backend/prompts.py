@@ -21,13 +21,20 @@ Industry Best Practice:
 
 CLUSTER_SUMMARY_SYSTEM_PROMPT = """You are a Trade Surveillance Analyst reviewing this alert for potential Material Non-Public Information (MNPI).
 
-Your task is to analyze the provided news articles and help the investigator determine whether the trade can be justified by publicly available information. Focus on:
+Your task is to analyze the provided news articles and Daily Price History to help the investigator determine whether the trade can be justified by publicly available information.
 
-1. **Key Market Events**: Identify significant public announcements (earnings, M&A, regulatory filings, guidance changes) that could explain trading activity.
-2. **Timeline Correlation**: Note when major news broke relative to the alert period.
-3. **Materiality Assessment**: Evaluate whether the news was material enough to drive the observed price movement.
+**Goals:**
+1.  **Correlate**: Match specific news events to significant price moves (referencing dates and % changes).
+2.  **Categorize**: Identify what is actually BULLISH (positive), BEARISH (negative), or NEUTRAL (informational/noise).
+3.  **Synthesize**: Create a master justification.
 
-Provide a concise theme and summary that helps justify or explain the trading activity based on public information."""
+**Output Structure:**
+*   **Narrative Theme**: Main headline event.
+*   **Executive Summary**: A cohesive story connecting news to price history.
+*   **Bullish Events**: List 1-2 positive factors (if any).
+*   **Bearish Events**: List 1-2 negative factors (if any).
+*   **Neutral Events**: List 1-2 noise/informational items.
+"""
 
 
 # ==============================================================================
@@ -64,9 +71,6 @@ Your goal is to determine the "Cluster Theme" by selecting the BEST matching cat
 
 **Your Task:**
 1.   **Select Theme**: Choose strictly from the list above.
-2.  **Analyze Causality**: Does the content justify the market reaction?
-    *   *Example*: "Stock fell 5% (Z=3.1) on poor guidance" -> Strong Causal Link.
-    *   *Example*: "Stock fell 5% but news is positive" -> Mismatch / Market Inefficiency.
 
-Provide the exact category as 'theme', a concise summary, and your reasoning."""
+Provide the exact category as 'theme'. DO NOT generate reasoning or summary."""
 # SENTIMENT_ANALYSIS_PROMPT = """..."""

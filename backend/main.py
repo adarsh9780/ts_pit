@@ -1,4 +1,5 @@
 import os
+import json
 import yfinance as yf
 import requests
 import pandas as pd
@@ -51,6 +52,9 @@ def run_migrations():
         "narrative_theme": "TEXT",
         "narrative_summary": "TEXT",
         "summary_generated_at": "TEXT",
+        "bullish_events": "TEXT",
+        "bearish_events": "TEXT",
+        "neutral_events": "TEXT",
     }
 
     for col, dtype in new_cols.items():
@@ -197,7 +201,7 @@ def analyze_article(id: str, request: Request):
             (
                 id,
                 analysis_result["theme"],
-                analysis_result["summary"],
+                analysis_result["summary"] or "",  # Handle None
                 analysis_result["analysis"],
             ),
         )
@@ -392,13 +396,23 @@ def generate_summary(alert_id: str, request: Request):
     articles = []
     for row in cursor.fetchall():
         r = dict(row)
+
+        # Use AI theme if valid, else fallback to original
+        theme = r.get("ai_theme")
+        if not theme or theme.lower() == "string":
+            # Determine which col holds original theme for articles
+            orig_theme_col = config.get_column("articles", "theme")
+            theme = r.get(orig_theme_col) or "UNCATEGORIZED"
+
+        summary = r.get("ai_summary")
+        if not summary or not summary.strip():
+            summary = r.get("original_summary")
+
         articles.append(
             {
                 "title": r["title"],
-                "summary": r["ai_summary"]
-                if r["ai_summary"]
-                else r["original_summary"],
-                "theme": r["ai_theme"],
+                "summary": summary,
+                "theme": theme,
                 "analysis": r["ai_analysis"],
                 "impact_score": r["impact_score"],
             }
@@ -418,9 +432,22 @@ def generate_summary(alert_id: str, request: Request):
     # 4. Save to DB
     now_str = datetime.now().isoformat()
 
+    # Serialize lists to JSON
+    bullish_json = json.dumps(result.get("bullish_events", []))
+    bearish_json = json.dumps(result.get("bearish_events", []))
+    neutral_json = json.dumps(result.get("neutral_events", []))
+
     cursor.execute(
-        f'UPDATE "{alerts_table}" SET "narrative_theme" = ?, "narrative_summary" = ?, "summary_generated_at" = ? WHERE "{alert_id_col}" = ?',
-        (result["narrative_theme"], result["narrative_summary"], now_str, alert_id),
+        f'UPDATE "{alerts_table}" SET "narrative_theme" = ?, "narrative_summary" = ?, "bullish_events" = ?, "bearish_events" = ?, "neutral_events" = ?, "summary_generated_at" = ? WHERE "{alert_id_col}" = ?',
+        (
+            result["narrative_theme"],
+            result["narrative_summary"],
+            bullish_json,
+            bearish_json,
+            neutral_json,
+            now_str,
+            alert_id,
+        ),
     )
     conn.commit()
     conn.close()
@@ -428,6 +455,9 @@ def generate_summary(alert_id: str, request: Request):
     return {
         "narrative_theme": result["narrative_theme"],
         "narrative_summary": result["narrative_summary"],
+        "bullish_events": result.get("bullish_events", []),
+        "bearish_events": result.get("bearish_events", []),
+        "neutral_events": result.get("neutral_events", []),
         "summary_generated_at": now_str,
     }
 
@@ -549,7 +579,29 @@ def get_news(
     isin_col = config.get_column("articles", "isin")
     date_col = config.get_column("articles", "created_date")
 
-    query = f'SELECT * FROM "{table_name}" WHERE "{isin_col}" = ?'
+    # Join query to prefer AI analysis if available
+    themes_table = config.get_table_name("article_themes")
+    art_id_col = config.get_column("articles", "id")
+    theme_art_id_col = config.get_column("article_themes", "art_id")
+    ai_theme_col = config.get_column("article_themes", "theme")
+    ai_summary_col = config.get_column("article_themes", "summary")
+    ai_analysis_col = config.get_column("article_themes", "analysis")
+    impact_score_col = config.get_column("articles", "impact_score")
+    original_theme_col = config.get_column("articles", "theme")
+    original_summary_col = config.get_column("articles", "summary")
+
+    query = f'''
+        SELECT 
+            a.*,
+            a."{original_theme_col}" as original_theme,
+            a."{original_summary_col}" as original_summary,
+            t."{ai_theme_col}" as ai_theme,
+            t."{ai_summary_col}" as ai_summary,
+            t."{ai_analysis_col}" as ai_analysis
+        FROM "{table_name}" a
+        LEFT JOIN "{themes_table}" t ON a."{art_id_col}" = t."{theme_art_id_col}"
+        WHERE a."{isin_col}" = ?
+    '''
     params = [isin]
 
     if start_date:
@@ -564,6 +616,26 @@ def get_news(
 
     cursor.execute(query, params)
     rows = cursor.fetchall()
-    conn.close()
 
-    return [remap_row(dict(row), "articles") for row in rows]
+    results = []
+    for row in rows:
+        r = dict(row)
+        remapped = remap_row(r, "articles")
+
+        # Fallback logic for theme and summary
+        ai_theme = r.get("ai_theme")
+        if ai_theme and ai_theme.lower() != "string":
+            remapped["theme"] = ai_theme
+
+        ai_summary = r.get("ai_summary")
+        if ai_summary and ai_summary.strip():
+            remapped["summary"] = ai_summary
+
+        # Ensure theme is never None (fallback to original or uncategorized)
+        if remapped.get("theme") is None:
+            remapped["theme"] = r.get("original_theme") or "UNCATEGORIZED"
+
+        results.append(remapped)
+
+    conn.close()
+    return results

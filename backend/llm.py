@@ -168,12 +168,18 @@ def generate_cluster_summary(
         return {
             "narrative_theme": result.narrative_theme,
             "narrative_summary": result.narrative_summary,
+            "bullish_events": result.bullish_events or [],
+            "bearish_events": result.bearish_events or [],
+            "neutral_events": result.neutral_events or [],
         }
     except Exception as e:
         print(f"LLM Structured Output Error: {e}")
         return {
             "narrative_theme": "Error",
             "narrative_summary": f"Failed to generate summary: {str(e)}",
+            "bullish_events": [],
+            "bearish_events": [],
+            "neutral_events": [],
         }
 
 
@@ -209,11 +215,19 @@ def generate_article_analysis(
 
     try:
         result = structured_llm.invoke(messages)
+
+        # Validation: Filter out placeholder "string" values
+        theme = (
+            result.theme
+            if result.theme and result.theme.lower() != "string"
+            else "UNCATEGORIZED"
+        )
+
         return {
-            "theme": result.theme,
-            "summary": result.summary,
-            "analysis": result.analysis,
+            "theme": theme,
+            "analysis": None,  # User explicitly removed individual AI reasoning
+            "summary": None,
         }
     except Exception as e:
         print(f"LLM Analysis Error: {e}")
-        return {"theme": "Error", "summary": "Failed to analyze.", "analysis": str(e)}
+        return {"theme": "Error", "summary": None, "analysis": str(e)}

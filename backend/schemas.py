@@ -22,6 +22,15 @@ class ClusterSummaryOutput(BaseModel):
     narrative_summary: str = Field(
         description="A 2-3 sentence executive summary highlighting publicly available information that could justify the trading activity"
     )
+    bullish_events: list[str] = Field(
+        description="List of 1-2 bullet points describing key positive/bullish factors found in the news"
+    )
+    bearish_events: list[str] = Field(
+        description="List of 1-2 bullet points describing key negative/bearish factors found in the news"
+    )
+    neutral_events: list[str] = Field(
+        description="List of 1-2 bullet points describing neutral or informational factors"
+    )
 
 
 # Add future schemas below as needed
@@ -32,8 +41,4 @@ class ClusterSummaryOutput(BaseModel):
 
 
 class ArticleAnalysisOutput(BaseModel):
-    theme: str = Field(description="A concise 3-5 word label for the event")
-    summary: str = Field(description="A summary of the event")
-    analysis: str = Field(
-        description="Brief reasoning connecting the news to the price impact"
-    )
+    theme: str = Field(description="The strict category label for the event")

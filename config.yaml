@@ -32,6 +32,13 @@ tables:
       alert_date: "Alert date"
       start_date: "Start date"
       end_date: "End date"
+      # AI Analysis Columns
+      narrative_theme: "narrative_theme"
+      narrative_summary: "narrative_summary"
+      summary_generated_at: "summary_generated_at"
+      bullish_events: "bullish_events"
+      bearish_events: "bearish_events"
+      neutral_events: "neutral_events"
 
   # News/Articles table (required)
   articles:

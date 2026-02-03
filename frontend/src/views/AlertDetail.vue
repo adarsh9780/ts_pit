@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, computed, watch, shallowRef } from 'vue';
 import axios from 'axios';
+import ConfirmDialog from '../components/ConfirmDialog.vue';
 import VChart from 'vue-echarts';
 import { use } from 'echarts/core';
 import { CanvasRenderer } from 'echarts/renderers';
@@ -27,6 +28,28 @@ const isLoadingPrices = ref(false);
 const config = ref(null);
 const viewMode = ref('chart');
 const isGeneratingSummary = ref(false);
+
+// Confirm Dialog State
+const showConfirmDialog = ref(false);
+const confirmAction = ref(null);
+const confirmTitle = ref('');
+const confirmMessage = ref('');
+
+const openConfirm = (title, message, action) => {
+    confirmTitle.value = title;
+    confirmMessage.value = message;
+    confirmAction.value = action;
+    showConfirmDialog.value = true;
+};
+
+const handleConfirm = () => {
+    if (confirmAction.value) confirmAction.value();
+    showConfirmDialog.value = false;
+};
+
+const handleCancel = () => {
+    showConfirmDialog.value = false;
+};
 
 // Chart refs
 const chartRef = shallowRef(null);
@@ -394,6 +417,9 @@ const generateSummary = async () => {
         if (alertData.value) {
             alertData.value.narrative_theme = response.data.narrative_theme;
             alertData.value.narrative_summary = response.data.narrative_summary;
+            alertData.value.bullish_events = response.data.bullish_events;
+            alertData.value.bearish_events = response.data.bearish_events;
+            alertData.value.neutral_events = response.data.neutral_events;
             alertData.value.summary_generated_at = response.data.summary_generated_at;
         }
     } catch (error) {
@@ -405,9 +431,11 @@ const generateSummary = async () => {
 };
 
 const refreshSummary = () => {
-    if (confirm("Are you sure you want to regenerate the summary? This will use AI credits.")) {
-        generateSummary();
-    }
+    openConfirm(
+        "Regenerate Summary", 
+        "Are you sure you want to regenerate the summary? This will use AI credits.", 
+        generateSummary
+    );
 };
 
 const updateStatus = async (newStatus) => {
@@ -734,6 +762,16 @@ const loadData = async () => {
         prepareChartData();
     }
 };
+
+const parseEvents = (data) => {
+    if (!data) return [];
+    if (Array.isArray(data)) return data;
+    try {
+        return JSON.parse(data);
+    } catch (e) {
+        return [];
+    }
+};
 </script>
 
 <template>
@@ -850,10 +888,38 @@ const loadData = async () => {
                             <div class="summary-header">
                                 <h4><span class="ai-icon">AI</span> Investigation Summary</h4>
                                 <button class="refresh-btn" @click="refreshSummary" :disabled="isGeneratingSummary" title="Regenerate Summary">
-                                    {{ isGeneratingSummary ? '...' : '↻' }}
+                                    <div v-if="isGeneratingSummary" class="spinner-icon"></div>
+                                    <span v-else>↻</span>
                                 </button>
                             </div>
-                            <p>{{ alertData.narrative_summary }}</p>
+                            <div :class="{ 'dimmed': isGeneratingSummary }">
+                                <p>{{ alertData.narrative_summary }}</p>
+                                
+                                <!-- Event Breakdown Grid -->
+                                <div class="events-grid">
+                                    <div v-if="parseEvents(alertData.bullish_events).length" class="event-col bullish">
+                                        <h5><span class="indicator">+</span> Bullish Factors</h5>
+                                        <ul>
+                                            <li v-for="(event, i) in parseEvents(alertData.bullish_events)" :key="i">{{ event }}</li>
+                                        </ul>
+                                    </div>
+                                    
+                                    <div v-if="parseEvents(alertData.bearish_events).length" class="event-col bearish">
+                                        <h5><span class="indicator">-</span> Bearish Factors</h5>
+                                        <ul>
+                                            <li v-for="(event, i) in parseEvents(alertData.bearish_events)" :key="i">{{ event }}</li>
+                                        </ul>
+                                    </div>
+                                    
+                                    <div v-if="parseEvents(alertData.neutral_events).length" class="event-col neutral">
+                                        <h5><span class="indicator">~</span> Neutral / Context</h5>
+                                        <ul>
+                                            <li v-for="(event, i) in parseEvents(alertData.neutral_events)" :key="i">{{ event }}</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+
                             <span class="summary-meta">Generated: {{ new Date(alertData.summary_generated_at).toLocaleString() }}</span>
                         </div>
                         
@@ -904,6 +970,15 @@ const loadData = async () => {
         </div>
     </div>
     <div v-else class="loading-screen"><div class="spinner"></div> Generating Dashboard...</div>
+
+    <ConfirmDialog 
+        :is-open="showConfirmDialog"
+        :title="confirmTitle"
+        :message="confirmMessage"
+        confirm-text="Proceed"
+        @confirm="handleConfirm"
+        @cancel="handleCancel"
+    />
 </template>
 
 <style scoped>
@@ -911,6 +986,25 @@ const loadData = async () => {
 .news-item.analyzed {
     border-left: 3px solid #7c3aed;
     background: #fdfbff;
+}
+
+.spinner-icon {
+    width: 14px;
+    height: 14px;
+    border: 2px solid #cbd5e1;
+    border-top-color: #6366f1;
+    border-radius: 50%;
+    animation: Spin 0.8s linear infinite;
+}
+
+.dimmed {
+    opacity: 0.5;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+}
+
+@keyframes Spin {
+    to { transform: rotate(360deg); }
 }
 
 .analysis-block {
@@ -930,11 +1024,25 @@ const loadData = async () => {
     text-transform: uppercase;
 }
 
-.analysis-content {
-    margin: 0;
-    color: #581c87;
-    line-height: 1.5;
+
+
+.events-grid {
+    display: flex;
+    gap: 1.5rem;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid #e2e8f0;
 }
+.event-col { flex: 1; }
+.event-col h5 { margin: 0 0 0.5rem 0; font-size: 0.85rem; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+.event-col ul { margin: 0; padding-left: 1.2rem; }
+.event-col li { font-size: 0.85rem; color: #475569; margin-bottom: 0.25rem; }
+.event-col.bullish h5 { color: #166534; }
+.event-col.bullish .indicator { background: #dcfce7; color: #166534; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; }
+.event-col.bearish h5 { color: #991b1b; }
+.event-col.bearish .indicator { background: #fee2e2; color: #991b1b; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; }
+.event-col.neutral h5 { color: #475569; }
+.event-col.neutral .indicator { background: #f1f5f9; color: #475569; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; }
 
 /* Original styles below */
 .detail-container { background-color: #f8fafc; height: 100%; width: 100%; display: flex; flex-direction: column; overflow-y: auto; font-family: 'Inter', sans-serif; }
