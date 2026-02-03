@@ -95,8 +95,8 @@ def get_llm_model():
 
 
 def generate_cluster_summary(
-    articles: list, price_history: list = None, llm=None
-) -> Dict[str, str]:
+    articles: list, price_history: list | None = None, llm=None
+) -> Dict[str, str | list[str]]:
     """
     Generate a formatted summary and theme from a list of articles.
 
@@ -189,7 +189,7 @@ def generate_article_analysis(
     z_score: float,
     price_change: float,
     llm=None,
-) -> Dict[str, str]:
+) -> Dict[str, str | None]:
     """
     Analyze an article with price context to generate theme and reasoning.
     """

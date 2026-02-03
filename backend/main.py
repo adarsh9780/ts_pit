@@ -404,9 +404,10 @@ def generate_summary(alert_id: str, request: Request):
             orig_theme_col = config.get_column("articles", "theme")
             theme = r.get(orig_theme_col) or "UNCATEGORIZED"
 
-        summary = r.get("ai_summary")
+        # Use Original Summary as requested
+        summary = r.get("original_summary")
         if not summary or not summary.strip():
-            summary = r.get("original_summary")
+            summary = r.get("ai_summary")  # Last resort fallback
 
         articles.append(
             {
@@ -627,9 +628,9 @@ def get_news(
         if ai_theme and ai_theme.lower() != "string":
             remapped["theme"] = ai_theme
 
-        ai_summary = r.get("ai_summary")
-        if ai_summary and ai_summary.strip():
-            remapped["summary"] = ai_summary
+        # Use Original Summary as requested
+        # remapped["summary"] already contains the original column from remap_row()
+        # We explicitly DO NOT overwrite it with ai_summary anymore.
 
         # Ensure theme is never None (fallback to original or uncategorized)
         if remapped.get("theme") is None:
