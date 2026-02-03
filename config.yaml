@@ -53,7 +53,7 @@ tables:
       theme: "theme"
       summary: "art_summary"
       # Optional: materiality column (leave empty if not available)
-      materiality: "Materiality"
+      materiality: "materiality"
       # Event Impact Scoring columns
       impact_score: "impact_score"     # Numeric Z-Score
       impact_label: "impact_label"     # Text label (High/Medium/Low/Noise)
