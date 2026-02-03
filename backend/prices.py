@@ -218,33 +218,6 @@ def fetch_and_cache_prices(
                 else:
                     industry = "ETF"
 
-                # Insert into DB with High/Low for candlestick charts
-                data_to_insert = []
-                for _, r in hist.iterrows():
-                    data_to_insert.append(
-                        (
-                            ticker,
-                            r["Date"],
-                            r["Open"],
-                            r["High"],
-                            r["Low"],
-                            r["Close"],
-                            int(
-                                row["Volume"]
-                            ),  # Using row from outer scope fetchone? No, wait.
-                            # BUG IN ORIGINAL CODE: 'row' is from cursor.fetchone() for min/max date check.
-                            # BUT we are iterating 'hist' as 'r'.
-                            # row["Volume"] inside the loop refers to the cursor row? Or is it mixing scopes?
-                            # In original it was 'r["Volume"]'.
-                            # Let's check original code carefully.
-                        )
-                    )
-                # Correction: The original code used r["Volume"], but let's double check context.
-                # In original view:
-                # 476:                             r["Volume"],
-                # Just realized I might have introduced a bug if I used 'row' instead of 'r'.
-
-                # Let's fix loop to be correct:
                 data_to_insert = []
                 for _, r in hist.iterrows():
                     data_to_insert.append(
