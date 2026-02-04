@@ -32,7 +32,11 @@ A tool for monitoring and investigating trade alerts with news correlation and p
    ```
    *See [SCHEMA_REQUIREMENTS.md](SCHEMA_REQUIREMENTS.md) for details.*
 
-3. **Configure your database** (see Configuration section below)
+3. **Understanding the Scores:**
+   Detailed guide on Materiality (P1/P2/P3), Impact Z-Scores, and how to use them for decision making:
+   *📖 Read [SCORING_METHODOLOGY.md](SCORING_METHODOLOGY.md)*
+
+4. **Configure your database** (see Configuration section below)
 
 3. **Start the backend:**
    ```bash
