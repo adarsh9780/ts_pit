@@ -618,6 +618,71 @@ def get_news(
     cursor.execute(query, params)
     rows = cursor.fetchall()
 
+    # Parse alert dates for dynamic P2 calculation
+    dt_start = datetime.strptime(start_date, "%Y-%m-%d") if start_date else None
+    dt_end = datetime.strptime(end_date, "%Y-%m-%d") if end_date else None
+    duration = (dt_end - dt_start).total_seconds() if dt_start and dt_end else None
+
+    # Helper for P2 (Proximity) Logic
+    def calculate_p2(art_date_str):
+        if not dt_start or not dt_end or not art_date_str:
+            return "L"
+        try:
+            # Handle potential ISO format or simple date
+            dt_art = (
+                datetime.fromisoformat(art_date_str)
+                if "T" in art_date_str
+                else datetime.strptime(art_date_str, "%Y-%m-%d")
+            )
+        except ValueError:
+            return "L"
+
+        # Calculate ratio
+        if dt_art >= dt_end:
+            ratio = 1.0
+        else:
+            elapsed = (dt_art - dt_start).total_seconds()
+            ratio = elapsed / duration if duration > 0 else 0
+
+        if ratio >= 0.66:
+            return "H"
+        if ratio >= 0.33:
+            return "M"
+        return "L"
+
+    # Helper for P3 (Theme) Logic
+    def calculate_p3(theme_str):
+        if not theme_str:
+            return "L"
+        theme = theme_str.upper()
+
+        # High Priority Themes
+        high_themes = [
+            "EARNINGS_ANNOUNCEMENT",
+            "M_AND_A",
+            "DIVIDEND_CORP_ACTION",
+            "PRODUCT_TECH_LAUNCH",
+            "COMMERCIAL_CONTRACTS",
+        ]
+        # Medium Priority Themes
+        med_themes = [
+            "LEGAL_REGULATORY",
+            "EXECUTIVE_CHANGE",
+            "OPERATIONAL_CRISIS",
+            "CAPITAL_STRUCTURE",
+        ]
+
+        for t in high_themes:
+            if t in theme:
+                return "H"
+        for t in med_themes:
+            if t in theme:
+                return "M"
+        return "L"
+
+    # Materiality Scoring Weights for Sorting
+    mat_score_map = {"H": 3, "M": 2, "L": 1}
+
     results = []
     for row in rows:
         r = dict(row)
@@ -628,15 +693,48 @@ def get_news(
         if ai_theme and ai_theme.lower() != "string":
             remapped["theme"] = ai_theme
 
-        # Use Original Summary as requested
-        # remapped["summary"] already contains the original column from remap_row()
-        # We explicitly DO NOT overwrite it with ai_summary anymore.
-
         # Ensure theme is never None (fallback to original or uncategorized)
         if remapped.get("theme") is None:
             remapped["theme"] = r.get("original_theme") or "UNCATEGORIZED"
 
+        # ------------------------------------------------------------------
+        # Dynamic Materiality Calculation (P1 + P2 + P3)
+        # ------------------------------------------------------------------
+        p1 = r.get("p1_prominence") or "L"
+        # p3 is now calculated dynamically from the theme
+        p2 = calculate_p2(remapped.get("created_date"))
+        p3 = calculate_p3(remapped.get("theme"))
+
+        final_score = f"{p1}{p2}{p3}"
+        remapped["materiality"] = final_score
+
+        # Detailed Breakdown for Tooltip
+        remapped["materiality_details"] = {
+            "p1": {"score": p1, "reason": "Entity Mention (Title/Lead/Body)"},
+            "p2": {
+                "score": p2,
+                "reason": f"Proximity to Window ({start_date} to {end_date})",
+            },
+            "p3": {"score": p3, "reason": f"Theme Priority ({remapped['theme']})"},
+        }
+
+        # Calculate numeric sort score (e.g., HHH=9, LLL=3)
+        sort_score = (
+            mat_score_map.get(p1, 1)
+            + mat_score_map.get(p2, 1)
+            + mat_score_map.get(p3, 1)
+        )
+        remapped["_sort_score"] = sort_score
+
         results.append(remapped)
 
     conn.close()
+
+    # Sort by Materiality Score (descending), then by date
+    results.sort(key=lambda x: (x["_sort_score"], x["created_date"]), reverse=True)
+
+    # Remove temporary sort key
+    for res in results:
+        del res["_sort_score"]
+
     return results

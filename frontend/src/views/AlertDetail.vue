@@ -78,6 +78,35 @@ const periods = [
 const getMaterialityColor = (code) => {
     if (!config.value || !config.value.materiality_colors) return '#808080';
     return config.value.materiality_colors[code] || config.value.materiality_colors['DEFAULT'] || '#808080';
+    if (!config.value || !config.value.materiality_colors) return '#808080';
+    return config.value.materiality_colors[code] || config.value.materiality_colors['DEFAULT'] || '#808080';
+};
+
+// Tooltip State
+const showTooltip = ref(false);
+const tooltipData = ref(null);
+const tooltipPos = ref({ x: 0, y: 0 });
+
+const handleTooltipEnter = (event, details) => {
+    if (!details) return;
+    tooltipData.value = details;
+    showTooltip.value = true;
+    
+    // Position tooltip near the mouse/element but ensuring it fits
+    const rect = event.target.getBoundingClientRect();
+    // Default: Top-Centered relative to element
+    let x = rect.left + (rect.width / 2) - 140; // Center 280px tooltip
+    let y = rect.top - 120; // Above
+    
+    // Adjust logic if close to edges (simple version)
+    if (x < 10) x = 10;
+    if (y < 10) y = rect.bottom + 10; // Show below if top is clipped
+    
+    tooltipPos.value = { x, y };
+};
+
+const handleTooltipLeave = () => {
+    showTooltip.value = false;
 };
 
 const chartOptions = computed(() => {
@@ -951,7 +980,13 @@ const parseEvents = (data) => {
                                 <span class="sentiment-indicator" :class="article.sentiment.split(':')[0].toLowerCase()">{{ article.sentiment.split(':')[0] }}</span>
                                 <template v-if="config && config.has_materiality && article.materiality">
                                     <span class="separator">•</span>
-                                    <span class="materiality-indicator" :style="{ color: getMaterialityColor(article.materiality) }">{{ article.materiality }}</span>
+                                    <span class="materiality-indicator" 
+                                          :style="{ color: getMaterialityColor(article.materiality) }"
+                                          @mouseenter="handleTooltipEnter($event, article.materiality_details)"
+                                          @mouseleave="handleTooltipLeave"
+                                    >
+                                        {{ article.materiality }}
+                                    </span>
                                 </template>
                                 
                                 <template v-if="article.impact_label">
@@ -979,6 +1014,16 @@ const parseEvents = (data) => {
         @confirm="handleConfirm"
         @cancel="handleCancel"
     />
+
+  <!-- Global Tooltip Element -->
+  <div v-if="showTooltip && tooltipData" 
+       class="details-tooltip"
+       :style="{ top: tooltipPos.y + 'px', left: tooltipPos.x + 'px' }"
+  >
+        <div class="tip-row"><strong>P1 (Entity):</strong> {{ tooltipData.p1.score }} - {{ tooltipData.p1.reason }}</div>
+        <div class="tip-row"><strong>P2 (Time):</strong> {{ tooltipData.p2.score }} - {{ tooltipData.p2.reason }}</div>
+        <div class="tip-row"><strong>P3 (Theme):</strong> {{ tooltipData.p3.score }} - {{ tooltipData.p3.reason }}</div>
+  </div>
 </template>
 
 <style scoped>
@@ -1072,7 +1117,7 @@ h1 { margin: 0; font-size: 1.5rem; color: #0f172a; display: flex; align-items: b
 .metric-item strong { font-weight: 600; color: #1f2937; }
 .separator { color: #9ca3af; }
 .dashboard-grid { flex: 1; display: flex; flex-direction: row; padding: 1.5rem 2rem; gap: 1.5rem; height: 100%; min-height: 0; box-sizing: border-box; width: 100%; }
-.card { background: white; border-radius: 0.75rem; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; overflow: hidden; }
+.card { background: white; border-radius: 0.75rem; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; /* overflow removed to allow tooltip */ }
 .card-header { padding: 1rem 1.5rem; border-bottom: 1px solid #f1f5f9; background: #ffffff; flex-shrink: 0; }
 .chart-header, .news-header { display: flex; justify-content: space-between; align-items: center; }
 .period-selector { display: flex; gap: 0.5rem; background: #f1f5f9; padding: 0.25rem; border-radius: 6px; }
@@ -1089,8 +1134,7 @@ h1 { margin: 0; font-size: 1.5rem; color: #0f172a; display: flex; align-items: b
 .news-panel { flex: 1; min-width: 450px; display: flex; flex-direction: column; height: 100%; }
 .scrollable { overflow-y: auto; padding: 0; height: 100%; }
 .news-feed { padding: 1.5rem; }
-.news-item { margin-bottom: 1.25rem; padding: 1rem; background: #f8fafc; border-radius: 0.5rem; border: 1px solid #e2e8f0; transition: all 0.2s ease; }
-.news-item:hover { border-color: #cbd5e1; box-shadow: 0 2px 4px rgba(0,0,0,0.04); }
+.news-item { margin-bottom: 1.25rem; padding: 1rem; background: #f8fafc; border-radius: 0.5rem; border: 1px solid #e2e8f0; transition: all 0.2s ease; overflow: visible; /* Ensure tooltip can show */ }
 .news-item:last-child { margin-bottom: 0; }
 .news-meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; font-size: 0.75rem; }
 .news-date { color: #64748b; font-weight: 500; }
@@ -1105,7 +1149,45 @@ h1 { margin: 0; font-size: 1.5rem; color: #0f172a; display: flex; align-items: b
 .sentiment-indicator.bearish { color: #dc2626; }
 .sentiment-indicator.neutral { color: #64748b; }
 .separator { margin: 0 0.5rem; color: #cbd5e1; }
-.materiality-indicator { font-size: 0.75rem; font-weight: 600; color: #475569; }
+
+/* Materiality Tooltip Styles - JS Driven */
+.materiality-indicator {
+    font-size: 0.75rem;
+    font-weight: 700;
+    cursor: help;
+    display: inline-block;
+    color: #475569;
+}
+
+.details-tooltip {
+    position: fixed;
+    z-index: 9999;
+    background-color: #1e293b;
+    color: #fff;
+    width: 280px;
+    padding: 12px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    pointer-events: none; /* Allow clicking through if needed */
+    line-height: 1.4;
+}
+
+.details-tooltip::after {
+    /* Optional: custom arrow logic implies complex positioning. Skipping for fixed tooltip relative to mouse */
+}
+
+.tip-row {
+    margin-bottom: 4px;
+    border-bottom: 1px solid #334155;
+    padding-bottom: 4px;
+}
+.tip-row:last-child {
+    margin-bottom: 0;
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
 .price-change { font-size: 0.75rem; font-weight: 600; }
 .price-change.positive { color: #16a34a; }
 .price-change.negative { color: #dc2626; }
