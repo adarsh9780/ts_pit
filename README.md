@@ -20,8 +20,19 @@ A tool for monitoring and investigating trade alerts with news correlation and p
    uv sync
    cd frontend && npm install
    ```
+   ```bash
+   uv sync
+   cd frontend && npm install
+   ```
 
-2. **Configure your database** (see Configuration section below)
+2. **Validate your database schema:**
+   Run the schema check to ensure your database has all required tables and columns:
+   ```bash
+   uv run scripts/validate_schema.py
+   ```
+   *See [SCHEMA_REQUIREMENTS.md](SCHEMA_REQUIREMENTS.md) for details.*
+
+3. **Configure your database** (see Configuration section below)
 
 3. **Start the backend:**
    ```bash

@@ -587,9 +587,15 @@ def get_news(
     ai_theme_col = config.get_column("article_themes", "theme")
     ai_summary_col = config.get_column("article_themes", "summary")
     ai_analysis_col = config.get_column("article_themes", "analysis")
+    ai_p1_col = config.get_column("article_themes", "p1_prominence")
+
     impact_score_col = config.get_column("articles", "impact_score")
     original_theme_col = config.get_column("articles", "theme")
     original_summary_col = config.get_column("articles", "summary")
+    # Legacy P1 support (if exists in articles)
+    legacy_p1_col = (
+        "p1_prominence"  # We don't get this from config anymore as we removed it
+    )
 
     query = f'''
         SELECT 
@@ -598,7 +604,8 @@ def get_news(
             a."{original_summary_col}" as original_summary,
             t."{ai_theme_col}" as ai_theme,
             t."{ai_summary_col}" as ai_summary,
-            t."{ai_analysis_col}" as ai_analysis
+            t."{ai_analysis_col}" as ai_analysis,
+            t."{ai_p1_col}" as ai_p1
         FROM "{table_name}" a
         LEFT JOIN "{themes_table}" t ON a."{art_id_col}" = t."{theme_art_id_col}"
         WHERE a."{isin_col}" = ?
@@ -700,7 +707,8 @@ def get_news(
         # ------------------------------------------------------------------
         # Dynamic Materiality Calculation (P1 + P2 + P3)
         # ------------------------------------------------------------------
-        p1 = r.get("p1_prominence") or "L"
+        # Prefer P1 from article_themes (ai_p1), fallback to articles (p1_prominence)
+        p1 = r.get("ai_p1") or r.get("p1_prominence") or "L"
         # p3 is now calculated dynamically from the theme
         p2 = calculate_p2(remapped.get("created_date"))
         p3 = calculate_p3(remapped.get("theme"))

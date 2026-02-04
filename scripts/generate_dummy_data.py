@@ -4,6 +4,8 @@ import random
 import uuid
 from datetime import datetime, timedelta
 from pandas.tseries.offsets import BusinessDay
+import shutil
+import os
 
 
 def generate_dummy_data(num_records=50):
@@ -120,7 +122,20 @@ def generate_dummy_data(num_records=50):
 
 
 def save_to_sqlite(alerts_df, articles_df, db_name="alerts.db"):
+    # SAFETY: Backup existing DB
+    if os.path.exists(db_name):
+        backup_name = f"{db_name}.bak_dummy"
+        try:
+            print(f"📦 Creating backup at '{backup_name}'...")
+            shutil.copy2(db_name, backup_name)
+        except Exception as e:
+            print(f"⚠️  Warning: Failed to create backup: {e}")
+
     conn = sqlite3.connect(db_name)
+    # OPTIMIZATION: Use WAL mode
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
+
     try:
         alerts_df.to_sql("alerts", conn, if_exists="replace", index=False)
         articles_df.to_sql("articles", conn, if_exists="replace", index=False)

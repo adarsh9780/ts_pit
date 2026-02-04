@@ -52,9 +52,12 @@ tables:
       sentiment: "sentiment"
       theme: "theme"
       summary: "art_summary"
-      # Optional: materiality column (leave empty if not available)
-      materiality: "materiality"
-      # Event Impact Scoring columns
+      # Required for Prominence Calculation (No Joins)
+      ticker: "ticker"
+      instrument_name: "instrument_name"
+      # Optional: materiality column (removed from source table requirements)
+      materiality: ""
+      # Event Impact Scoring columns (These might also need moving later, but sticking to request)
       impact_score: "impact_score"     # Numeric Z-Score
       impact_label: "impact_label"     # Text label (High/Medium/Low/Noise)
 
@@ -79,6 +82,8 @@ tables:
       theme: "narrative_theme"     # AI generated theme
       summary: "narrative_summary" # AI generated summary
       analysis: "narrative_analysis" # Detailed reasoning
+      # Calculated Scores
+      p1_prominence: "p1_prominence" # Calculated Entity Prominence (H/M/L)
 
   # Hourly Price cache table (for Impact Scoring)
   prices_hourly:

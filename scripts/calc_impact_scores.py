@@ -24,7 +24,11 @@ config = get_config()
 
 def get_db_connection():
     db_path = config.get_database_path()
-    return sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path)
+    # OPTIMIZATION: Use WAL mode
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
+    return conn
 
 
 from market_data import ensure_hourly_table, fetch_hourly_data_with_fallback
@@ -141,7 +145,19 @@ def main():
     )
     args = parser.parse_args()
 
-    print("Starting Post-Publication Impact Analysis...")
+    print("🚀 Starting Impact Score Calculation...")
+
+    # SAFETY: Create backup
+    db_path = config.get_database_path()
+    backup_path = f"{db_path}.bak_impact"
+    try:
+        import shutil
+
+        print(f"📦 Creating backup at '{backup_path}'...")
+        shutil.copy2(db_path, backup_path)
+    except Exception as e:
+        print(f"⚠️  Warning: Failed to create backup: {e}")
+
     conn = get_db_connection()
     ensure_hourly_table(conn)
 

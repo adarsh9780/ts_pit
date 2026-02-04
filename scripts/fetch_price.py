@@ -2,10 +2,25 @@ import yfinance as yf
 import sqlite3
 import pandas as pd
 from datetime import datetime, timedelta
+import shutil
+import os
 
 
 def fetch_price_data(db_name="alerts.db"):
+    # SAFETY: Backup existing DB
+    if os.path.exists(db_name):
+        backup_name = f"{db_name}.bak_price"
+        try:
+            print(f"📦 Creating backup at '{backup_name}'...")
+            shutil.copy2(db_name, backup_name)
+        except Exception as e:
+            print(f"⚠️  Warning: Failed to create backup: {e}")
+
     conn = sqlite3.connect(db_name)
+    # OPTIMIZATION: Use WAL mode
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
+
     try:
         # Get unique tickers and their required date ranges
         query = 'SELECT Ticker, MIN("Start date") as min_start, MAX("End date") as max_end FROM alerts GROUP BY Ticker'
