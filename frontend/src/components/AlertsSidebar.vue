@@ -132,7 +132,7 @@ const getTypeClass = (type) => {
         </div>
         
         <div class="card-footer">
-            <span class="alert-id">#{{ alert.id }}</span>
+            <span class="alert-id">Alert ID: #{{ alert.id }}</span>
             <div class="status-indicator">
                 <span class="status-dot" :class="getStatusClass(alert.status)"></span>
                 <span class="status-text">{{ alert.status }}</span>

@@ -172,6 +172,16 @@ const chartOptions = computed(() => {
                     borderType: 'dashed'
                 },
                 data: markAreaData
+            },
+            markLine: {
+                symbol: 'none',
+                label: { show: false },
+                lineStyle: {
+                    type: 'dashed',
+                    color: '#ef4444',
+                    width: 1
+                },
+                data: [{ xAxis: alertData.value.alert_date }]
             }
         });
     } else {
@@ -196,6 +206,16 @@ const chartOptions = computed(() => {
                         borderType: 'dashed'
                     },
                     data: markAreaData
+                },
+                markLine: {
+                    symbol: 'none',
+                    label: { show: false },
+                    lineStyle: {
+                        type: 'dashed',
+                        color: '#ef4444',
+                        width: 1
+                    },
+                    data: [{ xAxis: alertData.value.alert_date }]
                 }
             });
             
@@ -231,6 +251,16 @@ const chartOptions = computed(() => {
                         borderType: 'dashed'
                     },
                     data: markAreaData
+                },
+                markLine: {
+                    symbol: 'none',
+                    label: { show: false },
+                    lineStyle: {
+                        type: 'dashed',
+                        color: '#ef4444',
+                        width: 1
+                    },
+                    data: [{ xAxis: alertData.value.alert_date }]
                 }
             });
             
@@ -838,7 +868,8 @@ const recommendationClass = computed(() => {
                     <div class="header-left">
                         <h1>{{ alertData.ticker }} <span class="subtitle">{{ alertData.instrument_name }}</span></h1>
                         <div class="meta-tags">
-                           <span class="tag isin">{{ alertData.isin }}</span>
+                           <span class="tag alert-id">Alert ID: {{ alertId }}</span>
+                           <span class="tag isin">ISIN: {{ alertData.isin }}</span>
                            <span class="tag type" :class="alertData.trade_type.toLowerCase()">{{ alertData.trade_type }}</span>
                            <span class="status-badge" :class="getStatusClass(alertData.status)">{{ alertData.status }}</span>
                            <!-- Cluster Theme Badge -->
