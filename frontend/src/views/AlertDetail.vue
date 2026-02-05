@@ -416,7 +416,10 @@ const analyzeArticles = async () => {
                 
                 // Update local state immediately
                 article.theme = result.theme;
-                article.summary = result.summary; // Overwrite summary with AI version
+                // Only update summary if AI returns a non-empty value (preserve original otherwise)
+                if (result.summary) {
+                    article.summary = result.summary;
+                }
                 article.analysis = result.analysis; // New field
                 
                 return true;
