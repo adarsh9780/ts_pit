@@ -1,0 +1,6 @@
+
+- Always execute coding tasks one small step at a time.
+- STOP and ask for user confirmation after completing each major step (e.g., creating a component, editing a backend file) before proceeding to the next one.
+- Do NOT chain multiple tasks (e.g., Backend + Frontend + API) in a single turn.
+- If a task involves multiple files, edit one file, verify it, and then ask the user to proceed.
+- Prioritize user feedback over speed.

@@ -62,6 +62,9 @@ tables:
       # Event Impact Scoring columns (These might also need moving later, but sticking to request)
       impact_score: "impact_score"     # Numeric Z-Score
       impact_label: "impact_label"     # Text label (High/Medium/Low/Noise)
+      # Additional columns in database
+      crescendo_id: "crescendo_id"     # Legacy identifier (same as ISIN)
+      p1_prominence: "p1_prominence"   # Entity prominence: H/M/L
 
   # Price cache table (auto-created if doesn't exist)
   prices:

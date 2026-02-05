@@ -3,6 +3,7 @@ import { ref, onMounted, computed } from 'vue';
 import axios from 'axios';
 import AlertsSidebar from '../components/AlertsSidebar.vue';
 import AlertDetail from './AlertDetail.vue'; 
+import AgentPanel from '../components/AgentPanel.vue';
 
 // State
 const alerts = ref([]);
@@ -12,9 +13,15 @@ const loading = ref(true);
 const availableDates = ref([]);
 const mappings = ref({}); // Keep mappings if needed by children
 const isSidebarCollapsed = ref(false);
+const isAgentOpen = ref(false); // Controls Agent Panel visibility
 
 const toggleSidebar = () => {
     isSidebarCollapsed.value = !isSidebarCollapsed.value;
+};
+
+// Toggle Agent Panel
+const toggleAgent = () => {
+    isAgentOpen.value = !isAgentOpen.value;
 };
 
 // Dashboard Layout Logic
@@ -34,20 +41,6 @@ const fetchAlerts = async (date = null) => {
       // Default to the latest date (Today - 1 concept)
       if (dates.length > 0) {
           currentFilters.value.date = dates[0];
-          // Re-apply filter immediately locally since we have all data
-          // Or if we need strict backend filtering, we call fetchAlerts(dates[0])
-          // Given the current implementation fetches ALL then filters locally in applyFilters...
-          // Wait, fetchAlerts takes a date param to filter on backend? 
-          // Line 25: const params = date ? { date } : {}; -> Yes it does.
-          
-          // So we should probably fetch LATEST DATE only by default?
-          // But to know the latest date we need to fetch all or have a metadata endpoint.
-          // Current optimized approach:
-          // 1. Fetch all (or is it efficient?) -> It fetches all if date is null.
-          // 2. Find latest date.
-          // 3. Set filter.
-          
-          // Better UX: select the date and filter the list we just got.
           applyFilters();
       }
     } else {
@@ -64,7 +57,6 @@ onMounted(async () => {
   await fetchAlerts();
 });
 
-// Selection Handler
 // Selection Handler
 const onAlertSelect = (id) => {
   selectedAlertId.value = id;
@@ -147,10 +139,11 @@ const onFilterDate = (val) => {
         </div>
         
         <div v-else-if="selectedAlertId" class="detail-wrapper">
-             <!-- Temporarily passing ID, we will refactor AlertDetail to accept prop -->
-             <!-- For now, we render a placeholder if AlertDetail isn't ready as a component -->
-             <!-- But since I declared import AlertDetail, I need to make sure it works or I wrap it -->
-             <AlertDetail :key="selectedAlertId" :alertId="selectedAlertId" /> 
+             <AlertDetail 
+                :key="selectedAlertId" 
+                :alertId="selectedAlertId" 
+                @toggle-agent="toggleAgent"
+             /> 
         </div>
         
         <div v-else class="empty-state">
@@ -160,6 +153,15 @@ const onFilterDate = (val) => {
             </div>
         </div>
     </div>
+
+    <!-- Agent Panel (Right Side) -->
+    <transition name="slide-panel">
+        <AgentPanel 
+            v-if="isAgentOpen" 
+            :alertId="selectedAlertId" 
+            @close="isAgentOpen = false" 
+        />
+    </transition>
   </div>
 </template>
 
@@ -264,5 +266,41 @@ const onFilterDate = (val) => {
 .empty-content h3 {
     margin: 0 0 var(--spacing-2) 0;
     color: var(--color-text-main);
+}
+
+/* Agent Toggle Button */
+.agent-toggle-btn {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    z-index: 100;
+    background-color: var(--color-primary);
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-weight: 600;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    cursor: pointer;
+    transition: transform 0.2s, background-color 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.agent-toggle-btn:hover {
+    transform: translateY(-2px);
+    background-color: var(--color-primary-hover, #0056b3);
+}
+
+/* Slide Panel Transition */
+.slide-panel-enter-active,
+.slide-panel-leave-active {
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.slide-panel-enter-from,
+.slide-panel-leave-to {
+    transform: translateX(100%);
 }
 </style>

@@ -2,20 +2,25 @@ import os
 import json
 import yfinance as yf
 import requests
+import asyncio
+import aiosqlite
 import pandas as pd
 from datetime import datetime
 from pathlib import Path
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Optional, AsyncGenerator
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
-from .database import get_db_connection
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+from .database import get_db_connection, remap_row
 from .config import get_config
 from .llm import get_llm_model, generate_cluster_summary, generate_article_analysis
 from .prices import fetch_and_cache_prices, get_ticker_from_isin
+from .agent.graph import workflow  # Import the workflow blueprint
 
 # Load configuration
 config = get_config()
@@ -23,11 +28,26 @@ config = get_config()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Initialize LLM
+    # Startup: Initialize LLM & Agent
     print("Initializing LLM Model...")
     app.state.llm = get_llm_model()
-    yield
-    # Shutdown: Clean up if needed
+
+    # Initialize Persistent Memory for Agent
+    db_path = Path.home() / ".ts_pit" / "agent_memory.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    print(f"Initializing Agent Memory at {db_path}...")
+    # Open async connection for the application lifespan
+    async with aiosqlite.connect(db_path) as conn:
+        app.state.agent_params = {"conn": conn}
+        checkpointer = AsyncSqliteSaver(conn)
+
+        # Compile the graph ONCE with the checkpointer
+        app.state.agent = workflow.compile(checkpointer=checkpointer)
+
+        yield
+
+    # Shutdown
     print("Shutting down...")
 
 
@@ -112,34 +132,6 @@ if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
             return FileResponse(file_path)
         # Otherwise serve index.html for SPA routing
         return FileResponse(STATIC_DIR / "index.html")
-
-
-def remap_row(row, table_key: str):
-    """
-    Remaps a database row (dict-like) to UI keys based on config.
-
-    Args:
-        row: Database row as dict-like object
-        table_key: Table key (alerts, articles, prices)
-
-    Returns:
-        Dict with UI-friendly keys
-    """
-    columns = config.get_columns(table_key)
-    result = {}
-
-    # Map DB columns to UI keys
-    for ui_key, db_col in columns.items():
-        if db_col and db_col in row.keys():
-            result[ui_key] = row[db_col]
-
-    # Keep extra fields that aren't in the mapping
-    mapped_db_cols = set(col for col in columns.values() if col)
-    for k in row.keys():
-        if k not in mapped_db_cols:
-            result[k] = row[k]
-
-    return result
 
 
 @app.post("/articles/{id}/analyze")
@@ -716,3 +708,62 @@ def get_news(
         del res["_sort_score"]
 
     return results
+
+
+# ==============================================================================
+# AI AGENT ENDPOINTS
+# ==============================================================================
+
+
+class ChatRequest(BaseModel):
+    message: str
+    session_id: str
+    alert_id: Optional[str] = None
+
+
+@app.post("/agent/chat")
+async def chat_agent(request: Request, body: ChatRequest):
+    """
+    Chat with the Trade Surveillance Agent.
+    Streams the response using Server-Sent Events (SSE).
+    """
+    agent = request.app.state.agent
+
+    # Configure session
+    config = {"configurable": {"thread_id": body.session_id}}
+
+    # Input State
+    input_state = {
+        "messages": [("user", body.message)],
+        "current_alert_id": body.alert_id,  # Context Loader sees this
+    }
+
+    async def event_generator():
+        """Generates SSE events from the agent graph."""
+        try:
+            async for event in agent.astream_events(input_state, config, version="v1"):
+                kind = event["event"]
+
+                # Filter interesting events to stream to frontend
+                if kind == "on_chat_model_stream":
+                    content = event["data"]["chunk"].content
+                    if content:
+                        yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
+
+                elif kind == "on_tool_start":
+                    tool_name = event["name"]
+                    yield f"data: {json.dumps({'type': 'tool_start', 'tool': tool_name})}\n\n"
+
+                elif kind == "on_tool_end":
+                    tool_name = event["name"]
+                    output = str(event["data"].get("output"))
+                    yield f"data: {json.dumps({'type': 'tool_end', 'tool': tool_name, 'output': output})}\n\n"
+
+            # End of stream
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+        except Exception as e:
+            print(f"Agent Error: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")

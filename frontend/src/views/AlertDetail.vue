@@ -7,6 +7,10 @@ import { use } from 'echarts/core';
 import { CanvasRenderer } from 'echarts/renderers';
 import { LineChart, ScatterChart, BarChart, CandlestickChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent, LegendComponent, MarkAreaComponent } from 'echarts/components';
+import AlertHeader from '../components/alert/AlertHeader.vue';
+import AlertChart from '../components/alert/AlertChart.vue';
+import AlertSummary from '../components/alert/AlertSummary.vue';
+import AlertNews from '../components/alert/AlertNews.vue';
 
 // Register ECharts components
 use([CanvasRenderer, LineChart, ScatterChart, BarChart, CandlestickChart, GridComponent, TooltipComponent, LegendComponent, MarkAreaComponent]);
@@ -114,18 +118,16 @@ const chartOptions = computed(() => {
     if (!chartLabels.value.length) return {};
     
     // Calculate mark area for period highlighting
-    // Calculate mark area for period highlighting
     let markAreaData = [];
+    
     if (alertData.value && chartLabels.value.length > 0) {
         let targetStart = alertData.value.start_date;
         let targetEnd = alertData.value.end_date;
         
         // Helper to find closest available date in chartLabels
         const findClosestDate = (target, labels) => {
+            if (!target) return labels[0];
             if (labels.includes(target)) return target;
-            // Find closest (assuming sorted labels)
-            // Simple approach: find first label >= target (start) or last label <= target (end)
-            // For visualization, finding the closest sorted string is usually 'good enough' for dates YYYY-MM-DD
             let closest = labels[0];
             let minDiff = Infinity;
             const targetTime = new Date(target).getTime();
@@ -172,16 +174,6 @@ const chartOptions = computed(() => {
                     borderType: 'dashed'
                 },
                 data: markAreaData
-            },
-            markLine: {
-                symbol: 'none',
-                label: { show: false },
-                lineStyle: {
-                    type: 'dashed',
-                    color: '#ef4444',
-                    width: 1
-                },
-                data: [{ xAxis: alertData.value.alert_date }]
             }
         });
     } else {
@@ -206,16 +198,6 @@ const chartOptions = computed(() => {
                         borderType: 'dashed'
                     },
                     data: markAreaData
-                },
-                markLine: {
-                    symbol: 'none',
-                    label: { show: false },
-                    lineStyle: {
-                        type: 'dashed',
-                        color: '#ef4444',
-                        width: 1
-                    },
-                    data: [{ xAxis: alertData.value.alert_date }]
                 }
             });
             
@@ -251,16 +233,6 @@ const chartOptions = computed(() => {
                         borderType: 'dashed'
                     },
                     data: markAreaData
-                },
-                markLine: {
-                    symbol: 'none',
-                    label: { show: false },
-                    lineStyle: {
-                        type: 'dashed',
-                        color: '#ef4444',
-                        width: 1
-                    },
-                    data: [{ xAxis: alertData.value.alert_date }]
                 }
             });
             
@@ -828,276 +800,52 @@ const loadData = async () => {
     }
 };
 
-const parseEvents = (data) => {
-    if (!data) return [];
-    if (Array.isArray(data)) {
-        // Clean bullet characters from array items
-        return data.map(item => typeof item === 'string' ? item.replace(/^[-*•]\s*/, '') : item);
-    }
-    try {
-        const parsed = JSON.parse(data);
-        return Array.isArray(parsed) ? parsed.map(item => typeof item === 'string' ? item.replace(/^[-*•]\s*/, '') : item) : [];
-    } catch (e) {
-        return [];
-    }
-};
-
-const parseReasoning = (text) => {
-    if (!text) return [];
-    // Split by newlines and remove bullet characters
-    return text.split('\n')
-        .map(line => line.trim())
-        .filter(line => line.length > 0)
-        .map(line => line.replace(/^[-*•]\s*/, '')); // Remove bullet chars (-, *, •) and optional space
-};
-
-const recommendationClass = computed(() => {
-    if (!alertData.value || !alertData.value.recommendation) return '';
-    const rec = alertData.value.recommendation.toUpperCase();
-    if (rec.includes('DISMISS') || rec.includes('REJECT')) return 'reject'; // Green
-    if (rec.includes('APPROVE') || rec.includes('UNEXPLAINED')) return 'approve_l2'; // Red
-    return '';
-});
 </script>
+
 
 <template>
     <div class="detail-container" v-if="alertData">
-        <header class="header">
-            <div class="header-content">
-                <div class="header-main">
-                    <div class="header-left">
-                        <h1>{{ alertData.ticker }} <span class="subtitle">{{ alertData.instrument_name }}</span></h1>
-                        <div class="meta-tags">
-                           <span class="tag alert-id">Alert ID: {{ alertId }}</span>
-                           <span class="tag isin">ISIN: {{ alertData.isin }}</span>
-                           <span class="tag type" :class="alertData.trade_type.toLowerCase()">{{ alertData.trade_type }}</span>
-                           <span class="status-badge" :class="getStatusClass(alertData.status)">{{ alertData.status }}</span>
-                           <!-- Cluster Theme Badge -->
-                           <span v-if="alertData.narrative_theme" class="tag theme-badge" title="AI Generated Theme">
-                               {{ alertData.narrative_theme }}
-                           </span>
-                        </div>
-                        <div class="alert-metrics">
-                            <span class="metric-item"><strong>Alert Date:</strong> {{ alertData.alert_date }}</span>
-                            <span class="separator">•</span>
-                            <span class="metric-item"><strong>Start:</strong> {{ alertData.start_date }}</span>
-                            <span class="separator">•</span>
-                            <span class="metric-item"><strong>End:</strong> {{ alertData.end_date }}</span>
-                            <span class="separator">•</span>
-                            <span class="metric-item"><strong>Articles:</strong> {{ news ? news.length : 0 }}</span>
-                            <span class="separator">•</span>
-                            <span class="metric-item"><strong>Buy Qty:</strong> {{ alertData.buy_quantity?.toLocaleString() || '-' }}</span>
-                            <span class="separator">•</span>
-                            <span class="metric-item"><strong>Sell Qty:</strong> {{ alertData.sell_quantity?.toLocaleString() || '-' }}</span>
-                        </div>
-                    </div>
-                    <div class="header-actions">
-                        <button class="action-btn approve-btn" @click="updateStatus('Approved')" :disabled="alertData.status === 'Approved'">✓ Approve for L2</button>
-                        <button class="action-btn reject-btn" @click="updateStatus('Rejected')" :disabled="alertData.status === 'Rejected'">✗ Reject</button>
-                    </div>
-                </div>
-            </div>
-        </header>
+        <AlertHeader 
+            :alertData="alertData" 
+            :alertId="alertId" 
+            :newsCount="news ? news.length : 0"
+            @update-status="updateStatus"
+            @toggle-agent="$emit('toggle-agent')"
+        />
         
         <div class="dashboard-grid">
-            <div class="card chart-panel">
-                <div class="card-header chart-header">
-                    <h3>Price Performance</h3>
-                    <div class="header-controls">
-                        <div class="view-toggle">
-                            <button :class="{ active: viewMode === 'chart' && chartType === 'line' }" @click="viewMode = 'chart'; chartType = 'line'">Line</button>
-                            <button :class="{ active: viewMode === 'chart' && chartType === 'candle' }" @click="viewMode = 'chart'; chartType = 'candle'">Candle</button>
-                            <button :class="{ active: viewMode === 'table' }" @click="viewMode = 'table'">Table</button>
-                        </div>
-                        <!-- Price Mode Toggle - only shown for line charts -->
-                        <div v-if="viewMode === 'chart' && chartType === 'line'" class="view-toggle">
-                            <button :class="{ active: priceMode === 'actual' }" @click="priceMode = 'actual'">Actual</button>
-                            <button :class="{ active: priceMode === 'rebased' }" @click="priceMode = 'rebased'">Rebased</button>
-                        </div>
-                        <div class="period-selector">
-                            <button v-for="period in periods" :key="period.value" :class="{ active: selectedPeriod === period.value }" @click="selectedPeriod = period.value">{{ period.label }}</button>
-                        </div>
-                    </div>
-                </div>
-                <div class="card-body chart-wrapper">
-                    <div v-if="isLoadingPrices" class="loading-overlay"><div class="spinner"></div></div>
-                    
-                    <template v-if="!isLoadingPrices">
-                        <v-chart v-if="viewMode === 'chart' && chartLabels.length" ref="chartRef" class="chart" :option="chartOptions" autoresize />
-                        
-                        <div v-else-if="viewMode === 'table' && chartLabels.length" class="table-container">
-                            <table class="data-table">
-                                <thead>
-                                    <tr>
-                                        <th>Date</th>
-                                        <th>Close</th>
-                                        <th>Rebased</th>
-                                        <th>Ind. Rebased</th>
-                                        <th v-for="mat in activeMaterialityColumns" :key="mat" :style="{ color: getMaterialityColor(mat) }">{{ mat }}</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <tr v-for="row in tableData" :key="row.date">
-                                        <td>{{ row.date }}</td>
-                                        <td>{{ row.tickerClose }}</td>
-                                        <td>{{ row.tickerRebased }}</td>
-                                        <td>{{ row.industryRebased }}</td>
-                                        <td v-for="mat in activeMaterialityColumns" :key="mat" class="count-cell">
-                                            <span v-if="row.counts[mat] > 0" class="count-badge" :style="{ backgroundColor: getMaterialityColor(mat) }">
-                                                {{ row.counts[mat] }}
-                                            </span>
-                                            <span v-else class="empty-cell">-</span>
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                        
-                        <div v-else class="loading-state">No price data available.</div>
-                    </template>
-                </div>
-            </div>
+            <AlertChart 
+                class="layout-chart"
+                :chartLabels="chartLabels"
+                :chartOptions="chartOptions"
+                v-model:viewMode="viewMode"
+                v-model:chartType="chartType"
+                v-model:priceMode="priceMode"
+                v-model:selectedPeriod="selectedPeriod"
+                :isLoading="isLoadingPrices"
+                :tableData="tableData"
+                :activeMaterialityColumns="activeMaterialityColumns"
+                :config="config"
+            />
             
-            <div class="card news-panel">
-                <div class="card-header news-header">
-                    <h3>Relevant News</h3>
-                    <div class="theme-selector">
-                         <select v-model="activeTheme" class="theme-dropdown">
-                            <option v-for="theme in uniqueThemes" :key="theme" :value="theme">{{ theme.replace(/_/g, ' ') }}</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="card-body scrollable">
-                    
-                    <!-- Executive Summary Card -->
-                    <div class="executive-summary-wrapper">
-                        <div v-if="alertData.narrative_summary" class="executive-summary">
-                            <div class="summary-header">
-                                <div class="header-left-group">
-                                    <h4><span class="ai-icon">AI</span> Investigation Summary</h4>
-                                    <div class="summary-tabs">
-                                        <button :class="{ active: summaryTab === 'narrative' }" @click="summaryTab = 'narrative'">Summary</button>
-                                        <button :class="{ active: summaryTab === 'recommendation' }" @click="summaryTab = 'recommendation'">Recommendation</button>
-                                    </div>
-                                </div>
-                                <button class="refresh-btn" @click="refreshSummary" :disabled="isGeneratingSummary" title="Regenerate Summary">
-                                    <div v-if="isGeneratingSummary" class="spinner-icon"></div>
-                                    <span v-else>↻</span>
-                                </button>
-                            </div>
-                            <div :class="{ 'dimmed': isGeneratingSummary }">
-                                <!-- NARRATIVE TAB -->
-                                <div v-if="summaryTab === 'narrative'">
-                                    <h4>
-                                        <span class="theme-label">Theme:</span> 
-                                        {{ alertData.narrative_theme }}
-                                    </h4>
-                                    <p class="summary-text">{{ alertData.narrative_summary }}</p>
-                                    
-                                    <!-- Event Breakdown Grid -->
-                                    <div class="events-grid">
-                                        <div v-if="parseEvents(alertData.bullish_events).length" class="event-col bullish">
-                                            <h5><span class="indicator">+</span> Bullish Factors</h5>
-                                            <ul>
-                                                <li v-for="(event, i) in parseEvents(alertData.bullish_events)" :key="i">{{ event }}</li>
-                                            </ul>
-                                        </div>
-                                        
-                                        <div v-if="parseEvents(alertData.bearish_events).length" class="event-col bearish">
-                                            <h5><span class="indicator">-</span> Bearish Factors</h5>
-                                            <ul>
-                                                <li v-for="(event, i) in parseEvents(alertData.bearish_events)" :key="i">{{ event }}</li>
-                                            </ul>
-                                        </div>
-                                        
-                                        <div v-if="parseEvents(alertData.neutral_events).length" class="event-col neutral">
-                                            <h5><span class="indicator">~</span> Neutral / Context</h5>
-                                            <ul>
-                                                <li v-for="(event, i) in parseEvents(alertData.neutral_events)" :key="i">{{ event }}</li>
-                                            </ul>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- RECOMMENDATION TAB -->
-                                <div v-if="summaryTab === 'recommendation'">
-                                    <div v-if="alertData.recommendation" class="recommendation-banner" :class="recommendationClass">
-                                        <div class="rec-icon">
-                                            <span v-if="recommendationClass === 'reject'">✅</span>
-                                            <span v-else>⚠️</span>
-                                        </div>
-                                        <div class="rec-text">
-                                            <div class="rec-title">
-                                                {{ alertData.recommendation }}
-                                            </div>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="reasoning-section">
-                                        <h5>Decision Logic & Evidence:</h5>
-                                        <ul>
-                                            <li v-for="(point, i) in parseReasoning(alertData.recommendation_reason)" :key="i">{{ point }}</li>
-                                        </ul>
-                                        <div v-if="!alertData.recommendation_reason" class="empty-reasoning">
-                                            No detailed reasoning available. Regenerate the summary to get facts.
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <span class="summary-meta">Generated: {{ new Date(alertData.summary_generated_at).toLocaleString() }}</span>
-                        </div>
-                        
-                        <div v-else class="summary-placeholder">
-                             <button class="generate-btn" @click="analyzeArticles" :disabled="isGeneratingSummary">
-                                <span v-if="isGeneratingSummary" class="spinner-sm"></span>
-                                <span v-else>Analyze with AI</span>
-                            </button>
-                        </div>
-                    </div>
-
-                    <div v-if="filteredNews.length > 0" class="news-feed">
-                        <div v-for="article in filteredNews" :key="article.art_id" class="news-item" :class="{ 'analyzed': article.analysis }">
-                            <div class="news-meta">
-                                <span class="news-date">{{ article.created_date }}</span>
-                                <span class="news-theme">{{ article.theme.replace(/_/g, ' ') }}</span>
-                            </div>
-                            <h4 class="news-title">{{ article.title }}</h4>
-                            
-                            <!-- AI Analysis Block -->
-                            <div v-if="article.analysis" class="analysis-block">
-                                <div class="analysis-label">AI Logic:</div>
-                                <p class="analysis-content">{{ article.analysis }}</p>
-                            </div>
-                            
-                            <p v-if="article.summary" class="news-summary">{{ article.summary }}</p>
-                            
-                            <div class="news-footer">
-                                <span class="sentiment-indicator" :class="article.sentiment.split(':')[0].toLowerCase()">{{ article.sentiment.split(':')[0] }}</span>
-                                <template v-if="config && config.has_materiality && article.materiality">
-                                    <span class="separator">•</span>
-                                    <span class="materiality-indicator" 
-                                          :style="{ color: getMaterialityColor(article.materiality) }"
-                                          @mouseenter="handleTooltipEnter($event, article.materiality_details)"
-                                          @mouseleave="handleTooltipLeave"
-                                    >
-                                        {{ article.materiality }}
-                                    </span>
-                                </template>
-                                
-                                <template v-if="article.impact_label">
-                                    <span class="separator">•</span>
-                                    <span class="impact-badge" :class="article.impact_label.toLowerCase()">
-                                        <span class="impact-label">{{ article.impact_label }}</span>
-                                        <span class="impact-score" v-if="article.impact_score">({{ article.impact_score.toFixed(1) }}σ)</span>
-                                    </span>
-                                </template>
-                            </div>
-                        </div>
-                    </div>
-                     <div v-else class="empty-state">No news found for this specific theme.</div>
-                </div>
-            </div>
+            <AlertNews 
+                class="layout-news"
+                :news="filteredNews"
+                :themes="uniqueThemes"
+                v-model:activeTheme="activeTheme"
+                :config="config"
+                @hover-materiality="handleTooltipEnter"
+                @leave-materiality="handleTooltipLeave"
+            >
+                <template #summary>
+                    <AlertSummary 
+                        :alertData="alertData"
+                        :isGeneratingSummary="isGeneratingSummary"
+                        @refresh="refreshSummary"
+                        @analyze="analyzeArticles"
+                    />
+                </template>
+            </AlertNews>
         </div>
     </div>
     <div v-else class="loading-screen"><div class="spinner"></div> Generating Dashboard...</div>
@@ -1123,174 +871,63 @@ const recommendationClass = computed(() => {
 </template>
 
 <style scoped>
-/* Added analysis styles */
-.news-item.analyzed {
-    border-left: 3px solid #7c3aed;
-    background: #fdfbff;
-}
-
-/* Recommendation Banner Styles */
-.recommendation-banner {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    padding: 12px;
-    border-radius: 8px;
-    margin-bottom: 16px;
-    border: 1px solid transparent;
-}
-.recommendation-banner.reject {
-    background-color: #f0fdf4; /* Green-50 */
-    border-color: #bbf7d0;     /* Green-200 */
-    color: #166534;            /* Green-800 */
-}
-.recommendation-banner.approve_l2 {
-    background-color: #fef2f2; /* Red-50 */
-    border-color: #fecaca;     /* Red-200 */
-    color: #991b1b;            /* Red-800 */
-}
-.rec-icon {
-    font-size: 1.5rem;
-    line-height: 1;
-}
-.rec-title {
-    font-weight: 700;
-    font-size: 0.9rem;
-    text-transform: uppercase;
-    margin-bottom: 4px;
-}
-.rec-reason {
-    font-size: 0.9rem;
-    opacity: 0.9;
-    line-height: 1.4;
-}
-
-.spinner-icon {
-    width: 14px;
-    height: 14px;
-    border: 2px solid #cbd5e1;
-    border-top-color: #6366f1;
-    border-radius: 50%;
-    animation: Spin 0.8s linear infinite;
-}
-
-.dimmed {
-    opacity: 0.5;
-    pointer-events: none;
-    transition: opacity 0.3s ease;
-}
-
-@keyframes Spin {
-    to { transform: rotate(360deg); }
-}
-
-.analysis-block {
-    margin: 8px 0 12px 0;
-    padding: 8px 12px;
-    background: #f3e8ff;
-    border-radius: 6px;
-    font-size: 0.85rem;
-    border: 1px solid #e9d5ff;
-}
-
-.analysis-label {
-    font-weight: 700;
-    color: #6b21a8;
-    margin-bottom: 4px;
-    font-size: 0.75rem;
-    text-transform: uppercase;
-}
-
-
-
-.events-grid {
-    display: flex;
-    gap: 1.5rem;
-    margin-top: 1rem;
-    padding-top: 1rem;
-    border-top: 1px solid #e2e8f0;
-}
-.event-col { flex: 1; }
-.event-col h5 { margin: 0 0 0.5rem 0; font-size: 0.85rem; font-weight: 700; display: flex; align-items: center; gap: 6px; }
-.event-col ul { margin: 0; padding-left: 1.2rem; }
-.event-col li { font-size: 0.85rem; color: #475569; margin-bottom: 0.25rem; }
-.event-col.bullish h5 { color: #166534; }
-.event-col.bullish .indicator { background: #dcfce7; color: #166534; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; }
-.event-col.bearish h5 { color: #991b1b; }
-.event-col.bearish .indicator { background: #fee2e2; color: #991b1b; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; }
-.event-col.neutral h5 { color: #475569; }
-.event-col.neutral .indicator { background: #f1f5f9; color: #475569; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; }
-
 /* Original styles below */
-.detail-container { background-color: #f8fafc; height: 100%; width: 100%; display: flex; flex-direction: column; overflow-y: auto; font-family: 'Inter', sans-serif; }
-.header { background: white; border-bottom: 1px solid #e2e8f0; padding: 1rem 2rem; box-shadow: 0 1px 2px rgba(0,0,0,0.05); flex-shrink: 0; }
-.header-main { display: flex; justify-content: space-between; align-items: flex-start; margin-top: 0.5rem; }
-.header-left { flex: 1; }
-.header-actions { display: flex; gap: 0.75rem; }
-.action-btn { padding: 0.5rem 1rem; border: none; border-radius: 0.5rem; font-size: 0.875rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
-.action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.approve-btn { background: #dcfce7; color: #166534; }
-.approve-btn:hover:not(:disabled) { background: #bbf7d0; }
-.reject-btn { background: #fee2e2; color: #991b1b; }
-.reject-btn:hover:not(:disabled) { background: #fecaca; }
-h1 { margin: 0; font-size: 1.5rem; color: #0f172a; display: flex; align-items: baseline; gap: 0.75rem; }
-.subtitle { font-size: 1rem; color: #64748b; font-weight: 400; }
-.meta-tags { margin-top: 0.75rem; display: flex; gap: 0.5rem; align-items: center; }
-.tag { padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; }
-.tag.isin { background-color: #f1f5f9; color: #475569; }
-.tag.type { text-transform: uppercase; }
-.tag.type.buy { background-color: #dcfce7; color: #166534; }
-.tag.type.sell { background-color: #fee2e2; color: #991b1b; }
-.status-badge { padding: 0.25rem 0.75rem; border-radius: 0.375rem; font-size: 0.75rem; font-weight: 600; }
-.status-pending { background-color: #fef3c7; color: #92400e; }
-.status-approved { background-color: #dcfce7; color: #166534; }
-.status-rejected { background-color: #fee2e2; color: #991b1b; }
-.alert-metrics { margin-top: 12px; font-size: 0.9em; color: #4b5563; display: flex; align-items: center; gap: 8px; }
-.metric-item strong { font-weight: 600; color: #1f2937; }
-.separator { color: #9ca3af; }
-.dashboard-grid { flex: 1; display: flex; flex-direction: row; padding: 1.5rem 2rem; gap: 1.5rem; height: 100%; min-height: 0; box-sizing: border-box; width: 100%; }
-.card { background: white; border-radius: 0.75rem; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; /* overflow removed to allow tooltip */ }
-.card-header { padding: 1rem 1.5rem; border-bottom: 1px solid #f1f5f9; background: #ffffff; flex-shrink: 0; }
-.chart-header, .news-header { display: flex; justify-content: space-between; align-items: center; }
-.period-selector { display: flex; gap: 0.5rem; background: #f1f5f9; padding: 0.25rem; border-radius: 6px; }
-.period-selector button { border: none; background: transparent; padding: 0.25rem 0.5rem; font-size: 0.75rem; color: #64748b; border-radius: 4px; cursor: pointer; font-weight: 500; }
-.period-selector button:hover { color: #334155; background: rgba(255,255,255,0.5); }
-.period-selector button.active { background: white; color: #3b82f6; box-shadow: 0 1px 2px rgba(0,0,0,0.05); font-weight: 600; }
-.loading-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255,255,255,0.7); display: flex; align-items: center; justify-content: center; z-index: 10; }
-.theme-dropdown { padding: 0.25rem 0.5rem; border: 1px solid #cbd5e1; border-radius: 0.375rem; font-size: 0.875rem; color: #334155; background-color: white; }
-.card-header h3 { margin: 0; font-size: 1rem; font-weight: 600; color: #334155; }
-.card-body { flex: 1; position: relative; min-height: 0; }
-.chart-panel { flex: 2; min-width: 0; height: 100%; }
-.chart-wrapper { height: 100%; width: 100%; }
-.chart { width: 100%; height: 100%; min-height: 400px; }
-.news-panel { flex: 1; min-width: 450px; display: flex; flex-direction: column; height: 100%; }
-.scrollable { overflow-y: auto; padding: 0; height: 100%; }
-.news-feed { padding: 1.5rem; }
-.news-item { margin-bottom: 1.25rem; padding: 1rem; background: #f8fafc; border-radius: 0.5rem; border: 1px solid #e2e8f0; transition: all 0.2s ease; overflow: visible; /* Ensure tooltip can show */ }
-.news-item:last-child { margin-bottom: 0; }
-.news-meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; font-size: 0.75rem; }
-.news-date { color: #64748b; font-weight: 500; }
-.news-theme { color: #6366f1; font-weight: 600; background: #eef2ff; padding: 0 0.5rem; border-radius: 4px; font-size: 0.7rem; }
-.news-title { margin: 0 0 0.5rem 0; font-size: 1rem; color: #1e293b; line-height: 1.4; }
-.news-summary { font-size: 0.875rem; color: #475569; line-height: 1.5; margin-bottom: 0.75rem; }
-.sentiment-indicator { font-size: 0.75rem; font-weight: 600; }
-.sentiment-indicator.bullish { color: #16a34a; }
-.sentiment-indicator.bearish { color: #dc2626; }
-.sentiment-indicator { font-size: 0.75rem; font-weight: 600; }
-.sentiment-indicator.bullish { color: #16a34a; }
-.sentiment-indicator.bearish { color: #dc2626; }
-.sentiment-indicator.neutral { color: #64748b; }
-.separator { margin: 0 0.5rem; color: #cbd5e1; }
-
-/* Materiality Tooltip Styles - JS Driven */
-.materiality-indicator {
-    font-size: 0.75rem;
-    font-weight: 700;
-    cursor: help;
-    display: inline-block;
-    color: #475569;
+.detail-container { 
+    background-color: #f8fafc; 
+    height: 100%; 
+    width: 100%; 
+    display: flex; 
+    flex-direction: column; 
+    overflow: hidden; /* Main container fixed */
+    font-family: 'Inter', sans-serif;
+    container-type: inline-size; /* Enable Container Query */
+    container-name: details;
 }
 
+/* Default: Side-by-Side (Full Height) */
+.dashboard-grid { 
+    flex: 1; 
+    display: flex; 
+    flex-direction: row; /* Force row by default */
+    padding: 1.5rem 2rem; 
+    gap: 1.5rem; 
+    height: 100%; 
+    min-height: 0; 
+    box-sizing: border-box; 
+    width: 100%; 
+    overflow: hidden; /* Internal panels scroll */
+}
+
+/* Items fill height in side-by-side */
+.layout-chart {
+    flex: 2;
+    min-width: 0; 
+    height: 100%;
+}
+
+.layout-news {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+}
+
+/* Stacked Layout via Container Query */
+@container details (max-width: 1100px) {
+    .dashboard-grid {
+        flex-direction: column;
+        height: auto;
+        overflow-y: auto; /* Grid scrolls when stacked */
+    }
+    
+    .layout-chart, .layout-news {
+        flex: none;
+        width: 100%;
+        height: auto;
+        min-height: 500px;
+    }
+}
+
+/* Global Tooltip Styles */
 .details-tooltip {
     position: fixed;
     z-index: 9999;
@@ -1305,10 +942,6 @@ h1 { margin: 0; font-size: 1.5rem; color: #0f172a; display: flex; align-items: b
     line-height: 1.4;
 }
 
-.details-tooltip::after {
-    /* Optional: custom arrow logic implies complex positioning. Skipping for fixed tooltip relative to mouse */
-}
-
 .tip-row {
     margin-bottom: 4px;
     border-bottom: 1px solid #334155;
@@ -1320,223 +953,9 @@ h1 { margin: 0; font-size: 1.5rem; color: #0f172a; display: flex; align-items: b
     padding-bottom: 0;
 }
 
-.price-change { font-size: 0.75rem; font-weight: 600; }
-.price-change.positive { color: #16a34a; }
-.price-change.negative { color: #dc2626; }
-
-/* Impact Badges */
-.impact-badge { font-size: 0.75rem; font-weight: 600; display: inline-flex; gap: 4px; align-items: center; }
-.impact-badge.noise { color: #94a3b8; }
-.impact-badge.significant { color: #d97706; }
-.impact-badge.extreme { color: #7c3aed; background: #f3e8ff; padding: 0 4px; border-radius: 4px; }
-.impact-score { font-weight: 400; font-size: 0.7rem; opacity: 0.8; }
-.loading-screen, .loading-state { display: flex; align-items: center; justify-content: center; height: 100%; color: #64748b; font-weight: 500; gap: 10px; }
+.loading-screen { display: flex; align-items: center; justify-content: center; height: 100%; color: #64748b; font-weight: 500; gap: 10px; }
 .spinner { width: 20px; height: 20px; border: 3px solid #e2e8f0; border-top-color: #3b82f6; border-radius: 50%; animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.empty-state { padding: 2rem; text-align: center; color: #94a3b8; font-style: italic; display: flex; align-items: center; justify-content: center; height: 100%; }
 
-.header-controls { display: flex; gap: 1rem; align-items: center; }
-.view-toggle { display: flex; background: #f1f5f9; padding: 2px; border-radius: 6px; }
-.view-toggle button { border: none; background: transparent; padding: 4px 12px; font-size: 0.75rem; color: #64748b; border-radius: 4px; cursor: pointer; font-weight: 500; }
-.view-toggle button:hover { color: #334155; }
-.view-toggle button.active { background: white; color: #3b82f6; box-shadow: 0 1px 2px rgba(0,0,0,0.05); font-weight: 600; }
 
-.table-container { height: 100%; overflow: auto; padding: 0; }
-.data-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; text-align: right; }
-.data-table th, .data-table td { padding: 8px 12px; border-bottom: 1px solid #f1f5f9; white-space: nowrap; }
-.data-table th { position: sticky; top: 0; background: #fff; font-weight: 600; color: #64748b; text-align: right; z-index: 1; }
-.data-table th:first-child, .data-table td:first-child { text-align: left; }
-.data-table tbody tr:hover { background-color: #f8fafc; }
-.count-cell { text-align: center !important; }
-.data-table th.count-header { text-align: center !important; } /* Need to adjust th above if matching */
-.count-badge { color: white; border-radius: 12px; padding: 2px 8px; font-size: 0.7rem; font-weight: bold; min-width: 20px; display: inline-block; }
-.empty-cell { color: #cbd5e1; }
-
-/* AI Summary Styles */
-.theme-badge {
-    background-color: #f3e8ff;
-    color: #7e22ce;
-    border: 1px solid #d8b4fe;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-}
-
-.executive-summary-wrapper {
-    border-bottom: 1px solid #e2e8f0;
-    background: #f8fafc;
-}
-
-.executive-summary {
-    background: linear-gradient(to right, #fbf7ff, #f8fafc);
-    padding: 1.25rem;
-}
-
-.summary-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 0.75rem;
-}
-
-.executive-summary h4 {
-    margin: 0;
-    color: #4c1d95;
-    font-size: 0.9rem;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-weight: 700;
-}
-
-.ai-icon {
-    background: linear-gradient(135deg, #4c1d95, #7c3aed);
-    color: white;
-    font-size: 0.65rem;
-    font-weight: 700;
-    padding: 2px 6px;
-    border-radius: 4px;
-    letter-spacing: 0.5px;
-}
-
-.executive-summary p {
-    margin: 0;
-    font-size: 0.9rem;
-    color: #334155;
-    line-height: 1.6;
-}
-
-.summary-meta {
-    display: block;
-    margin-top: 8px;
-    font-size: 0.7rem;
-    color: #94a3b8;
-}
-
-.refresh-btn {
-    background: transparent;
-    border: none;
-    color: #94a3b8;
-    cursor: pointer;
-    font-size: 1rem;
-    padding: 2px 6px;
-    border-radius: 4px;
-}
-
-.refresh-btn:hover {
-    background: #e2e8f0;
-    color: #64748b;
-}
-
-.summary-placeholder {
-    padding: 1rem;
-    display: flex;
-    justify-content: center;
-    background: #fff;
-}
-
-.generate-btn {
-    background: linear-gradient(135deg, #7c3aed, #6d28d9);
-    color: white;
-    border: none;
-    padding: 0.6rem 1.2rem;
-    border-radius: 6px;
-    font-weight: 600;
-    font-size: 0.85rem;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    box-shadow: 0 2px 4px rgba(124, 58, 237, 0.2);
-    transition: all 0.2s;
-}
-
-.generate-btn:hover:not(:disabled) {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 6px rgba(124, 58, 237, 0.3);
-}
-
-.generate-btn:disabled {
-    opacity: 0.7;
-    cursor: wait;
-}
-
-.spinner-sm {
-    width: 14px;
-    height: 14px;
-    border: 2px solid rgba(255,255,255,0.3);
-    border-top-color: white;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-}
-
-/* Header Grouping for Tabs */
-.header-left-group {
-    display: flex;
-    align-items: center;
-    gap: 1.5rem;
-}
-
-/* Tabs Styling */
-.summary-tabs {
-    display: flex;
-    background: #e2e8f0;
-    padding: 3px;
-    border-radius: 6px;
-    gap: 2px;
-}
-
-.summary-tabs button {
-    border: none;
-    background: transparent;
-    padding: 4px 12px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: #64748b;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-
-.summary-tabs button:hover {
-    color: #334155;
-}
-
-.summary-tabs button.active {
-    background: white;
-    color: #4c1d95; /* Deep Purple to match header */
-    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-}
-
-/* Reasoning Section */
-.reasoning-section {
-    padding-top: 0.5rem;
-}
-
-.reasoning-section h5 {
-    margin: 0 0 0.5rem 0;
-    font-size: 0.85rem;
-    font-weight: 700;
-    color: #334155;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.reasoning-section ul {
-    margin: 0;
-    padding-left: 1.25rem;
-}
-
-.reasoning-section li {
-    font-size: 0.9rem;
-    color: #334155;
-    margin-bottom: 0.5rem;
-    line-height: 1.5;
-}
-
-.empty-reasoning {
-    font-style: italic;
-    color: #94a3b8;
-    font-size: 0.85rem;
-}
 </style>
