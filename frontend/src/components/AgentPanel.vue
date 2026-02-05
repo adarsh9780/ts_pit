@@ -1,5 +1,18 @@
 <script setup>
-import { ref, onMounted, watch, nextTick } from 'vue';
+import { ref, onMounted, watch, nextTick, computed } from 'vue';
+import { marked } from 'marked';
+
+// Configure marked for safe rendering
+marked.setOptions({
+    breaks: true,
+    gfm: true  // GitHub Flavored Markdown (tables, strikethrough, etc.)
+});
+
+// Helper to render markdown content
+const renderMarkdown = (content) => {
+    if (!content) return '';
+    return marked.parse(content);
+};
 
 const props = defineProps({
   alertId: String
@@ -17,14 +30,35 @@ const showTools = ref(false); // Toggle to show tool usage details
 const sessionId = ref('');
 const messagesContainer = ref(null);
 
-// Generate Session ID
-onMounted(() => {
+// Fetch chat history from backend
+const fetchChatHistory = async (sid) => {
+    try {
+        const response = await fetch(`http://localhost:8000/agent/history/${sid}`);
+        if (response.ok) {
+            const data = await response.json();
+            if (data.messages && data.messages.length > 0) {
+                messages.value = data.messages;
+                scrollToBottom();
+                return;
+            }
+        }
+    } catch (e) {
+        console.error('Failed to fetch chat history:', e);
+    }
+    // Keep the default greeting if no history
+};
+
+// Generate Session ID and load history
+onMounted(async () => {
     let stored = localStorage.getItem('agent_session_id');
     if (!stored) {
         stored = crypto.randomUUID();
         localStorage.setItem('agent_session_id', stored);
     }
     sessionId.value = stored;
+    
+    // Fetch persisted chat history
+    await fetchChatHistory(stored);
 });
 
 // Scroll to bottom
@@ -157,7 +191,7 @@ const stopResize = () => {
           <div v-for="(msg, index) in messages" :key="index" :class="['message', msg.role]">
               
               <div class="message-content">
-                  <div v-if="msg.content" class="text" v-html="msg.content.replace(/\n/g, '<br>')"></div>
+                  <div v-if="msg.content" class="text markdown-content" v-html="renderMarkdown(msg.content)"></div>
                   
                   <!-- Tool Usage Indicators -->
                   <div v-if="msg.tools && msg.tools.length > 0" class="tools-container">
@@ -275,6 +309,103 @@ const stopResize = () => {
     color: var(--color-text-main);
     border: 1px solid var(--color-border);
     border-bottom-left-radius: 2px;
+}
+
+/* Markdown Content Styles */
+.markdown-content {
+    line-height: 1.6;
+}
+
+.markdown-content :deep(p) {
+    margin: 0 0 0.5em 0;
+}
+
+.markdown-content :deep(p:last-child) {
+    margin-bottom: 0;
+}
+
+.markdown-content :deep(ul),
+.markdown-content :deep(ol) {
+    margin: 0.5em 0;
+    padding-left: 1.5em;
+}
+
+.markdown-content :deep(li) {
+    margin: 0.25em 0;
+}
+
+.markdown-content :deep(strong) {
+    font-weight: 600;
+    color: var(--color-text-main);
+}
+
+.markdown-content :deep(em) {
+    font-style: italic;
+}
+
+.markdown-content :deep(code) {
+    background: rgba(0, 0, 0, 0.08);
+    padding: 0.15em 0.4em;
+    border-radius: 3px;
+    font-family: 'SF Mono', Monaco, Consolas, monospace;
+    font-size: 0.9em;
+}
+
+.markdown-content :deep(pre) {
+    background: rgba(0, 0, 0, 0.06);
+    padding: 0.75em;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 0.5em 0;
+}
+
+.markdown-content :deep(pre code) {
+    background: none;
+    padding: 0;
+}
+
+/* Table Styles */
+.markdown-content :deep(table) {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.75em 0;
+    font-size: 0.9em;
+}
+
+.markdown-content :deep(th),
+.markdown-content :deep(td) {
+    border: 1px solid var(--color-border);
+    padding: 0.5em 0.75em;
+    text-align: left;
+}
+
+.markdown-content :deep(th) {
+    background: var(--color-surface-hover);
+    font-weight: 600;
+}
+
+.markdown-content :deep(tr:nth-child(even)) {
+    background: rgba(0, 0, 0, 0.02);
+}
+
+.markdown-content :deep(h1),
+.markdown-content :deep(h2),
+.markdown-content :deep(h3),
+.markdown-content :deep(h4) {
+    margin: 0.75em 0 0.5em 0;
+    font-weight: 600;
+}
+
+.markdown-content :deep(h1) { font-size: 1.3em; }
+.markdown-content :deep(h2) { font-size: 1.2em; }
+.markdown-content :deep(h3) { font-size: 1.1em; }
+.markdown-content :deep(h4) { font-size: 1em; }
+
+.markdown-content :deep(blockquote) {
+    border-left: 3px solid var(--color-primary);
+    margin: 0.5em 0;
+    padding-left: 1em;
+    color: var(--color-text-subtle);
 }
 
 .tools-container {

@@ -721,6 +721,53 @@ class ChatRequest(BaseModel):
     alert_id: Optional[str] = None
 
 
+@app.get("/agent/history/{session_id}")
+async def get_chat_history(session_id: str, request: Request):
+    """
+    Retrieve chat history for a given session from the LangGraph checkpointer.
+    Returns messages in a format suitable for the frontend.
+    """
+    agent = request.app.state.agent
+    config = {"configurable": {"thread_id": session_id}}
+
+    try:
+        # Get the current state from the checkpointer
+        state = await agent.aget_state(config)
+
+        if not state or not state.values:
+            return {"messages": []}
+
+        messages = state.values.get("messages", [])
+
+        # Convert LangChain messages to frontend format
+        frontend_messages = []
+        for msg in messages:
+            # Skip system messages (they're injected by context_loader)
+            if hasattr(msg, "type") and msg.type == "system":
+                continue
+
+            role = "user" if (hasattr(msg, "type") and msg.type == "human") else "agent"
+            content = msg.content if hasattr(msg, "content") else str(msg)
+
+            # Skip empty messages
+            if not content or not content.strip():
+                continue
+
+            frontend_messages.append(
+                {
+                    "role": role,
+                    "content": content,
+                    "tools": [],  # Historical messages don't need tool indicators
+                }
+            )
+
+        return {"messages": frontend_messages}
+
+    except Exception as e:
+        print(f"Error fetching chat history: {e}")
+        return {"messages": []}
+
+
 @app.post("/agent/chat")
 async def chat_agent(request: Request, body: ChatRequest):
     """
