@@ -123,14 +123,31 @@ def generate_cluster_summary(
     structured_llm = llm.with_structured_output(ClusterSummaryOutput)
 
     # Prepare article text
-    # Prioritize AI Theme/Analysis if available
+    # Filter articles based on User Request: "At least one H in materiality OR Significant Impact"
+    filtered_articles = []
+    for a in articles:
+        mat = a.get("materiality", "")
+        impact = a.get("impact_score") or 0.0
+
+        # Logic: High Materiality Component OR High Z-Score (> 2.0)
+        if "H" in mat or abs(impact) >= 2.0:
+            filtered_articles.append(a)
+
+    # Fallback: If filter is too aggressive (empty/low), use top 15 by default sort
+    if len(filtered_articles) < 3:
+        filtered_articles = articles[:15]
+    else:
+        # Cap to avoid context overflow (though 1.5 Pro is huge, cleaner is better)
+        filtered_articles = filtered_articles[:30]
+
     article_lines = []
-    for a in articles[:15]:
+    for a in filtered_articles:
         title = a.get("title", "No Title")
         summary = a.get("summary", "No Summary")
         theme = a.get("theme")
         analysis = a.get("analysis")
         impact = a.get("impact_score")
+        materiality = a.get("materiality")  # informative to add to context
 
         entry = f"Title: {title}\nSummary: {summary}"
         if theme:
@@ -139,6 +156,8 @@ def generate_cluster_summary(
             entry += f"\nAI ANALYSIS: {analysis}"
         if impact:
             entry += f"\nIMPACT SCORE (Z-Score): {impact}"
+        if materiality:
+            entry += f"\nMATERIALITY SCORE: {materiality}"
 
         article_lines.append(entry)
 
@@ -171,6 +190,10 @@ def generate_cluster_summary(
             "bullish_events": result.bullish_events or [],
             "bearish_events": result.bearish_events or [],
             "neutral_events": result.neutral_events or [],
+            "recommendation": result.recommendation
+            or "APPROVE_L2",  # Default to safety
+            "recommendation_reason": result.recommendation_reason
+            or "No recommendation generated.",
         }
     except Exception as e:
         print(f"LLM Structured Output Error: {e}")
@@ -180,6 +203,8 @@ def generate_cluster_summary(
             "bullish_events": [],
             "bearish_events": [],
             "neutral_events": [],
+            "recommendation": "APPROVE_L2",
+            "recommendation_reason": "Error during analysis.",
         }
 
 

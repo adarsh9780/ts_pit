@@ -39,6 +39,8 @@ tables:
       bullish_events: "bullish_events"
       bearish_events: "bearish_events"
       neutral_events: "neutral_events"
+      recommendation: "recommendation"
+      recommendation_reason: "recommendation_reason"
 
   # News/Articles table (required)
   articles:

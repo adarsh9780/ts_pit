@@ -55,6 +55,8 @@ def run_migrations():
         "bullish_events": "TEXT",
         "bearish_events": "TEXT",
         "neutral_events": "TEXT",
+        "recommendation": "TEXT",
+        "recommendation_reason": "TEXT",
     }
 
     for col, dtype in new_cols.items():
@@ -365,16 +367,19 @@ def generate_summary(alert_id: str, request: Request):
     ai_theme_col = config.get_column("article_themes", "theme")
     ai_summary_col = config.get_column("article_themes", "summary")
     ai_analysis_col = config.get_column("article_themes", "analysis")
+    ai_p1_col = config.get_column("article_themes", "p1_prominence")
 
     # Join query to prefer AI analysis if available
     query = f'''
         SELECT 
             a."{title_col}" as title, 
             a."{summary_col}" as original_summary,
+            a."{date_col}" as created_date, 
             a."{impact_score_col}" as impact_score,
             t."{ai_theme_col}" as ai_theme,
             t."{ai_summary_col}" as ai_summary,
-            t."{ai_analysis_col}" as ai_analysis
+            t."{ai_analysis_col}" as ai_analysis,
+            t."{ai_p1_col}" as ai_p1
         FROM "{articles_table}" a
         LEFT JOIN "{themes_table}" t ON a."{art_id_col}" = t."{theme_art_id_col}"
         WHERE a."{art_isin_col}" = ?
@@ -409,6 +414,12 @@ def generate_summary(alert_id: str, request: Request):
         if not summary or not summary.strip():
             summary = r.get("ai_summary")  # Last resort fallback
 
+        # Calculate Materiality
+        p1 = r.get("ai_p1") or "L"
+        p2 = calculate_p2(r.get("created_date"), start_date, end_date)
+        p3 = calculate_p3(theme)
+        materiality = f"{p1}{p2}{p3}"
+
         articles.append(
             {
                 "title": r["title"],
@@ -416,6 +427,7 @@ def generate_summary(alert_id: str, request: Request):
                 "theme": theme,
                 "analysis": r["ai_analysis"],
                 "impact_score": r["impact_score"],
+                "materiality": materiality,
             }
         )
 
@@ -431,6 +443,7 @@ def generate_summary(alert_id: str, request: Request):
         raise HTTPException(status_code=500, detail=f"LLM Generation Failed: {str(e)}")
 
     # 4. Save to DB
+    # 4. Save to DB
     now_str = datetime.now().isoformat()
 
     # Serialize lists to JSON
@@ -438,8 +451,16 @@ def generate_summary(alert_id: str, request: Request):
     bearish_json = json.dumps(result.get("bearish_events", []))
     neutral_json = json.dumps(result.get("neutral_events", []))
 
+    # Extract Recommendation
+    recommendation = result.get(
+        "recommendation", "APPROVE L2"
+    )  # Default to Approve L2 if missing
+    recommendation_reason = result.get(
+        "recommendation_reason", "AI analysis completed."
+    )
+
     cursor.execute(
-        f'UPDATE "{alerts_table}" SET "narrative_theme" = ?, "narrative_summary" = ?, "bullish_events" = ?, "bearish_events" = ?, "neutral_events" = ?, "summary_generated_at" = ? WHERE "{alert_id_col}" = ?',
+        f'UPDATE "{alerts_table}" SET "narrative_theme" = ?, "narrative_summary" = ?, "bullish_events" = ?, "bearish_events" = ?, "neutral_events" = ?, "summary_generated_at" = ?, "recommendation" = ?, "recommendation_reason" = ? WHERE "{alert_id_col}" = ?',
         (
             result["narrative_theme"],
             result["narrative_summary"],
@@ -447,6 +468,8 @@ def generate_summary(alert_id: str, request: Request):
             bearish_json,
             neutral_json,
             now_str,
+            recommendation,
+            recommendation_reason,
             alert_id,
         ),
     )
@@ -459,6 +482,8 @@ def generate_summary(alert_id: str, request: Request):
         "bullish_events": result.get("bullish_events", []),
         "bearish_events": result.get("bearish_events", []),
         "neutral_events": result.get("neutral_events", []),
+        "recommendation": recommendation,
+        "recommendation_reason": recommendation_reason,
         "summary_generated_at": now_str,
     }
 
@@ -566,6 +591,9 @@ def get_prices(
     }
 
 
+from .scoring import calculate_p2, calculate_p3
+
+
 @app.get("/news/{isin}")
 def get_news(
     isin: str,
@@ -625,68 +653,6 @@ def get_news(
     cursor.execute(query, params)
     rows = cursor.fetchall()
 
-    # Parse alert dates for dynamic P2 calculation
-    dt_start = datetime.strptime(start_date, "%Y-%m-%d") if start_date else None
-    dt_end = datetime.strptime(end_date, "%Y-%m-%d") if end_date else None
-    duration = (dt_end - dt_start).total_seconds() if dt_start and dt_end else None
-
-    # Helper for P2 (Proximity) Logic
-    def calculate_p2(art_date_str):
-        if not dt_start or not dt_end or not art_date_str:
-            return "L"
-        try:
-            # Handle potential ISO format or simple date
-            dt_art = (
-                datetime.fromisoformat(art_date_str)
-                if "T" in art_date_str
-                else datetime.strptime(art_date_str, "%Y-%m-%d")
-            )
-        except ValueError:
-            return "L"
-
-        # Calculate ratio
-        if dt_art >= dt_end:
-            ratio = 1.0
-        else:
-            elapsed = (dt_art - dt_start).total_seconds()
-            ratio = elapsed / duration if duration > 0 else 0
-
-        if ratio >= 0.66:
-            return "H"
-        if ratio >= 0.33:
-            return "M"
-        return "L"
-
-    # Helper for P3 (Theme) Logic
-    def calculate_p3(theme_str):
-        if not theme_str:
-            return "L"
-        theme = theme_str.upper()
-
-        # High Priority Themes
-        high_themes = [
-            "EARNINGS_ANNOUNCEMENT",
-            "M_AND_A",
-            "DIVIDEND_CORP_ACTION",
-            "PRODUCT_TECH_LAUNCH",
-            "COMMERCIAL_CONTRACTS",
-        ]
-        # Medium Priority Themes
-        med_themes = [
-            "LEGAL_REGULATORY",
-            "EXECUTIVE_CHANGE",
-            "OPERATIONAL_CRISIS",
-            "CAPITAL_STRUCTURE",
-        ]
-
-        for t in high_themes:
-            if t in theme:
-                return "H"
-        for t in med_themes:
-            if t in theme:
-                return "M"
-        return "L"
-
     # Materiality Scoring Weights for Sorting
     mat_score_map = {"H": 3, "M": 2, "L": 1}
 
@@ -710,7 +676,7 @@ def get_news(
         # Prefer P1 from article_themes (ai_p1), fallback to articles (p1_prominence)
         p1 = r.get("ai_p1") or r.get("p1_prominence") or "L"
         # p3 is now calculated dynamically from the theme
-        p2 = calculate_p2(remapped.get("created_date"))
+        p2 = calculate_p2(remapped.get("created_date"), start_date, end_date)
         p3 = calculate_p3(remapped.get("theme"))
 
         final_score = f"{p1}{p2}{p3}"

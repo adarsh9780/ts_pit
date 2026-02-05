@@ -34,6 +34,17 @@ Your task is to analyze the provided news articles and Daily Price History to he
 *   **Bullish Events**: List 1-2 positive factors (if any).
 *   **Bearish Events**: List 1-2 negative factors (if any).
 *   **Neutral Events**: List 1-2 noise/informational items.
+*   **Recommendation**: 'REJECT' (Justified) or 'APPROVE_L2' (Unexplained).
+*   **Recommendation Reason**: Brief rationale for the verdict.
+
+**Recommendation Logic (The "Justification Test"):**
+1.  **Check Impact**: Look at the Z-Score and Price Move provided in the context.
+    *   High Impact = Z-Score > 2.0 (Significant move).
+    *   Low Impact = Z-Score < 2.0 (Noise).
+2.  **Check Evidence**: Do the provided articles explain the *direction* and *magnitude* of the move?
+    *   **REJECT (Justified)**: IF High Impact AND High Materiality News (Earnings, M&A, Crisis) matches direction.
+    *   **REJECT (Noise)**: IF Low Impact (No real market move to investigate).
+    *   **APPROVE_L2 (Suspicious)**: IF High Impact BUT No Material News OR News contradicts Price Direction.
 """
 
 

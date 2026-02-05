@@ -369,10 +369,10 @@ const chartOptions = computed(() => {
                 splitLine: { lineStyle: { color: '#f0f0f0' } },
                 scale: true  // Scale axis to data range for better visualization
             },
-            // Secondary axis only when not in candlestick mode
-            ...(chartType.value !== 'candle' ? [{
+            // Secondary axis only when in 'actual' line mode (for Industry comparison)
+            ...(chartType.value !== 'candle' && priceMode.value === 'actual' ? [{
                 type: 'value',
-                name: 'Rebased',
+                name: prices.value.industry_name || 'Industry',
                 position: 'right',
                 axisLine: { show: false },
                 axisTick: { show: false },
@@ -449,6 +449,8 @@ const generateSummary = async () => {
             alertData.value.bullish_events = response.data.bullish_events;
             alertData.value.bearish_events = response.data.bearish_events;
             alertData.value.neutral_events = response.data.neutral_events;
+            alertData.value.recommendation = response.data.recommendation;
+            alertData.value.recommendation_reason = response.data.recommendation_reason;
             alertData.value.summary_generated_at = response.data.summary_generated_at;
         }
     } catch (error) {
@@ -922,7 +924,25 @@ const parseEvents = (data) => {
                                 </button>
                             </div>
                             <div :class="{ 'dimmed': isGeneratingSummary }">
-                                <p>{{ alertData.narrative_summary }}</p>
+                                <!-- Recommendation Badge -->
+                                <div v-if="alertData.recommendation" class="recommendation-banner" :class="alertData.recommendation.toLowerCase()">
+                                    <div class="rec-icon">
+                                        <span v-if="alertData.recommendation === 'REJECT'">✅</span>
+                                        <span v-else>⚠️</span>
+                                    </div>
+                                    <div class="rec-text">
+                                        <div class="rec-title">
+                                            {{ alertData.recommendation === 'REJECT' ? 'MARKET MOVE EXPLAINED' : 'UNEXPLAINED ANOMALY' }}
+                                        </div>
+                                        <div class="rec-reason">{{ alertData.recommendation_reason }}</div>
+                                    </div>
+                                </div>
+                                
+                                <h4>
+                                    <span class="theme-label">Theme:</span> 
+                                    {{ alertData.narrative_theme }}
+                                </h4>
+                                <p class="summary-text">{{ alertData.narrative_summary }}</p>
                                 
                                 <!-- Event Breakdown Grid -->
                                 <div class="events-grid">
@@ -1031,6 +1051,42 @@ const parseEvents = (data) => {
 .news-item.analyzed {
     border-left: 3px solid #7c3aed;
     background: #fdfbff;
+}
+
+/* Recommendation Banner Styles */
+.recommendation-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    border: 1px solid transparent;
+}
+.recommendation-banner.reject {
+    background-color: #f0fdf4; /* Green-50 */
+    border-color: #bbf7d0;     /* Green-200 */
+    color: #166534;            /* Green-800 */
+}
+.recommendation-banner.approve_l2 {
+    background-color: #fef2f2; /* Red-50 */
+    border-color: #fecaca;     /* Red-200 */
+    color: #991b1b;            /* Red-800 */
+}
+.rec-icon {
+    font-size: 1.5rem;
+    line-height: 1;
+}
+.rec-title {
+    font-weight: 700;
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+}
+.rec-reason {
+    font-size: 0.9rem;
+    opacity: 0.9;
+    line-height: 1.4;
 }
 
 .spinner-icon {

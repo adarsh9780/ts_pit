@@ -31,6 +31,12 @@ class ClusterSummaryOutput(BaseModel):
     neutral_events: list[str] = Field(
         description="List of 1-2 bullet points describing neutral or informational factors"
     )
+    recommendation: str = Field(
+        description="FINAL VERDICT: 'REJECT' (if justified by news) or 'APPROVE_L2' (if unexplained/suspicious)"
+    )
+    recommendation_reason: str = Field(
+        description="A single concise sentence explaining the recommendation rationale."
+    )
 
 
 # Add future schemas below as needed
