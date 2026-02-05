@@ -60,7 +60,7 @@ const sendMessage = async () => {
             body: JSON.stringify({
                 message: userMsg,
                 session_id: sessionId.value,
-                alert_id: props.alertId
+                alert_id: props.alertId ? String(props.alertId) : null  // Ensure string type
             })
         });
 
