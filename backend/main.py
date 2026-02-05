@@ -334,6 +334,10 @@ def generate_summary(alert_id: str, request: Request):
     isin = alert[isin_col]
     ticker = alert[ticker_col] if ticker_col in alert.keys() else None
 
+    # Extract trade_type for AI alignment check
+    trade_type_col = config.get_column("alerts", "trade_type")
+    trade_type = alert[trade_type_col] if trade_type_col in alert.keys() else None
+
     # 1.5 Fetch Price History for context
     price_history = []
     if ticker and start_date and end_date:
@@ -435,7 +439,7 @@ def generate_summary(alert_id: str, request: Request):
     try:
         llm = request.app.state.llm
         result = generate_cluster_summary(
-            articles, price_history=price_history, llm=llm
+            articles, price_history=price_history, trade_type=trade_type, llm=llm
         )
     except Exception as e:
         conn.close()

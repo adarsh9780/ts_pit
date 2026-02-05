@@ -28,6 +28,7 @@ const isLoadingPrices = ref(false);
 const config = ref(null);
 const viewMode = ref('chart');
 const isGeneratingSummary = ref(false);
+const summaryTab = ref('narrative'); // 'narrative' or 'recommendation'
 
 // Confirm Dialog State
 const showConfirmDialog = ref(false);
@@ -796,13 +797,34 @@ const loadData = async () => {
 
 const parseEvents = (data) => {
     if (!data) return [];
-    if (Array.isArray(data)) return data;
+    if (Array.isArray(data)) {
+        // Clean bullet characters from array items
+        return data.map(item => typeof item === 'string' ? item.replace(/^[-*•]\s*/, '') : item);
+    }
     try {
-        return JSON.parse(data);
+        const parsed = JSON.parse(data);
+        return Array.isArray(parsed) ? parsed.map(item => typeof item === 'string' ? item.replace(/^[-*•]\s*/, '') : item) : [];
     } catch (e) {
         return [];
     }
 };
+
+const parseReasoning = (text) => {
+    if (!text) return [];
+    // Split by newlines and remove bullet characters
+    return text.split('\n')
+        .map(line => line.trim())
+        .filter(line => line.length > 0)
+        .map(line => line.replace(/^[-*•]\s*/, '')); // Remove bullet chars (-, *, •) and optional space
+};
+
+const recommendationClass = computed(() => {
+    if (!alertData.value || !alertData.value.recommendation) return '';
+    const rec = alertData.value.recommendation.toUpperCase();
+    if (rec.includes('DISMISS') || rec.includes('REJECT')) return 'reject'; // Green
+    if (rec.includes('APPROVE') || rec.includes('UNEXPLAINED')) return 'approve_l2'; // Red
+    return '';
+});
 </script>
 
 <template>
@@ -917,54 +939,74 @@ const parseEvents = (data) => {
                     <div class="executive-summary-wrapper">
                         <div v-if="alertData.narrative_summary" class="executive-summary">
                             <div class="summary-header">
-                                <h4><span class="ai-icon">AI</span> Investigation Summary</h4>
+                                <div class="header-left-group">
+                                    <h4><span class="ai-icon">AI</span> Investigation Summary</h4>
+                                    <div class="summary-tabs">
+                                        <button :class="{ active: summaryTab === 'narrative' }" @click="summaryTab = 'narrative'">Summary</button>
+                                        <button :class="{ active: summaryTab === 'recommendation' }" @click="summaryTab = 'recommendation'">Recommendation</button>
+                                    </div>
+                                </div>
                                 <button class="refresh-btn" @click="refreshSummary" :disabled="isGeneratingSummary" title="Regenerate Summary">
                                     <div v-if="isGeneratingSummary" class="spinner-icon"></div>
                                     <span v-else>↻</span>
                                 </button>
                             </div>
                             <div :class="{ 'dimmed': isGeneratingSummary }">
-                                <!-- Recommendation Badge -->
-                                <div v-if="alertData.recommendation" class="recommendation-banner" :class="alertData.recommendation.toLowerCase()">
-                                    <div class="rec-icon">
-                                        <span v-if="alertData.recommendation === 'REJECT'">✅</span>
-                                        <span v-else>⚠️</span>
-                                    </div>
-                                    <div class="rec-text">
-                                        <div class="rec-title">
-                                            {{ alertData.recommendation === 'REJECT' ? 'MARKET MOVE EXPLAINED' : 'UNEXPLAINED ANOMALY' }}
+                                <!-- NARRATIVE TAB -->
+                                <div v-if="summaryTab === 'narrative'">
+                                    <h4>
+                                        <span class="theme-label">Theme:</span> 
+                                        {{ alertData.narrative_theme }}
+                                    </h4>
+                                    <p class="summary-text">{{ alertData.narrative_summary }}</p>
+                                    
+                                    <!-- Event Breakdown Grid -->
+                                    <div class="events-grid">
+                                        <div v-if="parseEvents(alertData.bullish_events).length" class="event-col bullish">
+                                            <h5><span class="indicator">+</span> Bullish Factors</h5>
+                                            <ul>
+                                                <li v-for="(event, i) in parseEvents(alertData.bullish_events)" :key="i">{{ event }}</li>
+                                            </ul>
                                         </div>
-                                        <div class="rec-reason">{{ alertData.recommendation_reason }}</div>
+                                        
+                                        <div v-if="parseEvents(alertData.bearish_events).length" class="event-col bearish">
+                                            <h5><span class="indicator">-</span> Bearish Factors</h5>
+                                            <ul>
+                                                <li v-for="(event, i) in parseEvents(alertData.bearish_events)" :key="i">{{ event }}</li>
+                                            </ul>
+                                        </div>
+                                        
+                                        <div v-if="parseEvents(alertData.neutral_events).length" class="event-col neutral">
+                                            <h5><span class="indicator">~</span> Neutral / Context</h5>
+                                            <ul>
+                                                <li v-for="(event, i) in parseEvents(alertData.neutral_events)" :key="i">{{ event }}</li>
+                                            </ul>
+                                        </div>
                                     </div>
                                 </div>
-                                
-                                <h4>
-                                    <span class="theme-label">Theme:</span> 
-                                    {{ alertData.narrative_theme }}
-                                </h4>
-                                <p class="summary-text">{{ alertData.narrative_summary }}</p>
-                                
-                                <!-- Event Breakdown Grid -->
-                                <div class="events-grid">
-                                    <div v-if="parseEvents(alertData.bullish_events).length" class="event-col bullish">
-                                        <h5><span class="indicator">+</span> Bullish Factors</h5>
-                                        <ul>
-                                            <li v-for="(event, i) in parseEvents(alertData.bullish_events)" :key="i">{{ event }}</li>
-                                        </ul>
+
+                                <!-- RECOMMENDATION TAB -->
+                                <div v-if="summaryTab === 'recommendation'">
+                                    <div v-if="alertData.recommendation" class="recommendation-banner" :class="recommendationClass">
+                                        <div class="rec-icon">
+                                            <span v-if="recommendationClass === 'reject'">✅</span>
+                                            <span v-else>⚠️</span>
+                                        </div>
+                                        <div class="rec-text">
+                                            <div class="rec-title">
+                                                {{ alertData.recommendation }}
+                                            </div>
+                                        </div>
                                     </div>
                                     
-                                    <div v-if="parseEvents(alertData.bearish_events).length" class="event-col bearish">
-                                        <h5><span class="indicator">-</span> Bearish Factors</h5>
+                                    <div class="reasoning-section">
+                                        <h5>Decision Logic & Evidence:</h5>
                                         <ul>
-                                            <li v-for="(event, i) in parseEvents(alertData.bearish_events)" :key="i">{{ event }}</li>
+                                            <li v-for="(point, i) in parseReasoning(alertData.recommendation_reason)" :key="i">{{ point }}</li>
                                         </ul>
-                                    </div>
-                                    
-                                    <div v-if="parseEvents(alertData.neutral_events).length" class="event-col neutral">
-                                        <h5><span class="indicator">~</span> Neutral / Context</h5>
-                                        <ul>
-                                            <li v-for="(event, i) in parseEvents(alertData.neutral_events)" :key="i">{{ event }}</li>
-                                        </ul>
+                                        <div v-if="!alertData.recommendation_reason" class="empty-reasoning">
+                                            No detailed reasoning available. Regenerate the summary to get facts.
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -1394,4 +1436,73 @@ h1 { margin: 0; font-size: 1.5rem; color: #0f172a; display: flex; align-items: b
     animation: spin 1s linear infinite;
 }
 
+/* Header Grouping for Tabs */
+.header-left-group {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+}
+
+/* Tabs Styling */
+.summary-tabs {
+    display: flex;
+    background: #e2e8f0;
+    padding: 3px;
+    border-radius: 6px;
+    gap: 2px;
+}
+
+.summary-tabs button {
+    border: none;
+    background: transparent;
+    padding: 4px 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #64748b;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.summary-tabs button:hover {
+    color: #334155;
+}
+
+.summary-tabs button.active {
+    background: white;
+    color: #4c1d95; /* Deep Purple to match header */
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+
+/* Reasoning Section */
+.reasoning-section {
+    padding-top: 0.5rem;
+}
+
+.reasoning-section h5 {
+    margin: 0 0 0.5rem 0;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #334155;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.reasoning-section ul {
+    margin: 0;
+    padding-left: 1.25rem;
+}
+
+.reasoning-section li {
+    font-size: 0.9rem;
+    color: #334155;
+    margin-bottom: 0.5rem;
+    line-height: 1.5;
+}
+
+.empty-reasoning {
+    font-style: italic;
+    color: #94a3b8;
+    font-size: 0.85rem;
+}
 </style>

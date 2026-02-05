@@ -34,17 +34,33 @@ Your task is to analyze the provided news articles and Daily Price History to he
 *   **Bullish Events**: List 1-2 positive factors (if any).
 *   **Bearish Events**: List 1-2 negative factors (if any).
 *   **Neutral Events**: List 1-2 noise/informational items.
-*   **Recommendation**: 'REJECT' (Justified) or 'APPROVE_L2' (Unexplained).
-*   **Recommendation Reason**: Brief rationale for the verdict.
+*   **Recommendation**: 'Dismiss the alert' (Justified/Noise) or 'Approve the alert' (Unexplained/Suspicious).
+*   **Recommendation Reason**: A detailed markdown list of specific facts that led to this decision.
+
+**Reasoning Requirements (Crucial):**
+Your 'Recommendation Reason' MUST be a bulleted list referencing explicit evidence from the analysis.
+Examples of required detail style:
+- "3 articles were found with High Materiality (P3) scores related to Earnings."
+- "The price drop of -5% on Jan 29th correlates directly with the 'Product Delay' news."
+- "Impact Z-Score is 4.2 (High), confirming a significant market reaction."
+- "No news articles were found in the 3-day window explaining the 10% price spike."
 
 **Recommendation Logic (The "Justification Test"):**
-1.  **Check Impact**: Look at the Z-Score and Price Move provided in the context.
-    *   High Impact = Z-Score > 2.0 (Significant move).
-    *   Low Impact = Z-Score < 2.0 (Noise).
-2.  **Check Evidence**: Do the provided articles explain the *direction* and *magnitude* of the move?
-    *   **REJECT (Justified)**: IF High Impact AND High Materiality News (Earnings, M&A, Crisis) matches direction.
-    *   **REJECT (Noise)**: IF Low Impact (No real market move to investigate).
-    *   **APPROVE_L2 (Suspicious)**: IF High Impact BUT No Material News OR News contradicts Price Direction.
+
+**CRITICAL: Trade Type Alignment Check**
+- If Alert Type is provided (BUY or SELL), you MUST verify alignment between the alert type and the news sentiment:
+  - **BUY Alert**: Requires predominantly BULLISH news to justify. Bearish news suggests suspicious activity.
+  - **SELL Alert**: Requires predominantly BEARISH news to justify. Bullish news suggests suspicious activity.
+  - **Misalignment** (e.g., BUY + Bearish News, or SELL + Bullish News) is a STRONG signal for "Approve the alert".
+
+1.  **Dismiss the alert** (Justified):
+    - Price move is High Impact (Z-Score > 2.0) AND explained by High Materiality News matching direction.
+    - Alert Type ALIGNS with News Sentiment (BUY + Bullish, or SELL + Bearish).
+    - Price move is Low Impact (Z-Score < 2.0) i.e., Noise.
+2.  **Approve the alert** (Unexplained/Suspicious):
+    - Price move is High Impact (Z-Score > 2.0) BUT No Material News found.
+    - Price move is High Impact BUT News contradicts price direction (e.g., Good news but price crashed).
+    - Alert Type CONTRADICTS News Sentiment (BUY + Bearish News, or SELL + Bullish News).
 """
 
 

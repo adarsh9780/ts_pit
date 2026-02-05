@@ -95,7 +95,10 @@ def get_llm_model():
 
 
 def generate_cluster_summary(
-    articles: list, price_history: list | None = None, llm=None
+    articles: list,
+    price_history: list | None = None,
+    trade_type: str | None = None,
+    llm=None,
 ) -> Dict[str, str | list[str]]:
     """
     Generate a formatted summary and theme from a list of articles.
@@ -174,10 +177,15 @@ def generate_cluster_summary(
             price_lines.append(f"{date}: {close}")
         price_context = "\n".join(price_lines)
 
+    # Add Alert Type context if available
+    alert_context = ""
+    if trade_type:
+        alert_context = f"\n\n**Alert Type: {trade_type.upper()}**\n(Verify if news sentiment aligns with this trade direction)"
+
     messages = [
         SystemMessage(content=CLUSTER_SUMMARY_SYSTEM_PROMPT),
         HumanMessage(
-            content=f"Here are the articles:\n\n{article_text}{price_context}"
+            content=f"Here are the articles:\n\n{article_text}{price_context}{alert_context}"
         ),
     ]
 
@@ -191,7 +199,7 @@ def generate_cluster_summary(
             "bearish_events": result.bearish_events or [],
             "neutral_events": result.neutral_events or [],
             "recommendation": result.recommendation
-            or "APPROVE_L2",  # Default to safety
+            or "Approve the alert",  # Default to safety
             "recommendation_reason": result.recommendation_reason
             or "No recommendation generated.",
         }
@@ -203,7 +211,7 @@ def generate_cluster_summary(
             "bullish_events": [],
             "bearish_events": [],
             "neutral_events": [],
-            "recommendation": "APPROVE_L2",
+            "recommendation": "Approve the alert",
             "recommendation_reason": "Error during analysis.",
         }
 

@@ -23,19 +23,19 @@ class ClusterSummaryOutput(BaseModel):
         description="A 2-3 sentence executive summary highlighting publicly available information that could justify the trading activity"
     )
     bullish_events: list[str] = Field(
-        description="List of 1-2 bullet points describing key positive/bullish factors found in the news"
+        description="List of 1-2 short text items describing key positive/bullish factors. DO NOT include bullet characters (-, *, •) at the start of each item."
     )
     bearish_events: list[str] = Field(
-        description="List of 1-2 bullet points describing key negative/bearish factors found in the news"
+        description="List of 1-2 short text items describing key negative/bearish factors. DO NOT include bullet characters (-, *, •) at the start of each item."
     )
     neutral_events: list[str] = Field(
-        description="List of 1-2 bullet points describing neutral or informational factors"
+        description="List of 1-2 short text items describing neutral or informational factors. DO NOT include bullet characters (-, *, •) at the start of each item."
     )
     recommendation: str = Field(
-        description="FINAL VERDICT: 'REJECT' (if justified by news) or 'APPROVE_L2' (if unexplained/suspicious)"
+        description="FINAL VERDICT: 'Dismiss the alert' (Justified) or 'Approve the alert' (Unexplained)"
     )
     recommendation_reason: str = Field(
-        description="A single concise sentence explaining the recommendation rationale."
+        description="A detailed markdown bulleted list of specific facts (article counts, scores) justifying the decision."
     )
 
 
