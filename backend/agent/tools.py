@@ -577,7 +577,8 @@ async def search_web_news(
             return f"No web news found for: {query}"
 
         # 2. Fetch article content concurrently (kept internal)
-        async with aiohttp.ClientSession() as session:
+        # Enable trust_env=True to respect HTTP_PROXY/HTTPS_PROXY/NO_PROXY
+        async with aiohttp.ClientSession(trust_env=True) as session:
             urls = [r.get("url", "") for r in results]
             tasks = [_fetch_content(session, url) for url in urls]
             contents = await asyncio.gather(*tasks)  # Internal only, not returned
