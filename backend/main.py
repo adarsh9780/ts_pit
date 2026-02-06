@@ -12,7 +12,8 @@ from typing import Optional, AsyncGenerator
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
@@ -115,6 +116,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Log detailed validation errors for debugging VDI/Production issues."""
+    print(f"Validation Error for {request.url}: {exc.errors()}")
+    print(f"Body: {exc.body}")
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors(), "body": str(exc.body)},
+    )
+
 
 # Serve built frontend from /ui if it exists
 STATIC_DIR = Path(__file__).parent / "static"
@@ -747,10 +760,7 @@ async def get_chat_history(session_id: str, request: Request):
         # Get the current state from the checkpointer
         state = await agent.aget_state(config)
 
-        # Debug logging
-        print(f"[DEBUG] get_chat_history for session: {session_id}")
-        print(f"[DEBUG] state exists: {state is not None}")
-        print(f"[DEBUG] state.values: {state.values if state else 'None'}")
+        # Debug logging - Removed
 
         if not state or not state.values:
             return {"messages": []}
