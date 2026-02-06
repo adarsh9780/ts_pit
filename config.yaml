@@ -224,3 +224,7 @@ proxy:
   https: ""
   # Comma-separated domains to bypass proxy (e.g., localhost,127.0.0.1,.jpmchase.net)
   no_proxy: "localhost,127.0.0.1"
+  
+  # Set to false if running in VDI/Corporate network with self-signed certificates
+  # This disables SSL verification for external tools (DuckDuckGo, Scraper)
+  ssl_verify: true

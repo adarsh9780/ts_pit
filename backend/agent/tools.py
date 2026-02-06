@@ -480,7 +480,21 @@ async def search_web_news(
 
     def _search():
         """Sync DDGS search."""
-        with DDGS() as ddgs:
+        # Get proxy from config
+        config = get_config()
+        proxy_config = config.get_proxy_config()
+        # Use HTTPS proxy if available, else HTTP
+        proxy_url = proxy_config.get("https") or proxy_config.get("http")
+
+        # Pass proxy to DDGS if set
+        kwargs = {}
+        if proxy_url:
+            kwargs["proxy"] = proxy_url
+
+        # KEY FIX: Disable SSL verification for VDI environment
+        kwargs["verify"] = False
+
+        with DDGS(**kwargs) as ddgs:
             # Fetch more than needed to allow for date filtering
             results = list(ddgs.news(search_query, max_results=max_results * 2))
 
@@ -676,7 +690,13 @@ async def scrape_websites(urls: list[str]) -> str:
             return url, f"[Error: {str(e)}]"
 
     # Run all fetches concurrently
-    async with aiohttp.ClientSession() as session:
+    # Enable trust_env=True to respect HTTP_PROXY/HTTPS_PROXY
+    # Configure SSL verification based on config (set ssl_verify: false in config.yaml for VDI)
+    config = get_config()
+    ssl_verify = config.get_proxy_config().get("ssl_verify", True)
+
+    connector = aiohttp.TCPConnector(ssl=ssl_verify)
+    async with aiohttp.ClientSession(trust_env=True, connector=connector) as session:
         tasks = [fetch_one(session, url) for url in url_list]
         results = await asyncio.gather(*tasks)
 
