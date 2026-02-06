@@ -51,20 +51,31 @@ def _resolve_env_var(value: str) -> str:
     return value or ""
 
 
+# Global cache for the LLM instance
+_cached_llm = None
+
+
 def get_llm_model():
     """
-    Factory to return the configured LLM model instance.
+    Singleton Factory to return the configured LLM model instance.
+    Initializes once and returns cached instance thereafter.
     """
+    global _cached_llm
+    if _cached_llm:
+        return _cached_llm
+
     config = get_config()
     llm_config = config.get_llm_config()
     provider = llm_config.get("provider", "gemini")
+
+    model_instance = None
 
     if provider == "azure":
         # Use user's custom class logic
         azure_conf = llm_config.get("azure", {})
 
         # Resolve all environment variables from config
-        return AzureOpenAIModel(
+        model_instance = AzureOpenAIModel(
             client_id=_resolve_env_var(azure_conf.get("client_id")),
             tenant_id=_resolve_env_var(azure_conf.get("tenant_id")),
             cert_path=azure_conf.get("cert_path"),  # Not sensitive, no env var
@@ -86,12 +97,16 @@ def get_llm_model():
             )
 
         # Use init_chat_model as requested
-        return init_chat_model(
+        model_instance = init_chat_model(
             model_name, model_provider="google_genai", google_api_key=api_key
         )
 
     else:
         raise ValueError(f"Unknown LLM provider: {provider}")
+
+    # Cache and return
+    _cached_llm = model_instance
+    return _cached_llm
 
 
 def generate_cluster_summary(
