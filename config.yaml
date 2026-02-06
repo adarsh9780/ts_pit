@@ -210,7 +210,7 @@ llm:
 
   # Google Gemini Configuration
   gemini:
-    model: "gemini-2.0-flash-lite"
+    model: "gemini-2.5-flash"
     # API Key should be set in environment variable GEMINI_API_KEY
     # But can be hardcoded here for testing if needed
     api_key: "${GEMINI_API_KEY}"

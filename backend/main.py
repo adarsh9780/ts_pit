@@ -715,10 +715,23 @@ def get_news(
 # ==============================================================================
 
 
+class AlertContext(BaseModel):
+    """Full alert context passed from frontend to avoid re-fetching."""
+
+    id: str
+    ticker: str
+    isin: str
+    start_date: str
+    end_date: str
+    instrument_name: Optional[str] = None
+    trade_type: Optional[str] = None
+    status: Optional[str] = None
+
+
 class ChatRequest(BaseModel):
     message: str
     session_id: str
-    alert_id: Optional[str] = None
+    alert_context: Optional[AlertContext] = None  # Full context from frontend
 
 
 @app.get("/agent/history/{session_id}")
@@ -734,6 +747,11 @@ async def get_chat_history(session_id: str, request: Request):
         # Get the current state from the checkpointer
         state = await agent.aget_state(config)
 
+        # Debug logging
+        print(f"[DEBUG] get_chat_history for session: {session_id}")
+        print(f"[DEBUG] state exists: {state is not None}")
+        print(f"[DEBUG] state.values: {state.values if state else 'None'}")
+
         if not state or not state.values:
             return {"messages": []}
 
@@ -742,16 +760,36 @@ async def get_chat_history(session_id: str, request: Request):
         # Convert LangChain messages to frontend format
         frontend_messages = []
         for msg in messages:
-            # Skip system messages (they're injected by context_loader)
-            if hasattr(msg, "type") and msg.type == "system":
-                continue
+            # Skip system messages and tool outputs
+            if hasattr(msg, "type"):
+                if msg.type == "system":
+                    continue
+                if msg.type == "tool":
+                    continue
 
             role = "user" if (hasattr(msg, "type") and msg.type == "human") else "agent"
             content = msg.content if hasattr(msg, "content") else str(msg)
 
+            # Handle case where content is a list (e.g., Gemini/Anthropic response structure)
+            if isinstance(content, list):
+                text_parts = []
+                for part in content:
+                    if isinstance(part, str):
+                        text_parts.append(part)
+                    elif isinstance(part, dict) and "text" in part:
+                        text_parts.append(part["text"])
+                content = " ".join(text_parts)
+
             # Skip empty messages
-            if not content or not content.strip():
+            if not content or (isinstance(content, str) and not content.strip()):
                 continue
+
+            # For user messages, strip the [CURRENT ALERT CONTEXT] prefix if present
+            if role == "user" and "[USER QUESTION]" in content:
+                # Extract just the user's question from the enriched message
+                parts = content.split("[USER QUESTION]")
+                if len(parts) > 1:
+                    content = parts[1].strip()
 
             frontend_messages.append(
                 {
@@ -768,6 +806,53 @@ async def get_chat_history(session_id: str, request: Request):
         return {"messages": []}
 
 
+@app.delete("/agent/history/{session_id}")
+async def delete_chat_history(session_id: str, request: Request):
+    """
+    Delete chat history for a given session from the LangGraph checkpointer.
+    """
+    import aiosqlite
+
+    db_path = Path.home() / ".ts_pit" / "agent_memory.db"
+
+    if not db_path.exists():
+        return {
+            "status": "deleted",
+            "session_id": session_id,
+            "message": "No history database found",
+        }
+
+    try:
+        async with aiosqlite.connect(str(db_path)) as conn:
+            deleted_count = 0
+
+            # Try to delete from each table (some may not exist)
+            for table in ["checkpoints", "checkpoint_writes", "checkpoint_blobs"]:
+                try:
+                    cursor = await conn.execute(
+                        f"DELETE FROM {table} WHERE thread_id = ?", (session_id,)
+                    )
+                    deleted_count += cursor.rowcount
+                except Exception:
+                    pass  # Table doesn't exist, skip
+
+            await conn.commit()
+
+        return {
+            "status": "deleted",
+            "session_id": session_id,
+            "deleted_rows": deleted_count,
+        }
+
+    except Exception as e:
+        print(f"Error deleting chat history: {e}")
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            status_code=500, content={"status": "error", "message": str(e)}
+        )
+
+
 @app.post("/agent/chat")
 async def chat_agent(request: Request, body: ChatRequest):
     """
@@ -779,10 +864,25 @@ async def chat_agent(request: Request, body: ChatRequest):
     # Configure session
     config = {"configurable": {"thread_id": body.session_id}}
 
-    # Input State
+    # Build enriched user message with alert context
+    if body.alert_context:
+        ctx = body.alert_context
+        enriched_message = f"""[CURRENT ALERT CONTEXT]
+Alert ID: {ctx.id}
+Ticker: {ctx.ticker} ({ctx.instrument_name or "N/A"})
+ISIN: {ctx.isin}
+Investigation Window: {ctx.start_date} to {ctx.end_date}
+Trade Type: {ctx.trade_type or "N/A"}
+Status: {ctx.status or "N/A"}
+
+[USER QUESTION]
+{body.message}"""
+    else:
+        enriched_message = body.message
+
+    # Input State - no more current_alert_id, context is in message
     input_state = {
-        "messages": [("user", body.message)],
-        "current_alert_id": body.alert_id,  # Context Loader sees this
+        "messages": [("user", enriched_message)],
     }
 
     async def event_generator():
@@ -793,7 +893,23 @@ async def chat_agent(request: Request, body: ChatRequest):
 
                 # Filter interesting events to stream to frontend
                 if kind == "on_chat_model_stream":
-                    content = event["data"]["chunk"].content
+                    # Only stream tokens from the AGENT node, not internal tool LLM calls
+                    if event.get("metadata", {}).get("langgraph_node") != "agent":
+                        continue
+
+                    chunk = event["data"]["chunk"]
+                    content = chunk.content
+
+                    # Handle case where content is a list (e.g., Anthropic/Gemini structure)
+                    if isinstance(content, list):
+                        text_content = ""
+                        for block in content:
+                            if isinstance(block, str):
+                                text_content += block
+                            elif isinstance(block, dict) and "text" in block:
+                                text_content += block["text"]
+                        content = text_content
+
                     if content:
                         yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
 
@@ -803,8 +919,8 @@ async def chat_agent(request: Request, body: ChatRequest):
 
                 elif kind == "on_tool_end":
                     tool_name = event["name"]
-                    output = str(event["data"].get("output"))
-                    yield f"data: {json.dumps({'type': 'tool_end', 'tool': tool_name, 'output': output})}\n\n"
+                    # output = str(event["data"].get("output")) # Don't send full output
+                    yield f"data: {json.dumps({'type': 'tool_end', 'tool': tool_name, 'output': 'Hidden'})}\n\n"
 
             # End of stream
             yield f"data: {json.dumps({'type': 'done'})}\n\n"

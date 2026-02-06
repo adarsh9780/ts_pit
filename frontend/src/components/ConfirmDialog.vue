@@ -16,6 +16,10 @@ defineProps({
     cancelText: {
         type: String,
         default: 'Cancel'
+    },
+    showButtons: {
+        type: Boolean,
+        default: true
     }
 });
 
@@ -32,7 +36,7 @@ const emit = defineEmits(['confirm', 'cancel']);
                 <div class="modal-body">
                     <p>{{ message }}</p>
                 </div>
-                <div class="modal-footer">
+                <div class="modal-footer" v-if="showButtons">
                     <button class="btn btn-cancel" @click="$emit('cancel')">{{ cancelText }}</button>
                     <button class="btn btn-confirm" @click="$emit('confirm')">{{ confirmText }}</button>
                 </div>
