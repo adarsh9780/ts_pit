@@ -261,7 +261,7 @@ def get_alerts(date: Optional[str] = None):
 
 
 @app.patch("/alerts/{alert_id}/status")
-def update_alert_status(alert_id: str, update: StatusUpdate):
+def update_alert_status(alert_id: str | int, update: StatusUpdate):
     """Update the status of an alert."""
     valid_statuses = config.get_valid_statuses()
     if update.status not in valid_statuses:
@@ -291,7 +291,7 @@ def update_alert_status(alert_id: str, update: StatusUpdate):
 
 
 @app.get("/alerts/{alert_id}")
-def get_alert_detail(alert_id: str):
+def get_alert_detail(alert_id: str | int):
     """Get details for a specific alert."""
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -731,7 +731,7 @@ def get_news(
 class AlertContext(BaseModel):
     """Full alert context passed from frontend to avoid re-fetching."""
 
-    id: str
+    id: str | int
     ticker: str
     isin: str
     start_date: str

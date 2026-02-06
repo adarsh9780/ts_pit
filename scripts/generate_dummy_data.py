@@ -66,7 +66,7 @@ def generate_dummy_data(num_records=50):
         trade_type = random.choice(["Buy", "Sell"])
 
         alert_record = {
-            "Alert ID": f"ALT-{1000 + i}",
+            "Alert ID": 1000 + i,
             "ISIN": asset["ISIN"],
             "Ticker": asset["Ticker"],
             "Instrument Name": asset["Name"],

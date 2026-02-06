@@ -10,10 +10,10 @@ tables:
     row_count: 50
     columns:
       id:
-        type: TEXT
-        description: Unique identifier for each alert (e.g., ALT-1000)
+        type: INTEGER
+        description: Unique identifier for each alert (e.g., 1000)
         db_column: Alert ID
-        example: ALT-1000
+        example: 1000
       ticker:
         type: TEXT
         description: Stock ticker symbol (e.g., NVDA, AAPL)
