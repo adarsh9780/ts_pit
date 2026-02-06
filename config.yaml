@@ -214,3 +214,13 @@ llm:
     # API Key should be set in environment variable GEMINI_API_KEY
     # But can be hardcoded here for testing if needed
     api_key: "${GEMINI_API_KEY}"
+
+# Proxy Configuration
+# ===================
+# Configure HTTP/HTTPS proxies if running behind a corporate firewall/VDI.
+# Leave empty "" for local development (Mac/Personal).
+proxy:
+  http: ""
+  https: ""
+  # Comma-separated domains to bypass proxy (e.g., localhost,127.0.0.1,.jpmchase.net)
+  no_proxy: "localhost,127.0.0.1"

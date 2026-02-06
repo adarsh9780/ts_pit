@@ -29,6 +29,18 @@ config = get_config()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Configure Proxy if set
+    proxy_config = config.get_proxy_config()
+    if proxy_config.get("http"):
+        os.environ["HTTP_PROXY"] = proxy_config["http"]
+        print(f"Proxy configured: HTTP_PROXY={proxy_config['http']}")
+    if proxy_config.get("https"):
+        os.environ["HTTPS_PROXY"] = proxy_config["https"]
+        print(f"Proxy configured: HTTPS_PROXY={proxy_config['https']}")
+    if proxy_config.get("no_proxy"):
+        os.environ["NO_PROXY"] = proxy_config["no_proxy"]
+        print(f"Proxy Bypass configured: NO_PROXY={proxy_config['no_proxy']}")
+
     # Startup: Initialize LLM & Agent
     print("Initializing LLM Model...")
     app.state.llm = get_llm_model()
