@@ -190,7 +190,7 @@ class Config:
             "display_columns": self.get_display_columns(),
             "column_labels": self._config.get("display", {}).get("column_labels", {}),
             "valid_statuses": self.get_valid_statuses(),
-            "has_materiality": self.has_column("articles", "materiality"),
+            "has_materiality": True,  # Calculated dynamically in main.py
         }
 
 

@@ -75,9 +75,11 @@ config = get_config()
 def run_migrations():
     conn = get_db_connection()
     cursor = conn.cursor()
+
+    # 1. Migrate Alerts Table
     table_name = config.get_table_name("alerts")
 
-    # Check for new columns
+    # Check for new columns in alerts
     cursor.execute(f'PRAGMA table_info("{table_name}")')
     columns = [row["name"] for row in cursor.fetchall()]
 
@@ -97,7 +99,25 @@ def run_migrations():
             print(f"Migrating: Adding {col} to {table_name}")
             cursor.execute(f'ALTER TABLE "{table_name}" ADD COLUMN "{col}" {dtype}')
 
-    # Ensure 'article_themes' table exists
+    # 2. Migrate Articles Table
+    articles_table = config.get_table_name("articles")
+    cursor.execute(f'PRAGMA table_info("{articles_table}")')
+    art_columns = [row["name"] for row in cursor.fetchall()]
+
+    new_art_cols = {
+        config.get_column("articles", "impact_score"): "REAL",
+        config.get_column("articles", "impact_label"): "TEXT",
+        config.get_column("articles", "ticker"): "TEXT",
+        config.get_column("articles", "instrument_name"): "TEXT",
+        config.get_column("articles", "p1_prominence"): "TEXT",
+    }
+
+    for col, dtype in new_art_cols.items():
+        if col and col not in art_columns:
+            print(f"Migrating: Adding {col} to {articles_table}")
+            cursor.execute(f'ALTER TABLE "{articles_table}" ADD COLUMN "{col}" {dtype}')
+
+    # 3. Ensure 'article_themes' table exists
     themes_table = config.get_table_name("article_themes")
     art_id_col = config.get_column("article_themes", "art_id")
     theme_col = config.get_column("article_themes", "theme")
