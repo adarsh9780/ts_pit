@@ -123,7 +123,33 @@ class Config:
 
     def get_valid_statuses(self) -> List[str]:
         """Get list of valid status values."""
-        return self._config.get("valid_statuses", ["Pending", "Approved", "Rejected"])
+        return self._config.get(
+            "valid_statuses", ["NEEDS_REVIEW", "ESCALATE_L2", "DISMISS"]
+        )
+
+    def get_status_aliases(self) -> Dict[str, str]:
+        """
+        Get optional status aliases.
+        Used to normalize legacy status values from external systems.
+        """
+        return self._config.get("status_aliases", {})
+
+    def normalize_status(self, status: str) -> str:
+        """Normalize status using aliases; returns original value if no alias exists."""
+        if status is None:
+            return status
+        aliases = self.get_status_aliases()
+        return aliases.get(status, status)
+
+    def is_status_enforced(self) -> bool:
+        """Whether status values should be strictly validated."""
+        validation = self._config.get("status_validation", {})
+        return bool(validation.get("enforce", True))
+
+    def is_valid_status(self, status: str) -> bool:
+        """Check if a status is valid after normalization."""
+        normalized = self.normalize_status(status)
+        return normalized in self.get_valid_statuses()
 
     def get_materiality_color(self, code: str) -> str:
         """Get the color for a materiality code."""

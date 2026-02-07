@@ -82,7 +82,7 @@ The following columns are **required** for each table:
 **Alerts table:**
 - `id` - Unique identifier for each alert
 - `ticker` - Stock ticker symbol
-- `status` - Current status (Pending/Approved/Rejected)
+- `status` - Current status (default canonical values: NEEDS_REVIEW/ESCALATE_L2/DISMISS)
 
 **Articles table:**
 - `id` - Unique identifier

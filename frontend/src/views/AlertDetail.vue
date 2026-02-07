@@ -484,11 +484,6 @@ const updateStatus = async (newStatus) => {
     }
 };
 
-const getStatusClass = (status) => {
-    const classes = { 'Pending': 'status-pending', 'Approved': 'status-approved', 'Rejected': 'status-rejected' };
-    return classes[status] || '';
-};
-
 const fetchPrices = async (ticker, period) => {
     isLoadingPrices.value = true;
     try {
@@ -823,6 +818,7 @@ const loadData = async () => {
             :alertData="alertData" 
             :alertId="alertId" 
             :newsCount="news ? news.length : 0"
+            :validStatuses="config?.valid_statuses || []"
             @update-status="updateStatus"
             @toggle-agent="$emit('toggle-agent')"
         />

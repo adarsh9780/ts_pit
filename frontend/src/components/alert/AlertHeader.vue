@@ -1,16 +1,23 @@
 <script setup>
-import { computed } from 'vue';
 
 const props = defineProps({
   alertData: { type: Object, required: true },
   alertId: { type: [String, Number], required: true },
-  newsCount: { type: Number, default: 0 }
+  newsCount: { type: Number, default: 0 },
+  validStatuses: { type: Array, default: () => ['NEEDS_REVIEW', 'ESCALATE_L2', 'DISMISS'] }
 });
 
 const emit = defineEmits(['update-status', 'toggle-agent']);
 
 const getStatusClass = (status) => {
-    const classes = { 'Pending': 'status-pending', 'Approved': 'status-approved', 'Rejected': 'status-rejected' };
+    const classes = {
+        'NEEDS_REVIEW': 'status-needs-review',
+        'ESCALATE_L2': 'status-escalate-l2',
+        'DISMISS': 'status-dismiss',
+        'Pending': 'status-needs-review',
+        'Approved': 'status-escalate-l2',
+        'Rejected': 'status-dismiss'
+    };
     return classes[status] || '';
 };
 
@@ -32,11 +39,29 @@ const updateStatus = (status) => {
                     <button class="action-btn ask-ai-btn" @click="$emit('toggle-agent')" title="Open AI Assistant">
                         <span class="icon">🤖</span> Ask AI
                     </button>
-                    <button class="action-btn approve-btn" @click="updateStatus('Approved')" :disabled="alertData.status === 'Approved'">
-                        <span class="icon">✓</span> Approve
+                    <button
+                        v-if="validStatuses.includes('ESCALATE_L2')"
+                        class="action-btn escalate-btn"
+                        @click="updateStatus('ESCALATE_L2')"
+                        :disabled="alertData.status === 'ESCALATE_L2'"
+                    >
+                        <span class="icon">!</span> Escalate L2
                     </button>
-                    <button class="action-btn reject-btn" @click="updateStatus('Rejected')" :disabled="alertData.status === 'Rejected'">
-                        <span class="icon">✗</span> Reject
+                    <button
+                        v-if="validStatuses.includes('DISMISS')"
+                        class="action-btn dismiss-btn"
+                        @click="updateStatus('DISMISS')"
+                        :disabled="alertData.status === 'DISMISS'"
+                    >
+                        <span class="icon">✓</span> Dismiss
+                    </button>
+                    <button
+                        v-if="validStatuses.includes('NEEDS_REVIEW')"
+                        class="action-btn review-btn"
+                        @click="updateStatus('NEEDS_REVIEW')"
+                        :disabled="alertData.status === 'NEEDS_REVIEW'"
+                    >
+                        <span class="icon">↺</span> Needs Review
                     </button>
                 </div>
             </div>
@@ -149,10 +174,12 @@ const updateStatus = (status) => {
 .ask-ai-btn { background: #3b82f6; color: white; margin-right: 0.5rem; }
 .ask-ai-btn:hover { background: #2563eb; box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3); }
 
-.approve-btn { background: #dcfce7; color: #166534; }
-.approve-btn:hover:not(:disabled) { background: #bbf7d0; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-.reject-btn { background: #fee2e2; color: #991b1b; }
-.reject-btn:hover:not(:disabled) { background: #fecaca; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+.dismiss-btn { background: #dcfce7; color: #166534; }
+.dismiss-btn:hover:not(:disabled) { background: #bbf7d0; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+.escalate-btn { background: #fee2e2; color: #991b1b; }
+.escalate-btn:hover:not(:disabled) { background: #fecaca; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+.review-btn { background: #fff7ed; color: #c2410c; }
+.review-btn:hover:not(:disabled) { background: #ffedd5; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
 
 /* 2. Context Row */
 .header-context { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; font-size: 0.8rem; }
@@ -166,9 +193,9 @@ const updateStatus = (status) => {
 .tag.type.sell { background-color: #fee2e2; color: #991b1b; }
 
 .status-badge { padding: 0.25rem 0.75rem; border-radius: 6px; font-weight: 600; text-transform: uppercase; font-size: 0.75rem; }
-.status-pending { background-color: #fff7ed; color: #c2410c; border: 1px solid #ffedd5; }
-.status-approved { background-color: #f0fdf4; color: #15803d; border: 1px solid #dcfce7; }
-.status-rejected { background-color: #fef2f2; color: #b91c1c; border: 1px solid #fee2e2; }
+.status-needs-review { background-color: #fff7ed; color: #c2410c; border: 1px solid #ffedd5; }
+.status-escalate-l2 { background-color: #fef2f2; color: #b91c1c; border: 1px solid #fee2e2; }
+.status-dismiss { background-color: #f0fdf4; color: #15803d; border: 1px solid #dcfce7; }
 
 .theme-badge {
     background-color: #f3e8ff; color: #7e22ce; border: 1px solid #d8b4fe;

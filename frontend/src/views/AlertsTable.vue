@@ -80,9 +80,12 @@ const getColumnLabel = (key) => {
 
 const getStatusClass = (status) => {
   const classes = {
-    'Pending': 'status-pending',
-    'Approved': 'status-approved',
-    'Rejected': 'status-rejected'
+    'NEEDS_REVIEW': 'status-needs-review',
+    'ESCALATE_L2': 'status-escalate-l2',
+    'DISMISS': 'status-dismiss',
+    'Pending': 'status-needs-review',
+    'Approved': 'status-escalate-l2',
+    'Rejected': 'status-dismiss'
   };
   return classes[status] || '';
 };
@@ -107,8 +110,8 @@ onMounted(async () => {
             <span class="stat-label">Total Alerts</span>
           </div>
           <div class="stat">
-            <span class="stat-value">{{ alerts.filter(a => a.status === 'Pending').length }}</span>
-            <span class="stat-label">Pending</span>
+            <span class="stat-value">{{ alerts.filter(a => a.status === 'NEEDS_REVIEW').length }}</span>
+            <span class="stat-label">Needs Review</span>
           </div>
         </div>
       </div>
@@ -153,17 +156,17 @@ onMounted(async () => {
                 </td>
                 <td class="actions-cell" @click.stop>
                   <button 
-                    class="action-btn approve" 
-                    @click="updateStatus(alert.id, 'Approved', $event)"
-                    :disabled="alert.status === 'Approved'"
-                    title="Approve for Level 2"
-                  >✓</button>
+                    class="action-btn escalate" 
+                    @click="updateStatus(alert.id, 'ESCALATE_L2', $event)"
+                    :disabled="alert.status === 'ESCALATE_L2'"
+                    title="Escalate to Level 2"
+                  >!</button>
                   <button 
-                    class="action-btn reject" 
-                    @click="updateStatus(alert.id, 'Rejected', $event)"
-                    :disabled="alert.status === 'Rejected'"
-                    title="Reject"
-                  >✗</button>
+                    class="action-btn dismiss" 
+                    @click="updateStatus(alert.id, 'DISMISS', $event)"
+                    :disabled="alert.status === 'DISMISS'"
+                    title="Dismiss"
+                  >✓</button>
                 </td>
               </tr>
             </tbody>
@@ -383,19 +386,19 @@ td {
     font-weight: 600;
 }
 
-.status-pending {
+.status-needs-review {
     background-color: #fef3c7;
     color: #92400e;
 }
 
-.status-approved {
-    background-color: #dcfce7;
-    color: #166534;
-}
-
-.status-rejected {
+.status-escalate-l2 {
     background-color: #fee2e2;
     color: #991b1b;
+}
+
+.status-dismiss {
+    background-color: #dcfce7;
+    color: #166534;
 }
 
 /* Action buttons */
@@ -422,21 +425,21 @@ td {
     cursor: not-allowed;
 }
 
-.action-btn.approve {
+.action-btn.dismiss {
     background: #dcfce7;
     color: #166534;
 }
 
-.action-btn.approve:hover:not(:disabled) {
+.action-btn.dismiss:hover:not(:disabled) {
     background: #bbf7d0;
 }
 
-.action-btn.reject {
+.action-btn.escalate {
     background: #fee2e2;
     color: #991b1b;
 }
 
-.action-btn.reject:hover:not(:disabled) {
+.action-btn.escalate:hover:not(:disabled) {
     background: #fecaca;
 }
 </style>

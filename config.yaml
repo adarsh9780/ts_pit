@@ -20,7 +20,7 @@ tables:
       # Required columns - these must exist in your database
       id: "Alert ID"                     # Unique identifier for each alert
       ticker: "Ticker"                   # Stock ticker symbol
-      status: "status"                   # Current status (Pending/Approved/Rejected)
+      status: "status"                   # Current status (canonical default: NEEDS_REVIEW/ESCALATE_L2/DISMISS)
       
       # Optional columns - leave empty string "" if not available
       isin: "ISIN"                       # ISIN for linking alerts to news
@@ -136,9 +136,20 @@ display:
 
 # Valid status values for alerts
 valid_statuses:
-  - Pending
-  - Approved
-  - Rejected
+  - NEEDS_REVIEW
+  - ESCALATE_L2
+  - DISMISS
+
+# Optional aliases to normalize legacy status values from external systems.
+# The API will return normalized values and writes will always persist canonical values.
+status_aliases:
+  Pending: NEEDS_REVIEW
+  Approved: ESCALATE_L2
+  Rejected: DISMISS
+
+# Enforce strict status validation after alias normalization.
+status_validation:
+  enforce: true
 
 # Materiality Color Configuration
 # ===============================

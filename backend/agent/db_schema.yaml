@@ -21,9 +21,9 @@ tables:
         example: NVDA
       status:
         type: TEXT
-        description: 'Current alert status: ''Pending'', ''Approved'', or ''Rejected'''
+        description: 'Current alert status (canonical): ''NEEDS_REVIEW'', ''ESCALATE_L2'', or ''DISMISS'''
         db_column: status
-        example: Pending
+        example: NEEDS_REVIEW
       isin:
         type: TEXT
         description: International Securities Identification Number - links to news

@@ -42,7 +42,7 @@ Response:
 Use **TABLES**:
 | Alert ID | Ticker | Status | Window |
 |----------|--------|--------|--------|
-| ALT-1001 | AAPL   | Pending | Jan 15-30 |
+| ALT-1001 | AAPL   | NEEDS_REVIEW | Jan 15-30 |
 
 ### Key Numbers:
 Always **bold** important figures.

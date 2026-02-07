@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted } from 'vue';
 import axios from 'axios';
 import AlertsSidebar from '../components/AlertsSidebar.vue';
 import AlertDetail from './AlertDetail.vue'; 
@@ -12,6 +12,7 @@ const selectedAlertId = ref(null);
 const loading = ref(true);
 const availableDates = ref([]);
 const mappings = ref({}); // Keep mappings if needed by children
+const validStatuses = ref(['NEEDS_REVIEW', 'ESCALATE_L2', 'DISMISS']);
 const isSidebarCollapsed = ref(false);
 const isAgentOpen = ref(false); // Controls Agent Panel visibility
 
@@ -22,6 +23,18 @@ const toggleSidebar = () => {
 // Toggle Agent Panel
 const toggleAgent = () => {
     isAgentOpen.value = !isAgentOpen.value;
+};
+
+const fetchConfig = async () => {
+  try {
+    const response = await axios.get('http://localhost:8000/config');
+    mappings.value = response.data;
+    if (Array.isArray(response.data?.valid_statuses) && response.data.valid_statuses.length > 0) {
+      validStatuses.value = response.data.valid_statuses;
+    }
+  } catch (error) {
+    console.error('Error fetching config:', error);
+  }
 };
 
 // Dashboard Layout Logic
@@ -54,6 +67,7 @@ const fetchAlerts = async (date = null) => {
 };
 
 onMounted(async () => {
+  await fetchConfig();
   await fetchAlerts();
 });
 
@@ -124,6 +138,7 @@ const onFilterDate = (val) => {
                 :alerts="filteredAlerts" 
                 :availableDates="availableDates"
                 :selectedId="selectedAlertId"
+                :validStatuses="validStatuses"
                 @select="onAlertSelect"
                 @filter-search="onFilterSearch"
                 @filter-status="onFilterStatus"

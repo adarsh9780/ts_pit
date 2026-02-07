@@ -399,14 +399,15 @@ def update_alert_status(alert_id: str, status: str, reason: str = None) -> str:
     Update the status of an alert.
     Args:
         alert_id: The ID of the alert (e.g., ALT-1000)
-        status: New status ('Pending', 'Approved', 'Rejected')
+        status: New status (configured in config.yaml)
         reason: Optional reason for the status change
     """
-    valid_statuses = ["Pending", "Approved", "Rejected"]
-    if status not in valid_statuses:
+    config = get_config()
+    normalized_status = config.normalize_status(status)
+    valid_statuses = config.get_valid_statuses()
+    if config.is_status_enforced() and normalized_status not in valid_statuses:
         return f"Invalid status '{status}'. Must be one of: {valid_statuses}"
 
-    config = get_config()
     conn = get_db_connection()
     cursor = conn.cursor()
 
@@ -417,7 +418,7 @@ def update_alert_status(alert_id: str, status: str, reason: str = None) -> str:
     try:
         cursor.execute(
             f'UPDATE "{table_name}" SET "{status_col}" = ? WHERE "{alert_id_col}" = ?',
-            (status, alert_id),
+            (normalized_status, alert_id),
         )
         conn.commit()
 
@@ -426,7 +427,7 @@ def update_alert_status(alert_id: str, status: str, reason: str = None) -> str:
             return f"Alert {alert_id} not found."
 
         conn.close()
-        return f"Successfully updated alert {alert_id} status to '{status}'."
+        return f"Successfully updated alert {alert_id} status to '{normalized_status}'."
 
     except Exception as e:
         conn.close()

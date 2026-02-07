@@ -99,6 +99,20 @@ def run_migrations():
             print(f"Migrating: Adding {col} to {table_name}")
             cursor.execute(f'ALTER TABLE "{table_name}" ADD COLUMN "{col}" {dtype}')
 
+    # Ensure status column exists and is backfilled to a valid default.
+    status_col = config.get_column("alerts", "status")
+    default_status = config.get_valid_statuses()[0]
+    if status_col not in columns:
+        print(f"Migrating: Adding {status_col} to {table_name} with default '{default_status}'")
+        default_status_sql = default_status.replace("'", "''")
+        cursor.execute(
+            f'ALTER TABLE "{table_name}" ADD COLUMN "{status_col}" TEXT DEFAULT \'{default_status_sql}\''
+        )
+    cursor.execute(
+        f'UPDATE "{table_name}" SET "{status_col}" = ? WHERE "{status_col}" IS NULL OR TRIM("{status_col}") = ""',
+        (default_status,),
+    )
+
     # 2. Migrate Articles Table
     articles_table = config.get_table_name("articles")
     cursor.execute(f'PRAGMA table_info("{articles_table}")')
@@ -139,6 +153,20 @@ def run_migrations():
 
 
 run_migrations()
+
+
+def normalize_and_validate_status(raw_status: str) -> str:
+    """
+    Normalize status using aliases and enforce allowed status values.
+    """
+    normalized = config.normalize_status(raw_status)
+    if config.is_status_enforced() and not config.is_valid_status(normalized):
+        valid_statuses = config.get_valid_statuses()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Invalid alert status '{raw_status}'. Allowed statuses: {valid_statuses}",
+        )
+    return normalized
 
 # Add CORS middleware
 app.add_middleware(
@@ -289,14 +317,22 @@ def get_alerts(date: Optional[str] = None):
 
     rows = cursor.fetchall()
     conn.close()
-    return [remap_row(dict(row), "alerts") for row in rows]
+
+    results = []
+    for row in rows:
+        remapped = remap_row(dict(row), "alerts")
+        if "status" in remapped:
+            remapped["status"] = normalize_and_validate_status(remapped["status"])
+        results.append(remapped)
+    return results
 
 
 @app.patch("/alerts/{alert_id}/status")
 def update_alert_status(alert_id: str | int, update: StatusUpdate):
     """Update the status of an alert."""
+    normalized_status = config.normalize_status(update.status)
     valid_statuses = config.get_valid_statuses()
-    if update.status not in valid_statuses:
+    if config.is_status_enforced() and normalized_status not in valid_statuses:
         raise HTTPException(
             status_code=400, detail=f"Invalid status. Must be one of: {valid_statuses}"
         )
@@ -310,7 +346,7 @@ def update_alert_status(alert_id: str | int, update: StatusUpdate):
 
     cursor.execute(
         f'UPDATE "{table_name}" SET "{status_col}" = ? WHERE "{alert_id_col}" = ?',
-        (update.status, alert_id),
+        (normalized_status, alert_id),
     )
     conn.commit()
 
@@ -319,7 +355,7 @@ def update_alert_status(alert_id: str | int, update: StatusUpdate):
         raise HTTPException(status_code=404, detail="Alert not found")
 
     conn.close()
-    return {"message": "Status updated", "alert_id": alert_id, "status": update.status}
+    return {"message": "Status updated", "alert_id": alert_id, "status": normalized_status}
 
 
 @app.get("/alerts/{alert_id}")
@@ -340,7 +376,10 @@ def get_alert_detail(alert_id: str | int):
     if row is None:
         raise HTTPException(status_code=404, detail="Alert not found")
 
-    return remap_row(dict(row), "alerts")
+    result = remap_row(dict(row), "alerts")
+    if "status" in result:
+        result["status"] = normalize_and_validate_status(result["status"])
+    return result
 
 
 @app.post("/alerts/{alert_id}/summary")

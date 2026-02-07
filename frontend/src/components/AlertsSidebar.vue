@@ -13,6 +13,10 @@ const props = defineProps({
   availableDates: {
     type: Array,
     default: () => []
+  },
+  validStatuses: {
+    type: Array,
+    default: () => ['NEEDS_REVIEW', 'ESCALATE_L2', 'DISMISS']
   }
 });
 
@@ -47,13 +51,16 @@ const formatTime = (dateStr) => {
    return dateStr.split('T')[1]?.slice(0, 5) || dateStr; // Simple time extraction if local time
 };
 
-const getStatusClass = (status) => {
-    switch (status) {
-        case 'Approved': return 'status-dot-success';
-        case 'Rejected': return 'status-dot-danger';
-        default: return 'status-dot-warning';
-    }
+const statusClassMap = {
+    NEEDS_REVIEW: 'status-dot-warning',
+    ESCALATE_L2: 'status-dot-danger',
+    DISMISS: 'status-dot-success',
+    Pending: 'status-dot-warning',
+    Approved: 'status-dot-danger',
+    Rejected: 'status-dot-success'
 };
+
+const getStatusClass = (status) => statusClassMap[status] || 'status-dot-warning';
 
 const getTypeClass = (type) => {
     return type?.toLowerCase() === 'buy' ? 'badge-buy' : 'badge-sell';
@@ -82,9 +89,7 @@ const getTypeClass = (type) => {
         
         <select v-model="statusFilter" @change="onStatusChange" class="select-sm">
           <option value="">All Status</option>
-          <option value="Pending">Pending</option>
-          <option value="Approved">Approved</option>
-          <option value="Rejected">Rejected</option>
+          <option v-for="status in validStatuses" :key="status" :value="status">{{ status }}</option>
         </select>
       </div>
 

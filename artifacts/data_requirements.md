@@ -23,7 +23,7 @@ Contains the core financial alerts that drive the dashboard.
 | `Alert ID` | TEXT | **Yes** | Unique identifier for the alert. Used in URLs. | `ALT-2024-001` |
 | `Ticker` | TEXT | **Yes** | Stock ticker symbol. | `NVDA` |
 | `ISIN` | TEXT | **Yes** | International Securities Identification Number. **CRITICAL**: Used to link to articles. Must match exactly. | `US67066G1040` |
-| `status` | TEXT | **Yes** | Workflow status. Allowed values: `Pending`, `Approved`, `Rejected`. | `Pending` |
+| `status` | TEXT | **Yes** | Workflow status. Default canonical values: `NEEDS_REVIEW`, `ESCALATE_L2`, `DISMISS` (aliases can be configured). | `NEEDS_REVIEW` |
 | `Alert date` | TEXT | Yes | Date the alert was generated (`YYYY-MM-DD`). Used for filtering. | `2024-01-15` |
 | `Start date` | TEXT | Yes | Start of the relevant analysis period (`YYYY-MM-DD`). | `2023-12-15` |
 | `End date` | TEXT | Yes | End of the relevant analysis period (`YYYY-MM-DD`). | `2024-01-15` |
