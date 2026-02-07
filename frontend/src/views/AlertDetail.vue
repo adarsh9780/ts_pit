@@ -251,8 +251,8 @@ const chartOptions = computed(() => {
     }
 
     
-    // Add scatter series for bubbles if we have data (only show in line mode)
-    if (chartType.value !== 'candle' && bubbleSeriesData.value.length > 0) {
+    // Bubble y-values are based on actual prices, so keep them only in actual line mode.
+    if (chartType.value !== 'candle' && priceMode.value === 'actual' && bubbleSeriesData.value.length > 0) {
         series.push({
             name: 'News Events',
             type: 'scatter',
@@ -700,6 +700,20 @@ const filteredNews = computed(() => {
 
 watch(selectedPeriod, async (newPeriod) => {
     if (alertData.value) await fetchPrices(alertData.value.ticker, newPeriod);
+});
+
+// Keep chart state combinations valid across toggle transitions.
+watch(priceMode, (mode) => {
+    if (mode === 'rebased') {
+        viewMode.value = 'chart';
+        chartType.value = 'line';
+    }
+});
+
+watch([viewMode, chartType], ([nextViewMode, nextChartType]) => {
+    if (priceMode.value === 'rebased' && (nextViewMode !== 'chart' || nextChartType !== 'line')) {
+        priceMode.value = 'actual';
+    }
 });
 
 onMounted(async () => {

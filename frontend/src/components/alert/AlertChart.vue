@@ -39,6 +39,8 @@ const periods = [
     { label: 'YTD', value: 'ytd' },
     { label: 'Max', value: 'max' },
 ];
+
+const isRebasedDisabled = computed(() => props.viewMode !== 'chart' || props.chartType !== 'line');
 </script>
 
 <template>
@@ -46,29 +48,29 @@ const periods = [
         <div class="card-header chart-header">
             <h3>Price Performance</h3>
             <div class="header-controls">
-                <div class="view-toggle">
+                <div class="view-toggle chart-mode-toggle">
                     <button 
                         :class="{ active: viewMode === 'chart' && chartType === 'line' }" 
                         @click="emit('update:viewMode', 'chart'); emit('update:chartType', 'line')"
                     >Line</button>
                     <button 
                         :class="{ active: viewMode === 'chart' && chartType === 'candle' }" 
-                        @click="emit('update:viewMode', 'chart'); emit('update:chartType', 'candle')"
+                        @click="emit('update:viewMode', 'chart'); emit('update:chartType', 'candle'); emit('update:priceMode', 'actual')"
                     >Candle</button>
                     <button 
                         :class="{ active: viewMode === 'table' }" 
-                        @click="emit('update:viewMode', 'table')"
+                        @click="emit('update:viewMode', 'table'); emit('update:priceMode', 'actual')"
                     >Table</button>
                 </div>
-                <!-- Price Mode Toggle - only shown for line charts -->
-                <div v-if="viewMode === 'chart' && chartType === 'line'" class="view-toggle">
+                <div class="view-toggle price-mode-toggle">
                     <button 
                         :class="{ active: priceMode === 'actual' }" 
                         @click="emit('update:priceMode', 'actual')"
                     >Actual</button>
                     <button 
-                        :class="{ active: priceMode === 'rebased' }" 
-                        @click="emit('update:priceMode', 'rebased')"
+                        :class="{ active: priceMode === 'rebased', disabled: isRebasedDisabled }"
+                        :disabled="isRebasedDisabled"
+                        @click="!isRebasedDisabled && emit('update:priceMode', 'rebased')"
                     >Rebased</button>
                 </div>
                 <div class="period-selector">
@@ -85,7 +87,13 @@ const periods = [
             <div v-if="isLoading" class="loading-overlay"><div class="spinner"></div></div>
             
             <template v-if="!isLoading">
-                <v-chart v-if="viewMode === 'chart' && chartLabels.length" class="chart" :option="chartOptions" autoresize />
+                <v-chart
+                    v-if="viewMode === 'chart' && chartLabels.length"
+                    :key="`${chartType}-${priceMode}-${selectedPeriod}`"
+                    class="chart"
+                    :option="chartOptions"
+                    autoresize
+                />
                 
                 <div v-else-if="viewMode === 'table' && chartLabels.length" class="table-container">
                     <table class="data-table">
@@ -123,7 +131,7 @@ const periods = [
 
 <style scoped>
 .card { background: white; border-radius: 0.75rem; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; }
-.card-header { padding: 1rem 1.5rem; border-bottom: 1px solid #f1f5f9; background: #ffffff; flex-shrink: 0; }
+.card-header { padding: 1rem 1.5rem; border-bottom: 1px solid #f1f5f9; background: #ffffff; flex-shrink: 0; position: relative; z-index: 2; }
 .chart-header { 
     display: flex; 
     justify-content: space-between; 
@@ -144,13 +152,14 @@ const periods = [
 .view-toggle button { border: none; background: transparent; padding: 4px 10px; font-size: 0.75rem; color: #64748b; border-radius: 4px; cursor: pointer; font-weight: 500; }
 .view-toggle button:hover { color: #334155; }
 .view-toggle button.active { background: white; color: #3b82f6; box-shadow: 0 1px 2px rgba(0,0,0,0.05); font-weight: 600; }
+.view-toggle button.disabled { opacity: 0.5; cursor: not-allowed; }
 
 .period-selector { display: flex; gap: 0.25rem; background: #f1f5f9; padding: 0.25rem; border-radius: 6px; white-space: nowrap; overflow-x: auto; max-width: 100%; }
 .period-selector button { border: none; background: transparent; padding: 0.25rem 0.5rem; font-size: 0.75rem; color: #64748b; border-radius: 4px; cursor: pointer; font-weight: 500; }
 .period-selector button:hover { color: #334155; background: rgba(255,255,255,0.5); }
 .period-selector button.active { background: white; color: #3b82f6; box-shadow: 0 1px 2px rgba(0,0,0,0.05); font-weight: 600; }
 
-.card-body { flex: 1; position: relative; min-height: 0; }
+.card-body { flex: 1; position: relative; min-height: 0; z-index: 1; }
 .chart-panel { flex: 2; min-width: 0; height: 100%; }
 .chart-wrapper { height: 100%; width: 100%; }
 .chart { width: 100%; height: 100%; min-height: 400px; }
