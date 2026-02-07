@@ -48,13 +48,16 @@ The score is displayed as three letters (H/M/L) corresponding to **P1**, **P2**,
 The Impact Score is a statistical measure of **market abnormality** at the time of the alert.
 
 *   **Calculated By**: `scripts/calc_impact_scores.py`
-*   **Methodology**: Rolling Z-Score of Hourly Closing Prices.
-    *   $Z = (Price - Mean_{21days}) / StdDev_{21days}$
-    *   Lookback Window: 21 Trading Days (~1 month).
+*   **Methodology (Current Implementation)**:
+    *   Build a baseline from **10 days of hourly candles before article time**.
+    *   Compute hourly return baseline: `(close - open) / open`.
+    *   Use baseline volatility `std(hourly_returns)`.
+    *   Compute event candle return from the first candle at/after article timestamp.
+    *   Final score: `Z = abs(event_return) / baseline_volatility`.
 *   **Interpretation**:
-    *   **High (> 2.0)**: Use "purple" badge. Price movement is statistically significant (2+ standard deviations).
-    *   **Medium (1.0 - 2.0)**: Noticeable movement.
-    *   **Low (< 1.0)**: Normal volatility / Noise.
+    *   **Noise**: `< 2.0`
+    *   **Significant**: `2.0 - <4.0`
+    *   **Extreme**: `>= 4.0`
 
 *   **Why use Z-Score?**
     It normalizes volatility. A 2% move in a stable utility stock is huge (High Z-Score), while a 2% move in a crypto stock might be noise (Low Z-Score).

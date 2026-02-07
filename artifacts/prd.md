@@ -1,5 +1,11 @@
 This is a comprehensive **Methodology and Solution Design Document** for the Insider Trading Alert Validator. This document details the architectural logic, scoring algorithms, and validation steps required to build a "Defense Engine" that automatically identifies public justifications for suspicious trades.
 
+> [!IMPORTANT]
+> **Status of this document**: This PRD is conceptual design guidance and contains draft sections/placeholders.
+> For operational decision labels and current implementation rules, use:
+> - `artifacts/AI_RECOMMENDATION_LOGIC.md`
+> - `artifacts/SCORING_METHODOLOGY.md`
+
 ---
 
 # 📘 Solution Design: Insider Trading "Defense Engine"

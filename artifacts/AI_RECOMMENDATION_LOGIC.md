@@ -1,91 +1,77 @@
-# AI Recommendation Logic: The "Justification Test"
+# AI Recommendation Logic (Operational Contract)
 
-This document details the **Artificial Intelligence (AI) Recommendation Engine** implemented in the dashboard. This system acts as an automated "Level 1 Analyst," determining whether an alert should be rejected (justified by news) or escalated (unexplained).
-
----
-
-## 1. The Core Methodology
-The logic is built on a **"Causality Check"**:
-> *Does the available public news explain the observed market reaction?*
-
-We compare two magnitudes:
-1.  **Market Impact** (Z-Score): How abnormal was the price move?
-2.  **News Materiality** (Content): How significant is the news event?
-
-### The Decision Matrix
-| Scenario | Impact Score | News Quality | Verdict | Reasoning |
-| :--- | :--- | :--- | :--- | :--- |
-| **Justified** | **High** (>2.0) | **High** (Earnings/M&A) | **REJECT** | "Market move is explained by major news." |
-| **Anomaly** | **High** (>2.0) | **Low / None** | **APPROVE L2** | "Price moved significantly but no news explains it. Suspicious." |
-| **Noise** | **Low** (<2.0) | **Any** | **REJECT** | "No significant market impact occurred." |
+This document defines the current recommendation contract for the dashboard.
+It is the canonical reference for recommendation labels and decision intent.
 
 ---
 
-## 2. Technical Data Flow
+## 1. Canonical Recommendation Labels
 
-### Step 1: Data Aggregation (`backend/main.py`)
-When the user clicks **"Analyze with AI"**:
-1.  Backend fetches the **Alert Detail** and **Active Articles**.
-2.  It calculates the **Max Impact Score** from the active articles (or Alert history).
-    *   *Note*: The Z-Score comes from `scripts/calc_impact_scores.py` and is stored in the DB.
+Use only these values for system recommendations:
 
-### Step 2: Context Construction (`backend/llm.py`)
-The `generate_cluster_summary` function builds a context block for the LLM.
+- `DISMISS`: Market move appears justified by public information, or impact is noise.
+- `ESCALATE_L2`: Suspicious or unexplained behavior requiring deeper review.
+- `NEEDS_REVIEW`: Insufficient/conflicting evidence or technical/data-quality blockers.
 
-**What is sent to the LLM?**
-We use a **Smart Filter** to select the most relevant evidence (capped at 30 articles):
-1.  **High Importance**: Any article with an 'H' component in Materiality (e.g., `HML`, `LHM`).
-2.  **High Impact**: Any article with a significant Impact Score (> 2.0).
-3.  **Fallback**: If fewer than 3 significant articles exist, we default to the Top 15 sorted by date.
-
-For *each* selected article, we send:
-*   **Title**: The headline.
-*   **Summary**: The full content/summary.
-*   **Theme**: The AI-classified category (e.g., `EARNINGS_ANNOUNCEMENT`).
-*   **Impact Score**: The specific Z-Score (Evidence of market reaction).
-*   **Materiality**: The P1P2P3 score (Evidence of importance).
-
-**Example Input to LLM:**
-```text
-Title: AAPL Stock Falls on SUV Delay
-Summary: Apple announced it is delaying the Apple Car indefinitely...
-CONFIRMED THEME: PRODUCT_TECH_LAUNCH
-IMPACT SCORE (Z-Score): 3.2
-```
-
-### Step 3: The Prompt (`backend/prompts.py`)
-The `CLUSTER_SUMMARY_SYSTEM_PROMPT` contains the "Analyst Instructions".
-It explicitly directs the model to perform the **Justification Test**:
-
-> "Check Evidence: Do the provided articles explain the *direction* and *magnitude* of the move?
-> IF High Impact AND High Materiality News -> REJECT (Justified).
-> IF High Impact BUT No Material News -> APPROVE_L2 (Suspicious)."
-
-### Step 4: Structured Output (`backend/schemas.py`)
-The LLM returns a strict JSON object (`ClusterSummaryOutput`):
-```json
-{
-  "recommendation": "REJECT",
-  "recommendation_reason": "High impact score (3.2) is fully justified by the negative product delay announcement."
-}
-```
-
-### Step 5: Frontend Display (`frontend/.../AlertDetail.vue`)
-*   **Green Badge (REJECT)**: Displays "✅ MARKET MOVE EXPLAINED".
-*   **Red Badge (APPROVE_L2)**: Displays "⚠️ UNEXPLAINED ANOMALY".
+> Note: Historical labels (`REJECT`, `APPROVE L2`, `Approve the alert`, `Dismiss the alert`) are legacy vocabulary and should be treated as transitional aliases only.
 
 ---
 
-## 3. Code Locations (Where to Edit)
+## 2. Core Methodology
 
-| Component | File Path | Purpose |
-| :--- | :--- | :--- |
-| **Prompt Logic** | `backend/prompts.py` | Edit the "Analyst Persona" and decision rules. |
-| **Context Builder** | `backend/llm.py` | Change *what data* (e.g., prices, volume) is sent to the LLM. |
-| **Output Schema** | `backend/schemas.py` | Add new fields (e.g., Confidence Score) to the JSON output. |
-| **UI Badge** | `frontend/src/views/AlertDetail.vue` | Change colors, icons, or layout of the recommendation. |
+The recommendation is based on a justification test:
+
+1. **Market Impact**: Was the move statistically abnormal?
+2. **News Materiality**: Is there high-quality public evidence that explains direction and magnitude?
+
+### Decision Matrix
+
+| Scenario | Impact | Evidence Quality | System Recommendation |
+| :--- | :--- | :--- | :--- |
+| Move explained by material public news | High | High | `DISMISS` |
+| High impact with weak/no explanatory news | High | Low/None | `ESCALATE_L2` |
+| No significant market abnormality | Low | Any | `DISMISS` |
+| Missing/conflicting key evidence | Unknown | Unknown | `NEEDS_REVIEW` |
 
 ---
 
-## 4. Why This Works
-By forcing the LLM to look at the **Impact Score** (Data) alongside the **Summary** (Narrative), we prevent it from "hallucinating" importance. A news article might *sound* scary, but if the Z-Score is 0.5, the LLM knows to ignore it (Verdict: Noise). Conversely, if the Z-Score is 4.0 and there is no news, it knows to flag it (Verdict: Anomaly).
+## 3. Data Flow (Current Implementation)
+
+1. Backend loads alert context + linked articles in the alert window.
+2. Impact score and materiality context are assembled for selected articles.
+3. LLM returns structured narrative + recommendation.
+4. Recommendation and reason are stored on the alert record.
+
+---
+
+## 4. Prompt Contract (Required)
+
+The recommendation output must map to exactly one of:
+
+- `DISMISS`
+- `ESCALATE_L2`
+- `NEEDS_REVIEW`
+
+Recommendation reason should include explicit evidence (scores, dates, and article-level linkage), not generic prose.
+
+---
+
+## 5. UI Semantics
+
+- Green: `DISMISS`
+- Red: `ESCALATE_L2`
+- Amber/Neutral: `NEEDS_REVIEW`
+
+Analyst workflow status is separate from system recommendation.
+
+---
+
+## 6. Change Control
+
+Any change to recommendation labels, thresholds, or mapping logic must be reflected in:
+
+- `backend/prompts.py`
+- `backend/schemas.py`
+- `backend/llm.py`
+- `frontend/src/components/alert/AlertSummary.vue`
+- this document
