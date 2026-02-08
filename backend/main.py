@@ -450,12 +450,15 @@ def generate_summary(alert_id: str, request: Request):
     ai_p1_col = config.get_column("article_themes", "p1_prominence")
 
     # Join query to prefer AI analysis if available
+    original_theme_col = config.get_column("articles", "theme")
+
     query = f'''
         SELECT 
             a."{title_col}" as title, 
             a."{summary_col}" as original_summary,
             a."{date_col}" as created_date, 
             a."{impact_score_col}" as impact_score,
+            a."{original_theme_col}" as original_theme,
             t."{ai_theme_col}" as ai_theme,
             t."{ai_summary_col}" as ai_summary,
             t."{ai_analysis_col}" as ai_analysis,
@@ -485,9 +488,7 @@ def generate_summary(alert_id: str, request: Request):
         # Use AI theme if valid, else fallback to original
         theme = r.get("ai_theme")
         if not theme or theme.lower() == "string":
-            # Determine which col holds original theme for articles
-            orig_theme_col = config.get_column("articles", "theme")
-            theme = r.get(orig_theme_col) or "UNCATEGORIZED"
+            theme = r.get("original_theme") or "UNCATEGORIZED"
 
         # Use Original Summary as requested
         summary = r.get("original_summary")

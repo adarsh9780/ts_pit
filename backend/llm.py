@@ -214,9 +214,9 @@ def generate_cluster_summary(
             "bearish_events": result.bearish_events or [],
             "neutral_events": result.neutral_events or [],
             "recommendation": result.recommendation
-            or "Approve the alert",  # Default to safety
+            or "NEEDS_REVIEW",  # Safe fallback: manual review
             "recommendation_reason": result.recommendation_reason
-            or "No recommendation generated.",
+            or "No recommendation generated. Manual review required.",
         }
     except Exception as e:
         print(f"LLM Structured Output Error: {e}")
@@ -226,8 +226,8 @@ def generate_cluster_summary(
             "bullish_events": [],
             "bearish_events": [],
             "neutral_events": [],
-            "recommendation": "Approve the alert",
-            "recommendation_reason": "Error during analysis.",
+            "recommendation": "NEEDS_REVIEW",
+            "recommendation_reason": "LLM generation failed. Manual review required.",
         }
 
 
