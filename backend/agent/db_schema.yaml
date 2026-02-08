@@ -177,12 +177,6 @@ tables:
         description: Legacy identifier (same as ISIN)
         db_column: crescendo_id
         example: US67066G1040
-      p1_prominence:
-        type: TEXT
-        description: 'Entity prominence score: H (High - in title), M (Medium - in
-          lead), L (Low - in body)'
-        db_column: p1_prominence
-        example: H
   prices:
     description: Daily OHLCV price data for tickers. Used for price charts and impact
       scoring.

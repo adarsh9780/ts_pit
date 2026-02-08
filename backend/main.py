@@ -123,7 +123,6 @@ def run_migrations():
         config.get_column("articles", "impact_label"): "TEXT",
         config.get_column("articles", "ticker"): "TEXT",
         config.get_column("articles", "instrument_name"): "TEXT",
-        config.get_column("articles", "p1_prominence"): "TEXT",
     }
 
     for col, dtype in new_art_cols.items():
@@ -147,6 +146,14 @@ def run_migrations():
             FOREIGN KEY("{art_id_col}") REFERENCES "articles"(id)
         )
     ''')
+
+    # Ensure article_themes has P1 prominence as the single source of truth.
+    p1_col = config.get_column("article_themes", "p1_prominence")
+    cursor.execute(f'PRAGMA table_info("{themes_table}")')
+    theme_columns = [row["name"] for row in cursor.fetchall()]
+    if p1_col not in theme_columns:
+        print(f"Migrating: Adding {p1_col} to {themes_table}")
+        cursor.execute(f'ALTER TABLE "{themes_table}" ADD COLUMN "{p1_col}" TEXT')
 
     conn.commit()
     conn.close()
@@ -745,11 +752,6 @@ def get_news(
     impact_score_col = config.get_column("articles", "impact_score")
     original_theme_col = config.get_column("articles", "theme")
     original_summary_col = config.get_column("articles", "summary")
-    # Legacy P1 support (if exists in articles)
-    legacy_p1_col = (
-        "p1_prominence"  # We don't get this from config anymore as we removed it
-    )
-
     query = f'''
         SELECT 
             a.*,
@@ -800,8 +802,8 @@ def get_news(
         # ------------------------------------------------------------------
         # Dynamic Materiality Calculation (P1 + P2 + P3)
         # ------------------------------------------------------------------
-        # Prefer P1 from article_themes (ai_p1), fallback to articles (p1_prominence)
-        p1 = r.get("ai_p1") or r.get("p1_prominence") or "L"
+        # Single source: P1 comes from article_themes only.
+        p1 = r.get("ai_p1") or "L"
         # p3 is now calculated dynamically from the theme
         p2 = calculate_p2(remapped.get("created_date"), start_date, end_date)
         p3 = calculate_p3(remapped.get("theme"))

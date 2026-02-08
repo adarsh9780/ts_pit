@@ -64,7 +64,6 @@ tables:
       impact_label: "impact_label"     # Text label (canonical: Low/Medium/High)
       # Additional columns in database
       crescendo_id: "crescendo_id"     # Legacy identifier (same as ISIN)
-      p1_prominence: "p1_prominence"   # Entity prominence: H/M/L
 
   # Price cache table (auto-created if doesn't exist)
   prices:
