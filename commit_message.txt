@@ -1,6 +1,8 @@
-Align deterministic impact gating, config-safe FK, and DDGS SSL behavior
+Refactor agent to use non-persisting alert analysis and JSON tool contracts
 
-- fix deterministic high-impact threshold to match canonical policy (High >= 4.0)
-- use config-mapped articles ID column in article_themes FK migration
-- make DDGS SSL verification respect config.yaml proxy.ssl_verify instead of forcing verify=False
-- keep behavior backwards-compatible for existing DBs while improving portability and policy consistency
+- add shared non-persisting analysis module (deterministic gates + LLM summary + citations)
+- route /alerts/{id}/summary through shared analysis core, then persist only in API endpoint
+- add agent tools: analyze_current_alert and get_current_alert_news (strict in-window evidence)
+- remove write-capable and generic ticker-news tools from agent binding
+- enforce analysis-first behavior for current alert intents and require evidence citations
+- standardize bound tool outputs to structured JSON {ok,data,error,meta}

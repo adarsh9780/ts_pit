@@ -19,8 +19,9 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from .database import get_db_connection, remap_row
 from .config import get_config
-from .llm import get_llm_model, generate_cluster_summary, generate_article_analysis
+from .llm import get_llm_model, generate_article_analysis
 from .prices import fetch_and_cache_prices, get_ticker_from_isin
+from .alert_analysis import analyze_alert_non_persisting
 from .agent.graph import workflow  # Import the workflow blueprint
 
 # Load configuration
@@ -679,200 +680,63 @@ def get_alert_detail(alert_id: str | int):
 def generate_summary(alert_id: str, request: Request):
     """Generate AI summary for the alert."""
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
+        alerts_table = config.get_table_name("alerts")
+        alert_id_col = config.get_column("alerts", "id")
 
-    # 1. Get Alert Details
-    alerts_table = config.get_table_name("alerts")
-    isin_col = config.get_column("alerts", "isin")
-    ticker_col = config.get_column("alerts", "ticker")  # Add ticker col
-    start_col = config.get_column("alerts", "start_date")
-    end_col = config.get_column("alerts", "end_date")
-    alert_id_col = config.get_column("alerts", "id")
-    alert, matched_id_col, matched_id_value = _resolve_alert_row(
-        cursor, alerts_table, alert_id
-    )
+        analysis = analyze_alert_non_persisting(
+            conn=conn, config=config, alert_id=alert_id, llm=request.app.state.llm
+        )
+        if not analysis.get("ok"):
+            if analysis.get("error") == "Alert not found":
+                raise HTTPException(status_code=404, detail="Alert not found")
+            raise HTTPException(status_code=500, detail=analysis.get("error", "Analysis failed"))
 
-    if not alert:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Alert not found")
+        result = analysis["result"]
+        matched_id_col = analysis.get("matched_id_col")
+        matched_id_value = analysis.get("matched_id_value")
+        now_str = datetime.now().isoformat()
 
-    start_date = alert[start_col]
-    end_date = alert[end_col]
-    isin = alert[isin_col]
-    ticker = alert[ticker_col] if ticker_col in alert.keys() else None
+        bullish_json = json.dumps(result.get("bullish_events", []))
+        bearish_json = json.dumps(result.get("bearish_events", []))
+        neutral_json = json.dumps(result.get("neutral_events", []))
 
-    # Extract trade_type for AI alignment check
-    trade_type_col = config.get_column("alerts", "trade_type")
-    trade_type = alert[trade_type_col] if trade_type_col in alert.keys() else None
-
-    # 1.5 Fetch Price History for context
-    price_history = []
-    if ticker and start_date and end_date:
-        prices_table = config.get_table_name("prices")
-        price_ticker_col = config.get_column("prices", "ticker")
-        price_date_col = config.get_column("prices", "date")
-        price_close_col = config.get_column("prices", "close")
-
-        try:
-            cursor.execute(
-                f'SELECT "{price_date_col}" as date, "{price_close_col}" as close FROM "{prices_table}" WHERE "{price_ticker_col}" = ? AND "{price_date_col}" BETWEEN ? AND ? ORDER BY "{price_date_col}" ASC',
-                (ticker, start_date, end_date),
-            )
-            price_history = [dict(row) for row in cursor.fetchall()]
-        except Exception as e:
-            print(f"Error fetching price history for summary: {e}")
-
-    # 2. Fetch news with AI Analysis fallback
-    articles_table = config.get_table_name("articles")
-    themes_table = config.get_table_name("article_themes")
-
-    art_id_col = config.get_column("articles", "id")
-    art_isin_col = config.get_column("articles", "isin")
-    date_col = config.get_column("articles", "created_date")
-    title_col = config.get_column("articles", "title")
-    summary_col = config.get_column("articles", "summary")
-    impact_score_col = config.get_column("articles", "impact_score")
-
-    # Theme columns
-    theme_art_id_col = config.get_column("article_themes", "art_id")
-    ai_theme_col = config.get_column("article_themes", "theme")
-    ai_summary_col = config.get_column("article_themes", "summary")
-    ai_analysis_col = config.get_column("article_themes", "analysis")
-    ai_p1_col = config.get_column("article_themes", "p1_prominence")
-
-    # Join query to prefer AI analysis if available
-    original_theme_col = config.get_column("articles", "theme")
-
-    query = f'''
-        SELECT 
-            a."{title_col}" as title, 
-            a."{summary_col}" as original_summary,
-            a."{date_col}" as created_date, 
-            a."{impact_score_col}" as impact_score,
-            a."{original_theme_col}" as original_theme,
-            t."{ai_theme_col}" as ai_theme,
-            t."{ai_summary_col}" as ai_summary,
-            t."{ai_analysis_col}" as ai_analysis,
-            t."{ai_p1_col}" as ai_p1
-        FROM "{articles_table}" a
-        LEFT JOIN "{themes_table}" t ON a."{art_id_col}" = t."{theme_art_id_col}"
-        WHERE a."{art_isin_col}" = ?
-    '''
-    params = [isin]
-
-    if start_date:
-        query += f' AND a."{date_col}" >= ?'
-        params.append(start_date)
-    if end_date:
-        query += f' AND a."{date_col}" <= ?'
-        params.append(end_date)
-
-    query += f' ORDER BY a."{date_col}" DESC'
-
-    cursor.execute(query, params)
-
-    # Construct list for LLM, preferring AI versions
-    articles = []
-    for row in cursor.fetchall():
-        r = dict(row)
-
-        # Use AI theme if valid, else fallback to original
-        theme = r.get("ai_theme")
-        if not theme or theme.lower() == "string":
-            theme = r.get("original_theme") or "UNCATEGORIZED"
-
-        # Use Original Summary as requested
-        summary = r.get("original_summary")
-        if not summary or not summary.strip():
-            summary = r.get("ai_summary")  # Last resort fallback
-
-        # Calculate Materiality
-        p1 = r.get("ai_p1") or "L"
-        p2 = calculate_p2(r.get("created_date"), start_date, end_date)
-        p3 = calculate_p3(theme)
-        materiality = f"{p1}{p2}{p3}"
-
-        articles.append(
-            {
-                "title": r["title"],
-                "summary": summary,
-                "created_date": r.get("created_date"),
-                "theme": theme,
-                "analysis": r["ai_analysis"],
-                "impact_score": r["impact_score"],
-                "materiality": materiality,
-            }
+        recommendation = result.get(
+            "recommendation", "NEEDS_REVIEW"
+        )
+        recommendation_reason = result.get(
+            "recommendation_reason", "AI analysis completed."
         )
 
-    # 3. Deterministic gates first, LLM second.
-    deterministic_result, llm_articles = _run_deterministic_summary_gates(
-        alert=alert,
-        articles=articles,
-        start_date=start_date,
-        end_date=end_date,
-        trade_type=trade_type,
-    )
+        cursor.execute(
+            f'UPDATE "{alerts_table}" SET "narrative_theme" = ?, "narrative_summary" = ?, "bullish_events" = ?, "bearish_events" = ?, "neutral_events" = ?, "summary_generated_at" = ?, "recommendation" = ?, "recommendation_reason" = ? WHERE "{matched_id_col or alert_id_col}" = ?',
+            (
+                result["narrative_theme"],
+                result["narrative_summary"],
+                bullish_json,
+                bearish_json,
+                neutral_json,
+                now_str,
+                recommendation,
+                recommendation_reason,
+                matched_id_value if matched_id_col else alert_id,
+            ),
+        )
+        conn.commit()
 
-    if deterministic_result is not None:
-        result = deterministic_result
-    else:
-        try:
-            llm = request.app.state.llm
-            result = generate_cluster_summary(
-                llm_articles or articles,
-                price_history=price_history,
-                trade_type=trade_type,
-                llm=llm,
-            )
-        except Exception as e:
-            conn.close()
-            print(f"LLM Error: {e}")
-            raise HTTPException(status_code=500, detail=f"LLM Generation Failed: {str(e)}")
-
-    # 4. Save to DB
-    # 4. Save to DB
-    now_str = datetime.now().isoformat()
-
-    # Serialize lists to JSON
-    bullish_json = json.dumps(result.get("bullish_events", []))
-    bearish_json = json.dumps(result.get("bearish_events", []))
-    neutral_json = json.dumps(result.get("neutral_events", []))
-
-    # Extract Recommendation
-    recommendation = result.get(
-        "recommendation", "NEEDS_REVIEW"
-    )  # Default to manual review if missing
-    recommendation_reason = result.get(
-        "recommendation_reason", "AI analysis completed."
-    )
-
-    cursor.execute(
-        f'UPDATE "{alerts_table}" SET "narrative_theme" = ?, "narrative_summary" = ?, "bullish_events" = ?, "bearish_events" = ?, "neutral_events" = ?, "summary_generated_at" = ?, "recommendation" = ?, "recommendation_reason" = ? WHERE "{matched_id_col or alert_id_col}" = ?',
-        (
-            result["narrative_theme"],
-            result["narrative_summary"],
-            bullish_json,
-            bearish_json,
-            neutral_json,
-            now_str,
-            recommendation,
-            recommendation_reason,
-            matched_id_value if matched_id_col else alert_id,
-        ),
-    )
-    conn.commit()
-    conn.close()
-
-    return {
-        "narrative_theme": result["narrative_theme"],
-        "narrative_summary": result["narrative_summary"],
-        "bullish_events": result.get("bullish_events", []),
-        "bearish_events": result.get("bearish_events", []),
-        "neutral_events": result.get("neutral_events", []),
-        "recommendation": recommendation,
-        "recommendation_reason": recommendation_reason,
-        "summary_generated_at": now_str,
-    }
+        return {
+            "narrative_theme": result["narrative_theme"],
+            "narrative_summary": result["narrative_summary"],
+            "bullish_events": result.get("bullish_events", []),
+            "bearish_events": result.get("bearish_events", []),
+            "neutral_events": result.get("neutral_events", []),
+            "recommendation": recommendation,
+            "recommendation_reason": recommendation_reason,
+            "summary_generated_at": now_str,
+        }
+    finally:
+        conn.close()
 
 
 # fetch_and_cache_prices and get_ticker_from_isin moved to backend/prices.py

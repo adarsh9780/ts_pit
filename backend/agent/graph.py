@@ -25,9 +25,8 @@ from backend.agent.tools import (
     get_alert_details,
     get_alerts_by_ticker,
     count_material_news,
-    get_price_history,
-    search_news,
-    update_alert_status,
+    analyze_current_alert,
+    get_current_alert_news,
     search_web_news,
     scrape_websites,
 )
@@ -74,14 +73,28 @@ def agent_node(state: AgentState, config: RunnableConfig):
         get_alert_details,
         get_alerts_by_ticker,
         count_material_news,
-        get_price_history,
-        search_news,
-        update_alert_status,
+        analyze_current_alert,
+        get_current_alert_news,
         search_web_news,
         scrape_websites,
     ]
 
     llm_with_tools = llm.bind_tools(tools)
+
+    last_content = str(messages[-1].content).lower() if messages else ""
+    analysis_intent = any(
+        kw in last_content
+        for kw in ("analyze", "analysis", "recommendation", "assess", "investigate")
+    ) and ("current alert context" in last_content or "this alert" in last_content)
+    if analysis_intent:
+        messages = list(messages) + [
+            SystemMessage(
+                content=(
+                    "For current-alert analysis requests, call analyze_current_alert first, "
+                    "then answer using that output. Include evidence citations with article_id and created_date."
+                )
+            )
+        ]
 
     # Invoke
     response = llm_with_tools.invoke(messages)
@@ -113,9 +126,8 @@ def build_graph():
         get_alert_details,
         get_alerts_by_ticker,
         count_material_news,
-        get_price_history,
-        search_news,
-        update_alert_status,
+        analyze_current_alert,
+        get_current_alert_news,
         search_web_news,
         scrape_websites,
     ]
