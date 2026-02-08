@@ -223,6 +223,15 @@ class Config:
             if db_col:
                 prices_mapping[ui_key] = db_col
 
+        has_materiality_configured = all(
+            [
+                self.has_column("articles", "created_date"),
+                self.has_column("articles", "theme"),
+                self.has_column("article_themes", "art_id"),
+                self.has_column("article_themes", "p1_prominence"),
+            ]
+        )
+
         return {
             "alerts": alerts_mapping,
             "articles": articles_mapping,
@@ -231,7 +240,7 @@ class Config:
             "display_columns": self.get_display_columns(),
             "column_labels": self._config.get("display", {}).get("column_labels", {}),
             "valid_statuses": self.get_valid_statuses(),
-            "has_materiality": True,  # Calculated dynamically in main.py
+            "has_materiality": has_materiality_configured,
         }
 
 

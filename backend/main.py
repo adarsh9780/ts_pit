@@ -223,6 +223,48 @@ def normalize_impact_label(raw_label: str) -> str:
     normalized = config.normalize_impact_label(raw_label)
     return normalized if normalized else raw_label
 
+
+def _db_column_exists(table_name: str, column_name: str) -> bool:
+    """Check if a physical DB column exists."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(f'PRAGMA table_info("{table_name}")')
+        columns = {row["name"] for row in cursor.fetchall()}
+        return column_name in columns
+    finally:
+        conn.close()
+
+
+def _has_materiality_support() -> bool:
+    """
+    Determine if materiality should be enabled in UI.
+    Requires both configured mappings and physical DB columns.
+    """
+    required_mappings = [
+        ("articles", "created_date"),
+        ("articles", "theme"),
+        ("article_themes", "art_id"),
+        ("article_themes", "p1_prominence"),
+    ]
+    for table_key, col_key in required_mappings:
+        if not config.has_column(table_key, col_key):
+            return False
+
+    required_db_columns = [
+        (config.get_table_name("articles"), config.get_column("articles", "created_date")),
+        (config.get_table_name("articles"), config.get_column("articles", "theme")),
+        (
+            config.get_table_name("article_themes"),
+            config.get_column("article_themes", "art_id"),
+        ),
+        (
+            config.get_table_name("article_themes"),
+            config.get_column("article_themes", "p1_prominence"),
+        ),
+    ]
+    return all(_db_column_exists(table, col) for table, col in required_db_columns)
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -344,14 +386,18 @@ class StatusUpdate(BaseModel):
 @app.get("/config")
 def get_config_endpoint():
     """Return configuration for the frontend."""
-    return config.get_mappings_for_api()
+    payload = config.get_mappings_for_api()
+    payload["has_materiality"] = _has_materiality_support()
+    return payload
 
 
 # For backwards compatibility, also serve at /mappings
 @app.get("/mappings")
 def get_mappings():
     """Legacy endpoint - returns same as /config."""
-    return config.get_mappings_for_api()
+    payload = config.get_mappings_for_api()
+    payload["has_materiality"] = _has_materiality_support()
+    return payload
 
 
 @app.get("/alerts")

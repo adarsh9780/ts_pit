@@ -1,0 +1,2 @@
+"remove p1_prominence column from articles table and use only article_themes table, default value will be L, utility scritp to remove the exis
+ting column from article"
