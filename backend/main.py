@@ -132,6 +132,8 @@ def run_migrations():
 
     # 3. Ensure 'article_themes' table exists
     themes_table = config.get_table_name("article_themes")
+    articles_table = config.get_table_name("articles")
+    articles_id_col = config.get_column("articles", "id")
     art_id_col = config.get_column("article_themes", "art_id")
     theme_col = config.get_column("article_themes", "theme")
     summary_col = config.get_column("article_themes", "summary")
@@ -143,7 +145,7 @@ def run_migrations():
             "{theme_col}" TEXT,
             "{summary_col}" TEXT,
             "{analysis_col}" TEXT,
-            FOREIGN KEY("{art_id_col}") REFERENCES "articles"(id)
+            FOREIGN KEY("{art_id_col}") REFERENCES "{articles_table}"("{articles_id_col}")
         )
     ''')
 
@@ -251,7 +253,8 @@ def _parse_datetime(value: str | None) -> datetime | None:
 
 def _is_high_impact(score: float | int | None) -> bool:
     try:
-        return abs(float(score)) >= 2.0
+        # Canonical thresholds: Low < 2.0, Medium >= 2.0 and < 4.0, High >= 4.0.
+        return abs(float(score)) >= 4.0
     except (TypeError, ValueError):
         return False
 

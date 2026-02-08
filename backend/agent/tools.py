@@ -500,8 +500,8 @@ async def search_web_news(
         if proxy_url:
             kwargs["proxy"] = proxy_url
 
-        # KEY FIX: Disable SSL verification for VDI environment
-        kwargs["verify"] = False
+        # Respect config.yaml proxy.ssl_verify (defaults to True).
+        kwargs["verify"] = proxy_config.get("ssl_verify", True)
 
         with DDGS(**kwargs) as ddgs:
             # Fetch more than needed to allow for date filtering

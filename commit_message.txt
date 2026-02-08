@@ -1,1 +1,6 @@
-fix time zone aware vs time zone unaware comparisons for art_created_date
+Align deterministic impact gating, config-safe FK, and DDGS SSL behavior
+
+- fix deterministic high-impact threshold to match canonical policy (High >= 4.0)
+- use config-mapped articles ID column in article_themes FK migration
+- make DDGS SSL verification respect config.yaml proxy.ssl_verify instead of forcing verify=False
+- keep behavior backwards-compatible for existing DBs while improving portability and policy consistency
