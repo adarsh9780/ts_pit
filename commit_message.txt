@@ -1,8 +1,13 @@
-Add deterministic pre-LLM causality gates for alert summaries
+Fix deterministic summary gating and consolidate docs into two sources of truth
 
-- run strict readiness checks before AI summary generation (required fields, valid timestamps, linked news)
-- enforce pre-trade causality: only articles at/before trade boundary can justify a trade
-- auto-escalate when high-impact behavior has no material pre-trade public news
-- return deterministic NEEDS_REVIEW/ESCALATE_L2 outcomes when gates fail, and call LLM only when gates pass
+- Fix P0 regression in AI summary flow by including `created_date` in article payload
+  passed to deterministic gates, preventing false `NEEDS_REVIEW` outcomes.
+- Introduce two canonical documents:
+  - `artifacts/BUSINESS_METHODOLOGY.md` (business logic, policy, governance, KPIs)
+  - `artifacts/TECHNICAL_IMPLEMENTATION.md` (architecture, contracts, pipeline, runbook)
+- Simplify `README.md` to point to only the two canonical docs and clean quick-start.
+- Remove stale/conflicting markdown docs to eliminate methodology drift.
+- Update `scripts/test_p3_mapping.py` documentation reference to the new technical doc.
 
-This makes Analyze-with-AI decisions more auditable and consistent by applying deterministic policy before narrative generation.
+This change improves recommendation reliability, reduces documentation ambiguity,
+and makes onboarding/audit conversations much clearer.

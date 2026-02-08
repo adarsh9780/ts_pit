@@ -3,7 +3,7 @@ Regression checks for P3 thematic tier mapping.
 
 This is a lightweight script (no pytest dependency) to prevent drift between:
 - backend/scoring.py (calculate_p3)
-- artifacts/SCORING_METHODOLOGY.md policy table
+- artifacts/TECHNICAL_IMPLEMENTATION.md policy table
 """
 
 import sys

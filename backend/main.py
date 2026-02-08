@@ -789,6 +789,7 @@ def generate_summary(alert_id: str, request: Request):
             {
                 "title": r["title"],
                 "summary": summary,
+                "created_date": r.get("created_date"),
                 "theme": theme,
                 "analysis": r["ai_analysis"],
                 "impact_score": r["impact_score"],
