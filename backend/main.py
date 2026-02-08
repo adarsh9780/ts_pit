@@ -155,17 +155,24 @@ def run_migrations():
 run_migrations()
 
 
+def log_diag(message: str) -> None:
+    """Lightweight diagnostics for VDI/runtime debugging."""
+    print(f"[DIAG] {datetime.now().isoformat()} | {message}")
+
+
 def normalize_and_validate_status(raw_status: str) -> str:
     """
-    Normalize status using aliases and enforce allowed status values.
+    Normalize status for API output.
+    Read paths must be tolerant to legacy/dirty values so UI doesn't fail hard.
     """
     normalized = config.normalize_status(raw_status)
     if config.is_status_enforced() and not config.is_valid_status(normalized):
-        valid_statuses = config.get_valid_statuses()
-        raise HTTPException(
-            status_code=500,
-            detail=f"Invalid alert status '{raw_status}'. Allowed statuses: {valid_statuses}",
+        fallback_status = config.get_valid_statuses()[0]
+        print(
+            f"Warning: Invalid alert status '{raw_status}' encountered on read. "
+            f"Returning fallback '{fallback_status}'."
         )
+        return fallback_status
     return normalized
 
 # Add CORS middleware
@@ -302,6 +309,7 @@ def get_mappings():
 @app.get("/alerts")
 def get_alerts(date: Optional[str] = None):
     """Get all alerts, optionally filtered by date."""
+    log_diag(f"/alerts request | date={date}")
     conn = get_db_connection()
     cursor = conn.cursor()
 
@@ -317,6 +325,7 @@ def get_alerts(date: Optional[str] = None):
 
     rows = cursor.fetchall()
     conn.close()
+    log_diag(f"/alerts query complete | rows={len(rows)}")
 
     results = []
     for row in rows:
@@ -324,6 +333,7 @@ def get_alerts(date: Optional[str] = None):
         if "status" in remapped:
             remapped["status"] = normalize_and_validate_status(remapped["status"])
         results.append(remapped)
+    log_diag(f"/alerts response ready | rows={len(results)}")
     return results
 
 
@@ -361,6 +371,7 @@ def update_alert_status(alert_id: str | int, update: StatusUpdate):
 @app.get("/alerts/{alert_id}")
 def get_alert_detail(alert_id: str | int):
     """Get details for a specific alert."""
+    log_diag(f"/alerts/{alert_id} request")
     conn = get_db_connection()
     cursor = conn.cursor()
 
@@ -374,11 +385,15 @@ def get_alert_detail(alert_id: str | int):
     conn.close()
 
     if row is None:
+        log_diag(f"/alerts/{alert_id} not found")
         raise HTTPException(status_code=404, detail="Alert not found")
 
     result = remap_row(dict(row), "alerts")
     if "status" in result:
         result["status"] = normalize_and_validate_status(result["status"])
+    log_diag(
+        f"/alerts/{alert_id} response | ticker={result.get('ticker')} isin={result.get('isin')} status={result.get('status')}"
+    )
     return result
 
 
@@ -580,6 +595,9 @@ def get_prices(
     end_date: str = Query(None),
 ):
     """Get price data for a ticker with industry comparison."""
+    log_diag(
+        f"/prices/{ticker} request | period={period} start_date={start_date} end_date={end_date}"
+    )
     # Use custom date range if provided, otherwise use period
     if start_date and end_date:
         start_date_str, actual_ticker = fetch_and_cache_prices(
@@ -587,6 +605,9 @@ def get_prices(
         )
     else:
         start_date_str, actual_ticker = fetch_and_cache_prices(ticker, period or "1y")
+    log_diag(
+        f"/prices/{ticker} cache/fetch complete | actual_ticker={actual_ticker} start_date_str={start_date_str}"
+    )
 
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -612,6 +633,9 @@ def get_prices(
     conn.close()
 
     ticker_data = [remap_row(dict(row), "prices") for row in rows]
+    log_diag(
+        f"/prices/{ticker} ticker series | points={len(ticker_data)} first={ticker_data[0].get('date') if ticker_data else None} last={ticker_data[-1].get('date') if ticker_data else None}"
+    )
 
     # 3. Determine Sector and fetch ETF for comparison
     industry_data = []
@@ -664,6 +688,13 @@ def get_prices(
             conn.close()
 
             industry_data = [remap_row(dict(row), "prices") for row in etf_rows]
+            log_diag(
+                f"/prices/{ticker} benchmark series | etf={etf_ticker} points={len(industry_data)}"
+            )
+
+    log_diag(
+        f"/prices/{ticker} response ready | ticker_points={len(ticker_data)} industry_points={len(industry_data)} industry_name={industry_name}"
+    )
 
     return {
         "ticker": ticker_data,
