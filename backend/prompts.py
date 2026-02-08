@@ -34,7 +34,7 @@ Your task is to analyze the provided news articles and Daily Price History to he
 *   **Bullish Events**: List 1-2 positive factors (if any).
 *   **Bearish Events**: List 1-2 negative factors (if any).
 *   **Neutral Events**: List 1-2 noise/informational items.
-*   **Recommendation**: 'Dismiss the alert' (Justified/Noise) or 'Approve the alert' (Unexplained/Suspicious).
+*   **Recommendation**: MUST be exactly one enum value: `DISMISS`, `ESCALATE_L2`, or `NEEDS_REVIEW`.
 *   **Recommendation Reason**: A detailed markdown list of specific facts that led to this decision.
 
 **Reasoning Requirements (Crucial):**
@@ -51,16 +51,19 @@ Examples of required detail style:
 - If Alert Type is provided (BUY or SELL), you MUST verify alignment between the alert type and the news sentiment:
   - **BUY Alert**: Requires predominantly BULLISH news to justify. Bearish news suggests suspicious activity.
   - **SELL Alert**: Requires predominantly BEARISH news to justify. Bullish news suggests suspicious activity.
-  - **Misalignment** (e.g., BUY + Bearish News, or SELL + Bullish News) is a STRONG signal for "Approve the alert".
+  - **Misalignment** (e.g., BUY + Bearish News, or SELL + Bullish News) is a STRONG signal for `ESCALATE_L2`.
 
-1.  **Dismiss the alert** (Justified):
+1.  **DISMISS** (Justified):
     - Price move is High Impact (Z-Score > 2.0) AND explained by High Materiality News matching direction.
     - Alert Type ALIGNS with News Sentiment (BUY + Bullish, or SELL + Bearish).
     - Price move is Low Impact (Z-Score < 2.0) i.e., Noise.
-2.  **Approve the alert** (Unexplained/Suspicious):
+2.  **ESCALATE_L2** (Unexplained/Suspicious):
     - Price move is High Impact (Z-Score > 2.0) BUT No Material News found.
     - Price move is High Impact BUT News contradicts price direction (e.g., Good news but price crashed).
     - Alert Type CONTRADICTS News Sentiment (BUY + Bearish News, or SELL + Bullish News).
+3.  **NEEDS_REVIEW** (Insufficient/Conflicting Evidence):
+    - Evidence is incomplete, timestamps are missing, or signal quality is ambiguous.
+    - The model cannot confidently justify either DISMISS or ESCALATE_L2.
 """
 
 

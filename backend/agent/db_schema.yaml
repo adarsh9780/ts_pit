@@ -104,9 +104,9 @@ tables:
         example: '["Executive change on January 29th"]'
       recommendation:
         type: TEXT
-        description: 'AI recommendation: ''Dismiss the alert'' or ''Approve the alert'''
+        description: 'AI recommendation (canonical enum): ''DISMISS'', ''ESCALATE_L2'', or ''NEEDS_REVIEW'''
         db_column: recommendation
-        example: Approve the alert
+        example: NEEDS_REVIEW
       recommendation_reason:
         type: TEXT
         description: Detailed AI reasoning for the recommendation as markdown list

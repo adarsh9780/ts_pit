@@ -37,8 +37,9 @@ const recommendationClass = computed(() => {
     if (!props.alertData || !props.alertData.recommendation) return '';
     const rec = props.alertData.recommendation.toUpperCase();
     if (rec.includes('DISMISS') || rec.includes('REJECT')) return 'reject'; // Green
-    if (rec.includes('APPROVE') || rec.includes('UNEXPLAINED')) return 'approve_l2'; // Red
-    return '';
+    if (rec.includes('ESCALATE_L2') || rec.includes('APPROVE') || rec.includes('UNEXPLAINED')) return 'approve_l2'; // Red
+    if (rec.includes('NEEDS_REVIEW') || rec.includes('PENDING')) return 'needs_review'; // Amber
+    return 'needs_review';
 });
 </script>
 
@@ -97,7 +98,8 @@ const recommendationClass = computed(() => {
                     <div v-if="alertData.recommendation" class="recommendation-banner" :class="recommendationClass">
                         <div class="rec-icon">
                             <span v-if="recommendationClass === 'reject'">✅</span>
-                            <span v-else>⚠️</span>
+                            <span v-else-if="recommendationClass === 'approve_l2'">⚠️</span>
+                            <span v-else>🟡</span>
                         </div>
                         <div class="rec-text">
                             <div class="rec-title">
@@ -366,6 +368,11 @@ const recommendationClass = computed(() => {
     background-color: #fef2f2; /* Red-50 */
     border-color: #fecaca;     /* Red-200 */
     color: #991b1b;            /* Red-800 */
+}
+.recommendation-banner.needs_review {
+    background-color: #fffbeb; /* Amber-50 */
+    border-color: #fde68a;     /* Amber-200 */
+    color: #92400e;            /* Amber-800 */
 }
 .rec-icon {
     font-size: 1.5rem;

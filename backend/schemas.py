@@ -10,6 +10,8 @@ Industry Best Practice:
 - LangChain's `with_structured_output()` uses these for guaranteed format
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -31,8 +33,8 @@ class ClusterSummaryOutput(BaseModel):
     neutral_events: list[str] = Field(
         description="List of 1-2 short text items describing neutral or informational factors. DO NOT include bullet characters (-, *, •) at the start of each item."
     )
-    recommendation: str = Field(
-        description="FINAL VERDICT: 'Dismiss the alert' (Justified) or 'Approve the alert' (Unexplained)"
+    recommendation: Literal["DISMISS", "ESCALATE_L2", "NEEDS_REVIEW"] = Field(
+        description="FINAL VERDICT enum only: 'DISMISS', 'ESCALATE_L2', or 'NEEDS_REVIEW'"
     )
     recommendation_reason: str = Field(
         description="A detailed markdown bulleted list of specific facts (article counts, scores) justifying the decision."

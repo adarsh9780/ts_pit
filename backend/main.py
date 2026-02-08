@@ -572,8 +572,8 @@ def generate_summary(alert_id: str, request: Request):
 
     # Extract Recommendation
     recommendation = result.get(
-        "recommendation", "APPROVE L2"
-    )  # Default to Approve L2 if missing
+        "recommendation", "NEEDS_REVIEW"
+    )  # Default to manual review if missing
     recommendation_reason = result.get(
         "recommendation_reason", "AI analysis completed."
     )

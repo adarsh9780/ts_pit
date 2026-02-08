@@ -54,6 +54,29 @@ def _resolve_env_var(value: str) -> str:
 # Global cache for the LLM instance
 _cached_llm = None
 
+_CANONICAL_RECOMMENDATIONS = {"DISMISS", "ESCALATE_L2", "NEEDS_REVIEW"}
+
+
+def _normalize_recommendation(value: str | None) -> str:
+    """Map legacy/model recommendation values into canonical enum."""
+    if not value:
+        return "NEEDS_REVIEW"
+
+    normalized = str(value).strip().upper().replace(" ", "_")
+    legacy_map = {
+        "DISMISS_THE_ALERT": "DISMISS",
+        "APPROVE_THE_ALERT": "ESCALATE_L2",
+        "APPROVE_L2": "ESCALATE_L2",
+        "APPROVED": "ESCALATE_L2",
+        "UNEXPLAINED": "ESCALATE_L2",
+        "REJECT": "DISMISS",
+        "REJECTED": "DISMISS",
+        "PENDING": "NEEDS_REVIEW",
+    }
+
+    mapped = legacy_map.get(normalized, normalized)
+    return mapped if mapped in _CANONICAL_RECOMMENDATIONS else "NEEDS_REVIEW"
+
 
 def get_llm_model():
     """
@@ -213,8 +236,7 @@ def generate_cluster_summary(
             "bullish_events": result.bullish_events or [],
             "bearish_events": result.bearish_events or [],
             "neutral_events": result.neutral_events or [],
-            "recommendation": result.recommendation
-            or "NEEDS_REVIEW",  # Safe fallback: manual review
+            "recommendation": _normalize_recommendation(result.recommendation),
             "recommendation_reason": result.recommendation_reason
             or "No recommendation generated. Manual review required.",
         }
