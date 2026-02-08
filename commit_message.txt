@@ -1,13 +1,1 @@
-Fix deterministic summary gating and consolidate docs into two sources of truth
-
-- Fix P0 regression in AI summary flow by including `created_date` in article payload
-  passed to deterministic gates, preventing false `NEEDS_REVIEW` outcomes.
-- Introduce two canonical documents:
-  - `artifacts/BUSINESS_METHODOLOGY.md` (business logic, policy, governance, KPIs)
-  - `artifacts/TECHNICAL_IMPLEMENTATION.md` (architecture, contracts, pipeline, runbook)
-- Simplify `README.md` to point to only the two canonical docs and clean quick-start.
-- Remove stale/conflicting markdown docs to eliminate methodology drift.
-- Update `scripts/test_p3_mapping.py` documentation reference to the new technical doc.
-
-This change improves recommendation reliability, reduces documentation ambiguity,
-and makes onboarding/audit conversations much clearer.
+fix time zone aware vs time zone unaware comparisons for art_created_date

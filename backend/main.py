@@ -5,7 +5,7 @@ import requests
 import asyncio
 import aiosqlite
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Optional, AsyncGenerator
@@ -233,7 +233,11 @@ def _parse_datetime(value: str | None) -> datetime | None:
         return None
     normalized = raw.replace("Z", "+00:00")
     try:
-        return datetime.fromisoformat(normalized)
+        dt = datetime.fromisoformat(normalized)
+        # Normalize to UTC-naive so comparisons never mix aware/naive datetimes.
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
     except ValueError:
         pass
 
