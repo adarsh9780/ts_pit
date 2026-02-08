@@ -33,8 +33,14 @@ const filteredCount = computed(() => {
   return props.alerts.length; 
 });
 
-const onSelect = (alertId) => {
-  emit('select', alertId);
+const resolveAlertId = (alert) => {
+  if (!alert || typeof alert !== 'object') return alert;
+  return alert.id ?? alert.alert_id ?? alert.alertId ?? alert['Alert ID'] ?? null;
+};
+
+const onSelect = (alert) => {
+  const resolvedId = resolveAlertId(alert);
+  emit('select', { id: resolvedId, alert });
 };
 
 // Filter handlers
@@ -113,10 +119,10 @@ const getTypeClass = (type) => {
     <div class="alert-list">
       <div 
         v-for="alert in alerts" 
-        :key="alert.id"
+        :key="resolveAlertId(alert) ?? `${alert.ticker}-${alert.execution_date}`"
         class="alert-card"
-        :class="{ active: selectedId === alert.id }"
-        @click="onSelect(alert.id)"
+        :class="{ active: selectedId === resolveAlertId(alert) }"
+        @click="onSelect(alert)"
       >
         <div class="card-header">
           <div class="ticker-box">
@@ -137,7 +143,7 @@ const getTypeClass = (type) => {
         </div>
         
         <div class="card-footer">
-            <span class="alert-id">Alert ID: #{{ alert.id }}</span>
+            <span class="alert-id">Alert ID: #{{ resolveAlertId(alert) ?? '-' }}</span>
             <div class="status-indicator">
                 <span class="status-dot" :class="getStatusClass(alert.status)"></span>
                 <span class="status-text">{{ alert.status }}</span>

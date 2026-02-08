@@ -326,6 +326,18 @@ def get_alerts(date: Optional[str] = None):
     rows = cursor.fetchall()
     conn.close()
     log_diag(f"/alerts query complete | rows={len(rows)}")
+    if rows:
+        sample_row = dict(rows[0])
+        sample_keys = list(sample_row.keys())
+        sample_id_fields = {
+            "id": sample_row.get("id"),
+            "Alert ID": sample_row.get("Alert ID"),
+            "alert_id": sample_row.get("alert_id"),
+            "status": sample_row.get(config.get_column("alerts", "status")),
+        }
+        log_diag(
+            f"/alerts sample row shape | keys={sample_keys[:20]} id_fields={sample_id_fields}"
+        )
 
     results = []
     for row in rows:

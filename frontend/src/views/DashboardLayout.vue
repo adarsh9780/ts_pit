@@ -25,6 +25,14 @@ const toggleAgent = () => {
     isAgentOpen.value = !isAgentOpen.value;
 };
 
+const resolveAlertId = (item) => {
+  if (item == null) return null;
+  if (typeof item === 'object') {
+    return item.id ?? item.alert_id ?? item.alertId ?? item['Alert ID'] ?? null;
+  }
+  return item;
+};
+
 const fetchConfig = async () => {
   try {
     const response = await axios.get('http://localhost:8000/config');
@@ -44,6 +52,10 @@ const fetchAlerts = async (date = null) => {
     const params = date ? { date } : {};
     const response = await axios.get('http://localhost:8000/alerts', { params });
     alerts.value = response.data;
+    console.log('[DIAG][UI] alerts fetched', {
+      count: alerts.value.length,
+      sampleKeys: alerts.value.length ? Object.keys(alerts.value[0]) : []
+    });
     applyFilters(); // Initial filter application
     
     // Extract dates if not already set (or always update if needed)
@@ -72,7 +84,12 @@ onMounted(async () => {
 });
 
 // Selection Handler
-const onAlertSelect = (id) => {
+const onAlertSelect = (payload) => {
+  const id = resolveAlertId(payload?.id != null ? payload.id : payload);
+  console.log('[DIAG][UI] alert selected', {
+    raw: payload,
+    resolvedId: id
+  });
   selectedAlertId.value = id;
   // Auto-collapse on selection if not already collapsed
   if (!isSidebarCollapsed.value) {
@@ -153,7 +170,7 @@ const onFilterDate = (val) => {
             <p>Loading alerts...</p>
         </div>
         
-        <div v-else-if="selectedAlertId" class="detail-wrapper">
+        <div v-else-if="selectedAlertId !== null && selectedAlertId !== undefined && selectedAlertId !== ''" class="detail-wrapper">
              <AlertDetail 
                 :key="selectedAlertId" 
                 :alertId="selectedAlertId" 
