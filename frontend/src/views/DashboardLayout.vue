@@ -52,10 +52,6 @@ const fetchAlerts = async (date = null) => {
     const params = date ? { date } : {};
     const response = await axios.get('http://localhost:8000/alerts', { params });
     alerts.value = response.data;
-    console.log('[DIAG][UI] alerts fetched', {
-      count: alerts.value.length,
-      sampleKeys: alerts.value.length ? Object.keys(alerts.value[0]) : []
-    });
     applyFilters(); // Initial filter application
     
     // Extract dates if not already set (or always update if needed)
@@ -86,11 +82,7 @@ onMounted(async () => {
 // Selection Handler
 const onAlertSelect = (payload) => {
   const id = resolveAlertId(payload?.id != null ? payload.id : payload);
-  console.log('[DIAG][UI] alert selected', {
-    raw: payload,
-    resolvedId: id
-  });
-  selectedAlertId.value = id;
+  selectedAlertId.value = id != null ? String(id) : null;
   // Auto-collapse on selection if not already collapsed
   if (!isSidebarCollapsed.value) {
     isSidebarCollapsed.value = true;

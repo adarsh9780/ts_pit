@@ -155,9 +155,44 @@ def run_migrations():
 run_migrations()
 
 
-def log_diag(message: str) -> None:
-    """Lightweight diagnostics for VDI/runtime debugging."""
-    print(f"[DIAG] {datetime.now().isoformat()} | {message}")
+def _get_alert_id_candidates(cursor, table_name: str) -> list[str]:
+    """
+    Return ID-column candidates available in the alerts table.
+    Keeps configured mapping first, then common fallbacks.
+    """
+    cursor.execute(f'PRAGMA table_info("{table_name}")')
+    available_cols = {row["name"] for row in cursor.fetchall()}
+    preferred = [
+        config.get_column("alerts", "id"),
+        "alert_id",
+        "Alert ID",
+        "id",
+    ]
+    return [c for c in dict.fromkeys(preferred) if c in available_cols]
+
+
+def _resolve_alert_row(cursor, table_name: str, alert_id: str | int):
+    """
+    Resolve an alert row across possible ID columns and value types.
+    Returns (row, id_column, matched_value) or (None, None, None).
+    """
+    id_cols = _get_alert_id_candidates(cursor, table_name)
+    probe_values = [alert_id]
+    if not isinstance(alert_id, str):
+        probe_values.append(str(alert_id))
+    elif alert_id.isdigit():
+        probe_values.append(int(alert_id))
+
+    for value in probe_values:
+        for id_col in id_cols:
+            cursor.execute(
+                f'SELECT * FROM "{table_name}" WHERE "{id_col}" = ? LIMIT 1', (value,)
+            )
+            row = cursor.fetchone()
+            if row:
+                return row, id_col, value
+
+    return None, None, None
 
 
 def normalize_and_validate_status(raw_status: str) -> str:
@@ -309,7 +344,6 @@ def get_mappings():
 @app.get("/alerts")
 def get_alerts(date: Optional[str] = None):
     """Get all alerts, optionally filtered by date."""
-    log_diag(f"/alerts request | date={date}")
     conn = get_db_connection()
     cursor = conn.cursor()
 
@@ -325,19 +359,6 @@ def get_alerts(date: Optional[str] = None):
 
     rows = cursor.fetchall()
     conn.close()
-    log_diag(f"/alerts query complete | rows={len(rows)}")
-    if rows:
-        sample_row = dict(rows[0])
-        sample_keys = list(sample_row.keys())
-        sample_id_fields = {
-            "id": sample_row.get("id"),
-            "Alert ID": sample_row.get("Alert ID"),
-            "alert_id": sample_row.get("alert_id"),
-            "status": sample_row.get(config.get_column("alerts", "status")),
-        }
-        log_diag(
-            f"/alerts sample row shape | keys={sample_keys[:20]} id_fields={sample_id_fields}"
-        )
 
     results = []
     for row in rows:
@@ -345,7 +366,6 @@ def get_alerts(date: Optional[str] = None):
         if "status" in remapped:
             remapped["status"] = normalize_and_validate_status(remapped["status"])
         results.append(remapped)
-    log_diag(f"/alerts response ready | rows={len(results)}")
     return results
 
 
@@ -363,12 +383,15 @@ def update_alert_status(alert_id: str | int, update: StatusUpdate):
     cursor = conn.cursor()
 
     table_name = config.get_table_name("alerts")
-    alert_id_col = config.get_column("alerts", "id")
     status_col = config.get_column("alerts", "status")
+    _, matched_id_col, matched_id_value = _resolve_alert_row(cursor, table_name, alert_id)
+    if not matched_id_col:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Alert not found")
 
     cursor.execute(
-        f'UPDATE "{table_name}" SET "{status_col}" = ? WHERE "{alert_id_col}" = ?',
-        (normalized_status, alert_id),
+        f'UPDATE "{table_name}" SET "{status_col}" = ? WHERE "{matched_id_col}" = ?',
+        (normalized_status, matched_id_value),
     )
     conn.commit()
 
@@ -383,29 +406,19 @@ def update_alert_status(alert_id: str | int, update: StatusUpdate):
 @app.get("/alerts/{alert_id}")
 def get_alert_detail(alert_id: str | int):
     """Get details for a specific alert."""
-    log_diag(f"/alerts/{alert_id} request")
     conn = get_db_connection()
     cursor = conn.cursor()
 
     table_name = config.get_table_name("alerts")
-    alert_id_col = config.get_column("alerts", "id")
-
-    cursor.execute(
-        f'SELECT * FROM "{table_name}" WHERE "{alert_id_col}" = ?', (alert_id,)
-    )
-    row = cursor.fetchone()
+    row, _, _ = _resolve_alert_row(cursor, table_name, alert_id)
     conn.close()
 
     if row is None:
-        log_diag(f"/alerts/{alert_id} not found")
         raise HTTPException(status_code=404, detail="Alert not found")
 
     result = remap_row(dict(row), "alerts")
     if "status" in result:
         result["status"] = normalize_and_validate_status(result["status"])
-    log_diag(
-        f"/alerts/{alert_id} response | ticker={result.get('ticker')} isin={result.get('isin')} status={result.get('status')}"
-    )
     return result
 
 
@@ -417,16 +430,14 @@ def generate_summary(alert_id: str, request: Request):
 
     # 1. Get Alert Details
     alerts_table = config.get_table_name("alerts")
-    alert_id_col = config.get_column("alerts", "id")
     isin_col = config.get_column("alerts", "isin")
     ticker_col = config.get_column("alerts", "ticker")  # Add ticker col
     start_col = config.get_column("alerts", "start_date")
     end_col = config.get_column("alerts", "end_date")
-
-    cursor.execute(
-        f'SELECT * FROM "{alerts_table}" WHERE "{alert_id_col}" = ?', (alert_id,)
+    alert_id_col = config.get_column("alerts", "id")
+    alert, matched_id_col, matched_id_value = _resolve_alert_row(
+        cursor, alerts_table, alert_id
     )
-    alert = cursor.fetchone()
 
     if not alert:
         conn.close()
@@ -568,7 +579,7 @@ def generate_summary(alert_id: str, request: Request):
     )
 
     cursor.execute(
-        f'UPDATE "{alerts_table}" SET "narrative_theme" = ?, "narrative_summary" = ?, "bullish_events" = ?, "bearish_events" = ?, "neutral_events" = ?, "summary_generated_at" = ?, "recommendation" = ?, "recommendation_reason" = ? WHERE "{alert_id_col}" = ?',
+        f'UPDATE "{alerts_table}" SET "narrative_theme" = ?, "narrative_summary" = ?, "bullish_events" = ?, "bearish_events" = ?, "neutral_events" = ?, "summary_generated_at" = ?, "recommendation" = ?, "recommendation_reason" = ? WHERE "{matched_id_col or alert_id_col}" = ?',
         (
             result["narrative_theme"],
             result["narrative_summary"],
@@ -578,7 +589,7 @@ def generate_summary(alert_id: str, request: Request):
             now_str,
             recommendation,
             recommendation_reason,
-            alert_id,
+            matched_id_value if matched_id_col else alert_id,
         ),
     )
     conn.commit()
@@ -607,9 +618,6 @@ def get_prices(
     end_date: str = Query(None),
 ):
     """Get price data for a ticker with industry comparison."""
-    log_diag(
-        f"/prices/{ticker} request | period={period} start_date={start_date} end_date={end_date}"
-    )
     # Use custom date range if provided, otherwise use period
     if start_date and end_date:
         start_date_str, actual_ticker = fetch_and_cache_prices(
@@ -617,9 +625,6 @@ def get_prices(
         )
     else:
         start_date_str, actual_ticker = fetch_and_cache_prices(ticker, period or "1y")
-    log_diag(
-        f"/prices/{ticker} cache/fetch complete | actual_ticker={actual_ticker} start_date_str={start_date_str}"
-    )
 
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -645,9 +650,6 @@ def get_prices(
     conn.close()
 
     ticker_data = [remap_row(dict(row), "prices") for row in rows]
-    log_diag(
-        f"/prices/{ticker} ticker series | points={len(ticker_data)} first={ticker_data[0].get('date') if ticker_data else None} last={ticker_data[-1].get('date') if ticker_data else None}"
-    )
 
     # 3. Determine Sector and fetch ETF for comparison
     industry_data = []
@@ -700,13 +702,6 @@ def get_prices(
             conn.close()
 
             industry_data = [remap_row(dict(row), "prices") for row in etf_rows]
-            log_diag(
-                f"/prices/{ticker} benchmark series | etf={etf_ticker} points={len(industry_data)}"
-            )
-
-    log_diag(
-        f"/prices/{ticker} response ready | ticker_points={len(ticker_data)} industry_points={len(industry_data)} industry_name={industry_name}"
-    )
 
     return {
         "ticker": ticker_data,

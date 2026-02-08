@@ -22,6 +22,7 @@ const props = defineProps({
     required: true
   }
 });
+const emit = defineEmits(['toggle-agent']);
 
 const alertData = ref(null);
 const prices = ref({ ticker: [], industry: [], industry_name: '' });
@@ -394,16 +395,8 @@ const chartOptions = computed(() => {
 const fetchAlertDetail = async () => {
     if (!props.alertId) return;
     try {
-        console.log('[DIAG][UI] fetchAlertDetail start', { alertId: props.alertId });
         const response = await axios.get(`http://localhost:8000/alerts/${props.alertId}`);
         alertData.value = response.data;
-        console.log('[DIAG][UI] fetchAlertDetail success', {
-            alertId: props.alertId,
-            ticker: response.data?.ticker,
-            isin: response.data?.isin,
-            start_date: response.data?.start_date,
-            end_date: response.data?.end_date
-        });
         return response.data;
     } catch (error) {
         console.error('Error fetching alert detail:', error);
@@ -495,7 +488,6 @@ const updateStatus = async (newStatus) => {
 const fetchPrices = async (ticker, period) => {
     isLoadingPrices.value = true;
     try {
-        console.log('[DIAG][UI] fetchPrices start', { ticker, period, alertId: props.alertId });
         let params = { period };
         
         // For 'alert' period, calculate custom date range: start_date-10 to end_date+10
@@ -519,12 +511,6 @@ const fetchPrices = async (ticker, period) => {
         
         const response = await axios.get(`http://localhost:8000/prices/${ticker}`, { params });
         prices.value = response.data;
-        console.log('[DIAG][UI] fetchPrices success', {
-            ticker,
-            tickerPoints: response.data?.ticker?.length ?? 0,
-            industryPoints: response.data?.industry?.length ?? 0,
-            industryName: response.data?.industry_name
-        });
         prepareChartData();
     } catch (error) {
         console.error('Error fetching prices:', error);
@@ -535,15 +521,10 @@ const fetchPrices = async (ticker, period) => {
 
 const fetchNews = async (isin, startDate, endDate) => {
     try {
-        console.log('[DIAG][UI] fetchNews start', { isin, startDate, endDate, alertId: props.alertId });
         const response = await axios.get(`http://localhost:8000/news/${isin}`, {
             params: { start_date: startDate, end_date: endDate }
         });
         news.value = response.data;
-        console.log('[DIAG][UI] fetchNews success', {
-            isin,
-            newsCount: response.data?.length ?? 0
-        });
     } catch (error) {
         console.error('Error fetching news:', error);
     }
@@ -821,15 +802,11 @@ const tableData = computed(() => {
 });
 
 const loadData = async () => {
-    console.log('[DIAG][UI] loadData start', { alertId: props.alertId });
     const alert = await fetchAlertDetail();
     if (alert) {
         await fetchPrices(alert.ticker, selectedPeriod.value);
         await fetchNews(alert.isin, alert.start_date, alert.end_date);
         prepareChartData();
-        console.log('[DIAG][UI] loadData complete', { alertId: props.alertId });
-    } else {
-        console.warn('[DIAG][UI] loadData skipped: no alert detail', { alertId: props.alertId });
     }
 };
 
@@ -844,7 +821,7 @@ const loadData = async () => {
             :newsCount="news ? news.length : 0"
             :validStatuses="config?.valid_statuses || []"
             @update-status="updateStatus"
-            @toggle-agent="$emit('toggle-agent')"
+            @toggle-agent="emit('toggle-agent')"
         />
         
         <div class="dashboard-grid">
