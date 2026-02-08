@@ -1,7 +1,8 @@
-Align P3 theme tiers across docs and code
+Add deterministic pre-LLM causality gates for alert summaries
 
-- document an explicit P3 category-to-tier contract in SCORING_METHODOLOGY.md
-- add a lightweight regression script (scripts/test_p3_mapping.py) to prevent drift in calculate_p3 behavior
-- validate expected High/Medium/Low mappings, including case-insensitive and substring handling
+- run strict readiness checks before AI summary generation (required fields, valid timestamps, linked news)
+- enforce pre-trade causality: only articles at/before trade boundary can justify a trade
+- auto-escalate when high-impact behavior has no material pre-trade public news
+- return deterministic NEEDS_REVIEW/ESCALATE_L2 outcomes when gates fail, and call LLM only when gates pass
 
-This keeps policy and implementation in sync and reduces future scoring inconsistencies.
+This makes Analyze-with-AI decisions more auditable and consistent by applying deterministic policy before narrative generation.

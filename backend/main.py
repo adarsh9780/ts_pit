@@ -224,6 +224,193 @@ def normalize_impact_label(raw_label: str) -> str:
     return normalized if normalized else raw_label
 
 
+def _parse_datetime(value: str | None) -> datetime | None:
+    """Parse common date/datetime formats used in alerts/articles."""
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    normalized = raw.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(normalized)
+    except ValueError:
+        pass
+
+    for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(raw, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _is_high_impact(score: float | int | None) -> bool:
+    try:
+        return abs(float(score)) >= 2.0
+    except (TypeError, ValueError):
+        return False
+
+
+def _is_material_news(article: dict) -> bool:
+    """Material if entity prominence or theme relevance is high (P1/P3 == H)."""
+    materiality = str(article.get("materiality") or "").upper()
+    if len(materiality) >= 3 and (materiality[0] == "H" or materiality[2] == "H"):
+        return True
+    return False
+
+
+def _run_deterministic_summary_gates(
+    alert,
+    articles: list[dict],
+    start_date: str | None,
+    end_date: str | None,
+    trade_type: str | None,
+):
+    """
+    Run deterministic gates before LLM summarization.
+    Returns (override_result_or_none, filtered_articles_for_llm).
+    """
+    missing_fields = []
+    if not trade_type:
+        missing_fields.append("trade_type")
+    if not start_date:
+        missing_fields.append("start_date")
+    if not end_date:
+        missing_fields.append("end_date")
+
+    execution_col = config.get_column("alerts", "execution_date")
+    trade_ts = None
+    if execution_col and execution_col in alert.keys():
+        trade_ts = _parse_datetime(alert[execution_col])
+    if trade_ts is None:
+        trade_ts = _parse_datetime(end_date)
+
+    if trade_ts is None:
+        missing_fields.append("trade timestamp (execution_date or end_date)")
+
+    if missing_fields:
+        reason = (
+            "- Data readiness check failed.\n"
+            f"- Missing required fields: {', '.join(missing_fields)}.\n"
+            "- Deterministic policy requires manual review when key fields are missing."
+        )
+        return (
+            {
+                "narrative_theme": "NEEDS_REVIEW_DATA_GAP",
+                "narrative_summary": "Insufficient data for deterministic validation. Manual review required before AI justification.",
+                "bullish_events": [],
+                "bearish_events": [],
+                "neutral_events": [],
+                "recommendation": "NEEDS_REVIEW",
+                "recommendation_reason": reason,
+            },
+            articles,
+        )
+
+    if not articles:
+        reason = (
+            "- No linked news articles found for the alert window.\n"
+            "- Deterministic policy blocks auto-justification without evidence."
+        )
+        return (
+            {
+                "narrative_theme": "NEEDS_REVIEW_NO_NEWS",
+                "narrative_summary": "No linked news available for deterministic causality checks. Manual review required.",
+                "bullish_events": [],
+                "bearish_events": [],
+                "neutral_events": [],
+                "recommendation": "NEEDS_REVIEW",
+                "recommendation_reason": reason,
+            },
+            articles,
+        )
+
+    parsed_articles = []
+    for article in articles:
+        article_ts = _parse_datetime(article.get("created_date"))
+        if article_ts is None:
+            reason = (
+                "- At least one linked article is missing a valid timestamp.\n"
+                "- Deterministic policy requires valid article timestamps for causality checks."
+            )
+            return (
+                {
+                    "narrative_theme": "NEEDS_REVIEW_INVALID_TIMESTAMP",
+                    "narrative_summary": "Article timestamp quality check failed. Manual review required.",
+                    "bullish_events": [],
+                    "bearish_events": [],
+                    "neutral_events": [],
+                    "recommendation": "NEEDS_REVIEW",
+                    "recommendation_reason": reason,
+                },
+                articles,
+            )
+        parsed_articles.append((article, article_ts))
+
+    # Gate 1: only pre-trade (or at-trade) articles can justify the trade.
+    pre_trade_articles = [a for a, ts in parsed_articles if ts <= trade_ts]
+
+    if not pre_trade_articles:
+        has_high_any = any(_is_high_impact(a.get("impact_score")) for a in articles)
+        if has_high_any:
+            reason = (
+                f"- Trade timestamp boundary: {trade_ts.isoformat()}.\n"
+                "- No pre-trade public articles were found to justify the move.\n"
+                "- High-impact movement exists without valid causal public evidence."
+            )
+            recommendation = "ESCALATE_L2"
+            theme = "ESCALATE_NO_PRETRADE_NEWS"
+            summary = "High-impact behavior found, but no pre-trade public news evidence was available for justification."
+        else:
+            reason = (
+                f"- Trade timestamp boundary: {trade_ts.isoformat()}.\n"
+                "- No pre-trade public articles were found.\n"
+                "- Deterministic policy requires manual review when causality cannot be established."
+            )
+            recommendation = "NEEDS_REVIEW"
+            theme = "NEEDS_REVIEW_NO_PRETRADE_NEWS"
+            summary = "No pre-trade public news evidence was available to establish deterministic causality."
+
+        return (
+            {
+                "narrative_theme": theme,
+                "narrative_summary": summary,
+                "bullish_events": [],
+                "bearish_events": [],
+                "neutral_events": [],
+                "recommendation": recommendation,
+                "recommendation_reason": reason,
+            },
+            pre_trade_articles,
+        )
+
+    # Gate 3: high-impact + no material pre-trade news => escalate
+    has_high_impact = any(_is_high_impact(a.get("impact_score")) for a in pre_trade_articles)
+    has_material_pretrade = any(_is_material_news(a) for a in pre_trade_articles)
+    if has_high_impact and not has_material_pretrade:
+        reason = (
+            f"- Trade timestamp boundary: {trade_ts.isoformat()}.\n"
+            "- Pre-trade public articles exist, but none meet materiality criteria (P1/P3 high).\n"
+            "- High-impact movement without material pre-trade public news."
+        )
+        return (
+            {
+                "narrative_theme": "ESCALATE_HIGH_IMPACT_NO_MATERIAL_NEWS",
+                "narrative_summary": "Deterministic gates detected high-impact behavior without material pre-trade public justification.",
+                "bullish_events": [],
+                "bearish_events": [],
+                "neutral_events": [],
+                "recommendation": "ESCALATE_L2",
+                "recommendation_reason": reason,
+            },
+            pre_trade_articles,
+        )
+
+    # Gates passed: allow LLM, but only on causally valid pre-trade articles.
+    return None, pre_trade_articles
+
+
 def _db_column_exists(table_name: str, column_name: str) -> bool:
     """Check if a physical DB column exists."""
     conn = get_db_connection()
@@ -609,16 +796,30 @@ def generate_summary(alert_id: str, request: Request):
             }
         )
 
-    # 3. Generate Summary via Singleton LLM
-    try:
-        llm = request.app.state.llm
-        result = generate_cluster_summary(
-            articles, price_history=price_history, trade_type=trade_type, llm=llm
-        )
-    except Exception as e:
-        conn.close()
-        print(f"LLM Error: {e}")
-        raise HTTPException(status_code=500, detail=f"LLM Generation Failed: {str(e)}")
+    # 3. Deterministic gates first, LLM second.
+    deterministic_result, llm_articles = _run_deterministic_summary_gates(
+        alert=alert,
+        articles=articles,
+        start_date=start_date,
+        end_date=end_date,
+        trade_type=trade_type,
+    )
+
+    if deterministic_result is not None:
+        result = deterministic_result
+    else:
+        try:
+            llm = request.app.state.llm
+            result = generate_cluster_summary(
+                llm_articles or articles,
+                price_history=price_history,
+                trade_type=trade_type,
+                llm=llm,
+            )
+        except Exception as e:
+            conn.close()
+            print(f"LLM Error: {e}")
+            raise HTTPException(status_code=500, detail=f"LLM Generation Failed: {str(e)}")
 
     # 4. Save to DB
     # 4. Save to DB
