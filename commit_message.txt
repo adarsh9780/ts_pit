@@ -1,1 +1,7 @@
-has_materiality is no longer hardcoded.
+Align P3 theme tiers across docs and code
+
+- document an explicit P3 category-to-tier contract in SCORING_METHODOLOGY.md
+- add a lightweight regression script (scripts/test_p3_mapping.py) to prevent drift in calculate_p3 behavior
+- validate expected High/Medium/Low mappings, including case-insensitive and substring handling
+
+This keeps policy and implementation in sync and reduces future scoring inconsistencies.

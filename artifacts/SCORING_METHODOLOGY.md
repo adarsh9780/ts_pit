@@ -169,7 +169,22 @@ Materiality is shown as a triplet like `HHM`.
 - Low: early in window or outside
 
 ### P3: Theme relevance
-- High/Medium/Low based on mapped business theme classes
+- High/Medium/Low based on mapped business theme classes.
+
+#### P3 Category-to-Tier Contract (Authoritative)
+
+This table is the policy contract and must stay aligned with:
+- `backend/scoring.py` (`calculate_p3`)
+
+| Tier | Theme categories |
+| :--- | :--- |
+| High (`H`) | `EARNINGS_ANNOUNCEMENT`, `M_AND_A`, `DIVIDEND_CORP_ACTION`, `PRODUCT_TECH_LAUNCH`, `COMMERCIAL_CONTRACTS` |
+| Medium (`M`) | `LEGAL_REGULATORY`, `EXECUTIVE_CHANGE`, `OPERATIONAL_CRISIS`, `CAPITAL_STRUCTURE`, `MACRO_SECTOR`, `ANALYST_OPINION` |
+| Low (`L`) | Any other theme not listed above, missing theme, or uncategorized values |
+
+Notes:
+- Matching is case-insensitive.
+- Matching uses substring containment in implementation (for robustness to extended labels).
 
 ---
 
@@ -207,4 +222,3 @@ Hourly data utilities:
 
 Materiality logic:
 - `backend/scoring.py`
-
