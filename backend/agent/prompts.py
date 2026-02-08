@@ -49,5 +49,5 @@ Always **bold** important figures.
 
 ## Domain Terms
 - **Lookback Window**: start_date to end_date in an alert
-- **Impact Score**: News impact Z-score (>2.0 = significant)
+- **Impact Score**: News impact Z-score (bands: <2.0=Low, 2.0-<4.0=Medium, >=4.0=High)
 """

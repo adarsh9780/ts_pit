@@ -61,7 +61,7 @@ tables:
       materiality: ""
       # Event Impact Scoring columns (These might also need moving later, but sticking to request)
       impact_score: "impact_score"     # Numeric Z-Score
-      impact_label: "impact_label"     # Text label (High/Medium/Low/Noise)
+      impact_label: "impact_label"     # Text label (canonical: Low/Medium/High)
       # Additional columns in database
       crescendo_id: "crescendo_id"     # Legacy identifier (same as ISIN)
       p1_prominence: "p1_prominence"   # Entity prominence: H/M/L
@@ -146,6 +146,15 @@ status_aliases:
   Pending: NEEDS_REVIEW
   Approved: ESCALATE_L2
   Rejected: DISMISS
+
+# Optional aliases to normalize legacy impact labels on read paths.
+impact_label_aliases:
+  Noise: Low
+  Significant: Medium
+  Extreme: High
+  NOISE: Low
+  SIGNIFICANT: Medium
+  EXTREME: High
 
 # Enforce strict status validation after alias normalization.
 status_validation:

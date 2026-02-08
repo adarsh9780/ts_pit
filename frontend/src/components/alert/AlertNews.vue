@@ -138,8 +138,11 @@ const getMaterialityColor = (code) => {
 /* Impact Badges */
 .news-footer { display: flex; align-items: center; flex-wrap: wrap; margin-top: 0.75rem; }
 .impact-badge { font-size: 0.75rem; font-weight: 600; display: inline-flex; gap: 4px; align-items: center; }
+.impact-badge.low,
 .impact-badge.noise { color: #94a3b8; }
+.impact-badge.medium,
 .impact-badge.significant { color: #d97706; }
+.impact-badge.high,
 .impact-badge.extreme { color: #7c3aed; background: #f3e8ff; padding: 0 4px; border-radius: 4px; }
 .impact-score { font-weight: 400; font-size: 0.7rem; opacity: 0.8; }
 

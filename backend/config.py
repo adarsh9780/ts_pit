@@ -187,6 +187,21 @@ class Config:
         """Get proxy configuration."""
         return self._config.get("proxy", {})
 
+    def get_impact_label_aliases(self) -> Dict[str, str]:
+        """
+        Get optional impact-label aliases.
+        Used to normalize legacy impact labels from older scoring runs.
+        """
+        return self._config.get("impact_label_aliases", {})
+
+    def normalize_impact_label(self, label: str) -> str:
+        """Normalize impact label using aliases; returns original value if no alias exists."""
+        if label is None:
+            return label
+        aliases = self.get_impact_label_aliases()
+        key = str(label).strip()
+        return aliases.get(key, aliases.get(key.upper(), key))
+
     def get_mappings_for_api(self) -> Dict[str, Any]:
         """
         Get configuration in a format compatible with the /config API endpoint.

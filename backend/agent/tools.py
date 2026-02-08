@@ -25,6 +25,11 @@ if SCHEMA_PATH.exists():
         DB_SCHEMA = yaml.dump(schema_data, sort_keys=False)
 
 
+def _normalize_impact_label(label: str) -> str:
+    """Normalize legacy impact labels for consistent tool output."""
+    return get_config().normalize_impact_label(label)
+
+
 @tool
 def execute_sql(query: str) -> str:
     """
@@ -269,7 +274,10 @@ def count_material_news(ticker: str) -> str:
         if not rows:
             return f"No news found for {ticker} (ISIN: {isin})."
 
-        results = {row[0]: row[1] for row in rows}
+        results = {}
+        for raw_label, count in rows:
+            normalized_label = _normalize_impact_label(raw_label)
+            results[normalized_label] = results.get(normalized_label, 0) + count
         return f"News Impact Breakdown for {ticker}: {results}"
 
     except Exception as e:

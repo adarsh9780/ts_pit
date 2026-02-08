@@ -117,11 +117,11 @@ def calculate_z_score(conn, ticker, article_date_str):
 
     # Labeling
     if z_score < 2.0:
-        label = "Noise"
+        label = "Low"
     elif z_score < 4.0:
-        label = "Significant"
+        label = "Medium"
     else:
-        label = "Extreme"
+        label = "High"
 
     return round(z_score, 2), label
 

@@ -1,104 +1,210 @@
-# Scoring Methodology & Guide
+# Scoring Methodology and Interpretation Guide
 
-This document details the quantitative and qualitative metrics used in the dashboard to evaluate financial alerts.
+This document explains how the system scores news impact and materiality, in both:
+- Plain-language steps for non-statistical users.
+- Exact formulas for quantitative users.
 
----
-
-## 1. Materiality Score (Hybrid Triplet)
-The Materiality Score is a **composite triplet** (e.g., `HHM`) representing three distinct dimensions of an article's relevance. It is designed to quickly answer: *"Does this article matter right now?"*
-
-### The Triplet Structure
-The score is displayed as three letters (H/M/L) corresponding to **P1**, **P2**, and **P3**.
-
-| Dimension | Type | Represents | Why it matters |
-| :--- | :--- | :--- | :--- |
-| **P1** | **Entity Prominence** | *Who is it about?* | Filters out noise where the company is just a footnote. |
-| **P2** | **Temporal Proximity** | *When did it happen?* | Prioritizes news closest to the event impact window. |
-| **P3** | **Thematic Relevance** | *What is it about?* | Prioritizes high-impact event types (e.g., Earnings vs. General News). |
-
-### P1: Entity Prominence (Static)
-*   **Calculated By**: `scripts/calc_prominence.py` (Stored in DB)
-*   **Methodology**: Regex matching of Ticker and Instrument Name.
-    *   **High (H)**: Entity mentioned in the **Headline**.
-    *   **Medium (M)**: Entity mentioned in the **Lead Paragraph** (first 500 chars).
-    *   **Low (L)**: Entity mentioned only in the body text or not found.
-*   **Pros**: Extremely fast, filters "tangential" mentions.
-*   **Cons**: Can miss context (e.g., "Competitor of [Ticker]..." might be scored H).
-
-### P2: Temporal Proximity (Dynamic)
-*   **Calculated By**: `backend/main.py` (Real-time)
-*   **Methodology**: Position of the article within the Alert's "Impact Window" (Start Date to End Date).
-    *   Formula: $Ratio = (ArticleDate - StartDate) / (EndDate - StartDate)$
-    *   **High (H)**: Top 33% of the window (Closest to the target date).
-    *   **Medium (M)**: Middle 33%.
-    *   **Low (L)**: First 33% (Oldest news in the window) or outside the window.
-*   **Pros**: Auto-adjusts if you change the alert window. Highlights "fresh" information.
-
-### P3: Thematic Relevance (AI + Dynamic)
-*   **Calculated By**: AI Analysis / `backend/main.py` map.
-*   **Methodology**: Maps the AI-identified "Theme" to a priority tier.
-    *   **High (H)**: `Earnings`, `M&A`, `Dividends`, `Product Launch`, `Contracts`.
-    *   **Medium (M)**: `Legal/Regulatory`, `Executive Change`, `Operational Crisis`, `Capital Structure`.
-    *   **Low (L)**: `Analyst Opinion`, `Market Noise`, `Uncategorized`.
-*   **Pros**: Focuses attention on fundamental drivers of value.
+It is intended to be the single source of truth for the current implementation.
 
 ---
 
-## 2. Event Impact Score (Z-Score)
-The Impact Score is a statistical measure of **market abnormality** at the time of the alert.
+## 1. What Problem This Score Solves
 
-*   **Calculated By**: `scripts/calc_impact_scores.py`
-*   **Methodology (Current Implementation)**:
-    *   Build a baseline from **10 days of hourly candles before article time**.
-    *   Compute hourly return baseline: `(close - open) / open`.
-    *   Use baseline volatility `std(hourly_returns)`.
-    *   Compute event candle return from the first candle at/after article timestamp.
-    *   Final score: `Z = abs(event_return) / baseline_volatility`.
-*   **Interpretation**:
-    *   **Noise**: `< 2.0`
-    *   **Significant**: `2.0 - <4.0`
-    *   **Extreme**: `>= 4.0`
+When an article is published, investigators need to answer:
 
-*   **Why use Z-Score?**
-    It normalizes volatility. A 2% move in a stable utility stock is huge (High Z-Score), while a 2% move in a crypto stock might be noise (Low Z-Score).
+"Did the market move unusually strongly right when this article became public?"
+
+The impact score is built to answer that specific question, not to forecast prices.
 
 ---
 
-## 3. Sentiment (Bullish/Bearish)
-*   **Calculated By**: AI Analysis (`Prompts: ANALYSIS_SYSTEM_PROMPT`).
-*   **Methodology**: LLM analyzes the *content* of the articles cluster, not just price.
-*   **Categories**:
-    *   **Bullish**: Positive news likely to drive price up.
-    *   **Bearish**: Negative news likely to drive price down.
-    *   **Neutral**: Informational or mixed impact.
+## 2. Plain-Language Walkthrough (No Stats Prerequisite)
+
+Use one article at a time.
+
+### Step A: Find the article publication time
+
+Example: article published at `2025-12-31 10:15:00`.
+
+### Step B: Build a "normal behavior" window
+
+Look at the previous 10 days of hourly candles before publication time.
+
+In simple words:
+- This gives us a recent sample of how much this stock usually moves each hour.
+- We do this per stock, so NVDA and a low-volatility stock are not treated the same.
+
+### Step C: Measure each hour's movement in that 10-day window
+
+For each hourly candle:
+- Start of the hour = `open`
+- End of the hour = `close`
+- Hourly move = `(close - open) / open`
+
+This creates a list of hourly move percentages.
+
+### Step D: Convert that list into "typical hourly movement size"
+
+From the Step C list, compute standard deviation.
+
+In plain words:
+- If this number is small, the stock usually moves little hour to hour.
+- If large, the stock is naturally noisy.
+
+### Step E: Measure movement in the article hour
+
+Take the first hourly candle at or after article timestamp.
+
+Example:
+- Article at `10:15`
+- First hourly candle at/after that time might be `11:00` in stored data.
+
+Compute the same movement:
+- `(event_close - event_open) / event_open`
+
+### Step F: Compare article-hour movement vs normal movement
+
+If the article-hour movement is much larger than normal, impact is high.
+
+That comparison value is the impact Z-score.
+
+### Step G: Convert score into a label
+
+Current numeric bands:
+- `< 2.0`
+- `2.0 to < 4.0`
+- `>= 4.0`
+
+Business labels for these bands are described in Section 5.
 
 ---
 
-## How to Review an Alert (Synthesis Guide)
+## 3. Statistical Definition (Formula Section)
 
-Use the combination of these three metrics to make decisions:
+Let:
+- `t0` = article publication timestamp
+- Baseline window = `[t0 - 10 days, t0]`
+- Hourly candle return for candle `i`:
+  - `r_i = (close_i - open_i) / open_i`
 
-### Scenario A: The "Critical Event" ✅
-*   **Impact**: **High (>2.0)** (The market reacted violently)
-*   **Materiality**: **HHH** (Headline news, recent, high-priority theme)
-*   **Sentiment**: **Bearish**
-*   **Conclusion**: Real, explained market event. **High Confidence Short.**
+Baseline volatility:
+- `sigma = std(r_i)` over all hourly candles in the baseline window.
 
-### Scenario B: The "Overreaction" / "Mismatch" ⚠️
-*   **Impact**: **High (>2.0)** (Price moved)
-*   **Materiality**: **LML** (Tangential mention, old news, low priority)
-*   **Conclusion**: Price moved, but the news doesn't explain it. Could be:
-    1.  Insider trading / leak (News hasn't hit yet).
-    2.  Market manipulation.
-    3.  Algo reaction to a false flag.
-    *Action: Investigate deeper or wait.*
+Event candle:
+- First hourly candle with `timestamp >= t0`
+- Event return:
+  - `r_event = (close_event - open_event) / open_event`
 
-### Scenario C: The "Priced In" Event 💤
-*   **Impact**: **Low (<1.0)** (No price move)
-*   **Materiality**: **HHH** (Major earnings report)
-*   **Conclusion**: The news was expected or the market doesn't care.
+Impact score:
+- `Z = abs(r_event) / sigma`
 
-### Summary Strategy
-1.  **Check Impact First**: Did the price actually move?
-2.  **scan Materiality**: Can the news explain *why*? (Look for `H` in P1/P3).
-3.  **Read Sentiment**: Directional check.
+Special cases:
+- If insufficient baseline rows: no score.
+- If `sigma == 0` (flatline): score treated as `0`.
+
+---
+
+## 4. Why This Method Is Preferred Here
+
+This system investigates "event-time abnormality", not long-term valuation drift.
+
+Why this method fits:
+1. It is event-local.
+The score focuses on the move at publication time, which matches surveillance workflow.
+2. It is volatility-normalized.
+The same absolute move can be major for one stock and routine for another.
+3. It is comparable across names.
+Using `Z` makes cross-ticker interpretation more consistent.
+4. It is deterministic and explainable.
+Each component can be traced and audited from stored candles.
+
+What this method is not:
+- It is not a prediction model.
+- It is not causality proof by itself.
+- It is not a replacement for analyst context review.
+
+---
+
+## 5. Impact Label Terminology
+
+### 5.1 Threshold bands (stable)
+
+The numeric contract is:
+- Band 1: `Z < 2.0`
+- Band 2: `2.0 <= Z < 4.0`
+- Band 3: `Z >= 4.0`
+
+### 5.2 Label names (business-facing)
+
+Recommended business-facing labels:
+- Band 1 -> `Low`
+- Band 2 -> `Medium`
+- Band 3 -> `High`
+
+Legacy labels seen historically:
+- Band 1 -> `Noise`
+- Band 2 -> `Significant`
+- Band 3 -> `Extreme`
+
+These two vocabularies are semantically equivalent by threshold.
+
+---
+
+## 6. Materiality Triplet (P1/P2/P3)
+
+Materiality and impact are complementary:
+- Impact asks: "How unusually did price move around article time?"
+- Materiality asks: "How relevant is this article to the alert?"
+
+Materiality is shown as a triplet like `HHM`.
+
+### P1: Entity Prominence
+- High: company in headline
+- Medium: company in lead text
+- Low: company only in body / weak mention
+
+### P2: Temporal Proximity to alert window
+- High: article near end of alert window
+- Medium: middle of window
+- Low: early in window or outside
+
+### P3: Theme relevance
+- High/Medium/Low based on mapped business theme classes
+
+---
+
+## 7. How Investigators Should Use the Score
+
+Recommended sequence:
+1. Check impact band first (Low/Medium/High).
+2. Check materiality triplet next (look for strong P1/P3).
+3. Check sentiment and narrative alignment with trade direction.
+4. Decide recommendation with all evidence, not impact alone.
+
+Interpretation guidance:
+- High impact + high materiality can support a valid public-news explanation.
+- High impact + weak materiality is a stronger escalation signal.
+- Low impact does not prove innocence; it indicates weak price abnormality at article hour.
+
+---
+
+## 8. Operational Notes
+
+1. The impact score depends on hourly price cache quality and timestamp quality.
+2. Missing/poor timestamp data can reduce reliability.
+3. If data is sparse, scores may be absent for some rows.
+4. Thresholds are policy choices; they can be recalibrated later without changing formula.
+
+---
+
+## 9. Current Implementation Reference
+
+Primary implementation:
+- `scripts/calc_impact_scores.py`
+
+Hourly data utilities:
+- `scripts/market_data.py`
+
+Materiality logic:
+- `backend/scoring.py`
+

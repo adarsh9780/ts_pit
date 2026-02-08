@@ -169,9 +169,9 @@ tables:
         example: 1.67
       impact_label:
         type: TEXT
-        description: 'Impact classification: ''High'', ''Medium'', ''Low'', or ''Noise'''
+        description: 'Impact classification (canonical): ''Low'', ''Medium'', or ''High'''
         db_column: impact_label
-        example: Noise
+        example: Medium
       crescendo_id:
         type: TEXT
         description: Legacy identifier (same as ISIN)

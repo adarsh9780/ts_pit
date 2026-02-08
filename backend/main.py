@@ -210,6 +210,12 @@ def normalize_and_validate_status(raw_status: str) -> str:
         return fallback_status
     return normalized
 
+
+def normalize_impact_label(raw_label: str) -> str:
+    """Normalize impact labels to canonical business labels for API responses."""
+    normalized = config.normalize_impact_label(raw_label)
+    return normalized if normalized else raw_label
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -779,6 +785,8 @@ def get_news(
     for row in rows:
         r = dict(row)
         remapped = remap_row(r, "articles")
+        if "impact_label" in remapped:
+            remapped["impact_label"] = normalize_impact_label(remapped["impact_label"])
 
         # Fallback logic for theme and summary
         ai_theme = r.get("ai_theme")
