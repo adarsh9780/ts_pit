@@ -1,18 +1,18 @@
-feat(agent): enforce strong-evidence dismissal guardrail and refine report evidence UX
+Report filename format now saved as: {ticker}_{alert_id}_{alert_date_in_human_language}.html
+Example: AAPL_ALT-1023_Feb_09_2026.html
 
-- add shared post-analysis safety gate in `backend/alert_analysis.py`:
-  - introduce `enforce_dismiss_evidence_requirements(...)`
-  - only allow `DISMISS` when strong evidence thresholds are met
-  - auto-downgrade weak `DISMISS` outcomes to `NEEDS_REVIEW` with detailed gap-based reasoning
-  - include explicit observed vs missing evidence in `recommendation_reason`
+1. If same name already exists, it auto-appends _2, _3, etc. (to avoid overwrite).
+2. Article count cap + priority logic. For internal report evidence (H-only articles):
+    if <= 10: show all
+    if > 10: show top 10
+    Ranking used:
+    1. number of H in materiality (desc, so effectively HHH first, then 2H, then 1H)
+    absolute impact score (desc)
+    2. created date (desc)
 
-- tighten recommendation policy prompt in `backend/prompts.py`:
-  - remove low-impact-only dismissal behavior
-  - require `NEEDS_REVIEW` when evidence is sparse/generic/conflicting
-  - require explicit “present evidence / missing evidence / why blocked” reasoning for review decisions
-
-- improve report evidence curation and presentation in `backend/reporting.py`:
-  - include only internal articles with at least one `H` in materiality
-  - replace internal evidence table with blog-style clickable article cards
-  - render external news in the same card-based format
-  - fix recommendation badge mapping to canonical enums (`DISMISS`, `ESCALATE_L2`, `NEEDS_REVIEW`)
+3. NEEDS_REVIEW reasoning upgraded for both flows
+4. Added shared enrichment so both Analyze with AI and Agent now include:
+    why it is not DISMISS
+    why it is not ESCALATE_L2
+    what additional info is needed to move toward dismissal
+    evidence snapshot counts

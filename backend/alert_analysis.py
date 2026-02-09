@@ -308,6 +308,97 @@ def enforce_dismiss_evidence_requirements(
     return downgraded
 
 
+def enrich_needs_review_reason(
+    result: dict[str, Any],
+    used_articles: list[dict[str, Any]],
+    trade_type: str | None,
+) -> dict[str, Any]:
+    """
+    For NEEDS_REVIEW decisions, provide explicit dual rationale:
+    - why dismissal is not safe
+    - why escalation criteria are not yet met
+    - what additional information is needed to dismiss
+    """
+    recommendation = str(result.get("recommendation") or "").upper()
+    if recommendation != "NEEDS_REVIEW":
+        return result
+
+    total_articles = len(used_articles)
+    material_articles = [a for a in used_articles if is_material_news(a)]
+    high_impact_articles = []
+    meaningful_impact_articles = []
+    for a in used_articles:
+        try:
+            score = abs(float(a.get("impact_score") or 0.0))
+            if score >= 2.0:
+                meaningful_impact_articles.append(a)
+            if score >= 4.0:
+                high_impact_articles.append(a)
+        except (TypeError, ValueError):
+            continue
+
+    bullish_count = len(result.get("bullish_events") or [])
+    bearish_count = len(result.get("bearish_events") or [])
+    normalized_trade_type = str(trade_type or "").strip().upper()
+
+    not_dismiss_reasons = []
+    if total_articles < 2:
+        not_dismiss_reasons.append("insufficient number of pre-trade evidence articles")
+    if len(material_articles) < 2:
+        not_dismiss_reasons.append("not enough material evidence (materiality containing H)")
+    if len(meaningful_impact_articles) < 1:
+        not_dismiss_reasons.append("no article shows meaningful market reaction (|impact_score| >= 2.0)")
+    if normalized_trade_type == "BUY" and bearish_count > bullish_count:
+        not_dismiss_reasons.append("directional alignment is weak for BUY (bearish evidence dominates)")
+    if normalized_trade_type == "SELL" and bullish_count > bearish_count:
+        not_dismiss_reasons.append("directional alignment is weak for SELL (bullish evidence dominates)")
+    if normalized_trade_type not in {"BUY", "SELL"}:
+        not_dismiss_reasons.append("trade direction is missing/unclear")
+    if not not_dismiss_reasons:
+        not_dismiss_reasons.append("evidence quality/confidence is not strong enough for safe dismissal")
+
+    not_escalate_reasons = []
+    if len(high_impact_articles) == 0:
+        not_escalate_reasons.append("no high-impact anomaly (|impact_score| >= 4.0) was detected")
+    if len(high_impact_articles) > 0 and len(material_articles) > 0:
+        not_escalate_reasons.append("high-impact movement has some material public evidence, so deterministic auto-escalation is not triggered")
+    if len(high_impact_articles) > 0 and len(material_articles) == 0:
+        not_escalate_reasons.append("high-impact signal exists but overall evidence set is inconsistent/low-confidence and requires manual adjudication")
+    if not not_escalate_reasons:
+        not_escalate_reasons.append("escalation criteria are not conclusively met from current evidence")
+
+    needed_for_dismiss = [
+        "additional pre-trade, company-specific public news with clear causal linkage to the move",
+        "stronger materiality evidence (more H in P1/P3 dimensions)",
+        "clear trade-direction alignment between alert type and evidence sentiment",
+    ]
+
+    detail_lines = [
+        "",
+        "- Why this is NOT DISMISS:",
+        *[f"- {r}" for r in not_dismiss_reasons],
+        "- Why this is NOT ESCALATE_L2:",
+        *[f"- {r}" for r in not_escalate_reasons],
+        "- Information needed to move toward DISMISS:",
+        *[f"- {r}" for r in needed_for_dismiss],
+        "- Evidence snapshot:",
+        f"- pre-trade articles considered: {total_articles}",
+        f"- material articles (contains H): {len(material_articles)}",
+        f"- meaningful impact articles (|impact_score| >= 2.0): {len(meaningful_impact_articles)}",
+        f"- high-impact articles (|impact_score| >= 4.0): {len(high_impact_articles)}",
+        f"- bullish events: {bullish_count}",
+        f"- bearish events: {bearish_count}",
+    ]
+
+    enriched = dict(result)
+    base_reason = str(enriched.get("recommendation_reason") or "").strip()
+    if base_reason:
+        enriched["recommendation_reason"] = base_reason + "\n" + "\n".join(detail_lines)
+    else:
+        enriched["recommendation_reason"] = "\n".join(detail_lines).strip()
+    return enriched
+
+
 def build_alert_articles(config, cursor, alert, start_date: str | None, end_date: str | None):
     articles_table = config.get_table_name("articles")
     themes_table = config.get_table_name("article_themes")
@@ -446,6 +537,11 @@ def analyze_alert_non_persisting(conn, config, alert_id: str | int, llm):
         source = "llm"
 
     result = enforce_dismiss_evidence_requirements(
+        result=result,
+        used_articles=used_articles,
+        trade_type=trade_type,
+    )
+    result = enrich_needs_review_reason(
         result=result,
         used_articles=used_articles,
         trade_type=trade_type,

@@ -37,6 +37,56 @@ def _format_num(value: Any, decimals: int = 2) -> str:
         return "-"
 
 
+def _parse_report_date(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    normalized = raw.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(normalized)
+    except ValueError:
+        pass
+    for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(raw, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _safe_filename_component(value: Any, fallback: str) -> str:
+    raw = str(value or fallback).strip()
+    cleaned = re.sub(r"[^a-zA-Z0-9_-]+", "_", raw)
+    cleaned = re.sub(r"_+", "_", cleaned).strip("_")
+    return cleaned or fallback
+
+
+def _select_report_articles(articles: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Keep all if <= 10. If more than 10, keep top 10 ranked by:
+    1) number of H characters in materiality (desc),
+    2) impact score absolute value (desc),
+    3) created_date (desc, lexical ISO).
+    """
+    if len(articles) <= 10:
+        return articles
+
+    def _rank_key(a: dict[str, Any]):
+        materiality = str(a.get("materiality") or "").upper()
+        h_count = materiality.count("H")
+        try:
+            impact = abs(float(a.get("impact_score") or 0.0))
+        except (TypeError, ValueError):
+            impact = 0.0
+        created_date = str(a.get("created_date") or "")
+        return (h_count, impact, created_date)
+
+    ranked = sorted(articles, key=_rank_key, reverse=True)
+    return ranked[:10]
+
+
 def _build_price_svg(price_history: list[dict], width: int = 900, height: int = 240) -> str:
     if not price_history:
         return '<svg width="900" height="240" xmlns="http://www.w3.org/2000/svg"><text x="20" y="30" font-size="14">No price data for alert window</text></svg>'
@@ -504,6 +554,7 @@ def generate_alert_report_html(
     high_materiality_articles = [
         a for a in articles if "H" in str(a.get("materiality") or "").upper()
     ]
+    high_materiality_articles = _select_report_articles(high_materiality_articles)
 
     # Optional URL enrichment
     article_ids = [a.get("article_id") for a in high_materiality_articles if a.get("article_id") is not None]
@@ -533,6 +584,7 @@ def generate_alert_report_html(
             "end_date": alert.get(config.get_column("alerts", "end_date")),
             "trade_type": alert.get(config.get_column("alerts", "trade_type")),
             "status": alert.get(config.get_column("alerts", "status")),
+            "alert_date": alert.get(config.get_column("alerts", "alert_date")),
         },
         "analysis": {
             "source": analysis.get("source"),
@@ -547,12 +599,25 @@ def generate_alert_report_html(
     }
 
     report_html = _render_report_html(report_payload)
-    ts = now.strftime("%Y%m%d_%H%M%S")
-    alert_id_str = str(report_payload["alert"]["id"] or alert_id).replace("/", "_")
+    ticker_str = _safe_filename_component(report_payload["alert"].get("ticker"), "ticker")
+    alert_id_str = _safe_filename_component(report_payload["alert"].get("id") or alert_id, "alert")
+    alert_date_raw = (
+        report_payload["alert"].get("alert_date")
+        or report_payload["alert"].get("end_date")
+        or report_payload["alert"].get("start_date")
+    )
+    parsed_alert_date = _parse_report_date(alert_date_raw) or now
+    human_date = parsed_alert_date.strftime("%b_%d_%Y")
     session_dir = REPORTS_ROOT / session_id
     session_dir.mkdir(parents=True, exist_ok=True)
-    report_filename = f"{alert_id_str}_{ts}.html"
+    base_filename = f"{ticker_str}_{alert_id_str}_{human_date}"
+    report_filename = f"{base_filename}.html"
     report_path = session_dir / report_filename
+    suffix = 2
+    while report_path.exists():
+        report_filename = f"{base_filename}_{suffix}.html"
+        report_path = session_dir / report_filename
+        suffix += 1
     report_path.write_text(report_html, encoding="utf-8")
 
     expires_at = (now + timedelta(hours=24)).isoformat()
