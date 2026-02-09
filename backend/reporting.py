@@ -244,75 +244,204 @@ def _render_report_html(payload: dict[str, Any]) -> str:
     web_html = "\n".join(web_items) if web_items else "<li>Web news enrichment not included.</li>"
 
     rec = analysis["analysis"].get("recommendation", "NEEDS_REVIEW")
+    rec_norm = str(rec or "NEEDS_REVIEW").upper()
+    rec_class = {
+        "ESCALATE": "badge-escalate",
+        "CLOSE_ALERT": "badge-close",
+        "NEEDS_REVIEW": "badge-review",
+    }.get(rec_norm, "badge-review")
     rec_reason = _e(analysis["analysis"].get("recommendation_reason", ""))
     return f"""<!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Alert Report { _e(alert.get('id')) }</title>
+  <title>Investigation Report { _e(alert.get('id')) }</title>
   <style>
-    body {{ font-family: Arial, sans-serif; margin: 24px; color: #0f172a; }}
-    h1,h2,h3 {{ margin: 0 0 10px 0; }}
-    .muted {{ color: #64748b; }}
-    .card {{ border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; margin: 14px 0; }}
-    table {{ width: 100%; border-collapse: collapse; font-size: 12px; }}
-    th, td {{ border: 1px solid #e2e8f0; padding: 6px; text-align: left; vertical-align: top; }}
-    th {{ background: #f8fafc; }}
+    :root {{
+      --text: #0f172a;
+      --muted: #64748b;
+      --line: #e2e8f0;
+      --surface: #ffffff;
+      --surface-soft: #f8fafc;
+      --title: #111827;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      background: #f1f5f9;
+      color: var(--text);
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 15px;
+      line-height: 1.6;
+      padding: 32px 24px;
+    }}
+    .report {{
+      max-width: 980px;
+      margin: 0 auto;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 28px 34px 34px 34px;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+    }}
+    h1, h2, h3 {{ margin: 0 0 10px 0; color: var(--title); font-family: "Helvetica Neue", Arial, sans-serif; }}
+    h1 {{ font-size: 30px; margin-bottom: 4px; }}
+    h2 {{ font-size: 20px; margin-bottom: 12px; }}
+    h3 {{ font-size: 16px; margin-top: 6px; }}
+    .subtitle {{ color: var(--muted); font-family: "Helvetica Neue", Arial, sans-serif; font-size: 13px; }}
+    .muted {{ color: var(--muted); }}
+    .card {{
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 16px 18px;
+      margin: 18px 0;
+      background: var(--surface);
+    }}
+    .meta-grid {{
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px 18px;
+      margin-top: 8px;
+    }}
+    .meta-item b {{ font-family: "Helvetica Neue", Arial, sans-serif; }}
+    .recommendation-row {{
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin: 8px 0 10px 0;
+    }}
+    .rec-badge {{
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 12px;
+      font-weight: 700;
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      border: 1px solid transparent;
+      letter-spacing: 0.02em;
+    }}
+    .badge-escalate {{ color: #991b1b; background: #fee2e2; border-color: #fecaca; }}
+    .badge-close {{ color: #065f46; background: #d1fae5; border-color: #a7f3d0; }}
+    .badge-review {{ color: #92400e; background: #fef3c7; border-color: #fde68a; }}
+    .chart-frame {{
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--surface-soft);
+      padding: 8px;
+    }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      table-layout: fixed;
+    }}
+    th, td {{
+      border: 1px solid var(--line);
+      padding: 8px 9px;
+      text-align: left;
+      vertical-align: top;
+      word-wrap: break-word;
+    }}
+    th {{
+      background: var(--surface-soft);
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      font-size: 12px;
+      letter-spacing: 0.01em;
+    }}
+    tr:nth-child(even) td {{ background: #fcfdff; }}
+    ul {{ margin: 8px 0 0 20px; }}
+    li {{ margin-bottom: 8px; }}
     .small {{ font-size: 12px; }}
     .pre {{ white-space: pre-wrap; }}
+    .section-index {{
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }}
+    @media print {{
+      body {{ background: #fff; padding: 0; }}
+      .report {{ border: none; box-shadow: none; max-width: none; border-radius: 0; padding: 16px 20px; }}
+      a {{ color: inherit; text-decoration: none; }}
+    }}
   </style>
 </head>
 <body>
-  <h1>Investigation Report</h1>
-  <p class="muted small">Generated: {_e(generated_at)} | Session: {_e(payload.get('session_id'))} | Alert: {_e(alert.get('id'))}</p>
+  <div class="report">
+    <h1>Investigation Report</h1>
+    <p class="subtitle">Generated: {_e(generated_at)} | Session: {_e(payload.get('session_id'))} | Alert: {_e(alert.get('id'))}</p>
 
-  <div class="card">
-    <h2>Alert Context</h2>
-    <p><b>Ticker:</b> {_e(alert.get('ticker'))} ({_e(alert.get('instrument_name'))})</p>
-    <p><b>ISIN:</b> {_e(alert.get('isin'))}</p>
-    <p><b>Window:</b> {_e(alert.get('start_date'))} to {_e(alert.get('end_date'))}</p>
-    <p><b>Trade Type:</b> {_e(alert.get('trade_type'))} | <b>Status:</b> {_e(alert.get('status'))}</p>
-  </div>
+    <div class="card">
+      <div class="section-index">Section 1</div>
+      <h2>Executive Summary</h2>
+      <div class="recommendation-row">
+        <b>Recommendation:</b>
+        <span class="rec-badge {rec_class}">{_e(rec_norm)}</span>
+      </div>
+      <p class="pre"><b>Reasoning:</b> {rec_reason}</p>
+      <p><b>Narrative Theme:</b> {_e(analysis['analysis'].get('narrative_theme'))}</p>
+      <p class="pre"><b>Narrative Summary:</b> {_e(analysis['analysis'].get('narrative_summary'))}</p>
+    </div>
 
-  <div class="card">
-    <h2>Price Chart (Alert Window)</h2>
-    {"<img src='" + html.escape(chart_snapshot) + "' alt='Alert chart snapshot' style='max-width:100%;border:1px solid #e2e8f0;border-radius:4px;'/>" if chart_snapshot else price_svg}
-  </div>
+    <div class="card">
+      <div class="section-index">Section 2</div>
+      <h2>Alert Context</h2>
+      <div class="meta-grid">
+        <div class="meta-item"><b>Ticker:</b> {_e(alert.get('ticker'))} ({_e(alert.get('instrument_name'))})</div>
+        <div class="meta-item"><b>ISIN:</b> {_e(alert.get('isin'))}</div>
+        <div class="meta-item"><b>Window:</b> {_e(alert.get('start_date'))} to {_e(alert.get('end_date'))}</div>
+        <div class="meta-item"><b>Trade Type:</b> {_e(alert.get('trade_type'))}</div>
+        <div class="meta-item"><b>Status:</b> {_e(alert.get('status'))}</div>
+        <div class="meta-item"><b>Analysis Source:</b> {_e(analysis.get('source'))}</div>
+      </div>
+    </div>
 
-  <div class="card">
-    <h2>LLM Analysis</h2>
-    <p><b>Source:</b> {_e(analysis.get('source'))}</p>
-    <p><b>Narrative Theme:</b> {_e(analysis['analysis'].get('narrative_theme'))}</p>
-    <p class="pre"><b>Summary:</b> {_e(analysis['analysis'].get('narrative_summary'))}</p>
-    <p><b>Recommendation:</b> {_e(rec)}</p>
-    <p class="pre"><b>Recommendation Reason:</b> {rec_reason}</p>
-    <h3>Evidence Citations</h3>
-    <ul>{citations_html}</ul>
-  </div>
+    <div class="card">
+      <div class="section-index">Section 3</div>
+      <h2>Price Chart (Alert Window)</h2>
+      <div class="chart-frame">
+        {"<img src='" + html.escape(chart_snapshot) + "' alt='Alert chart snapshot' style='max-width:100%;display:block;border-radius:4px;'/>" if chart_snapshot else price_svg}
+      </div>
+    </div>
 
-  <div class="card">
-    <h2>Materiality-High Articles (at least one H)</h2>
-    <table>
-      <thead>
-        <tr><th>#</th><th>Title</th><th>Date</th><th>Category</th><th>Materiality</th><th>Impact</th><th>Summary</th></tr>
-      </thead>
-      <tbody>{evidence_table}</tbody>
-    </table>
-  </div>
+    <div class="card">
+      <div class="section-index">Section 4</div>
+      <h2>Evidence Citations</h2>
+      <ul>{citations_html}</ul>
+    </div>
 
-  <div class="card">
-    <h2>All Internal Alert-Window Articles</h2>
-    <table>
-      <thead>
-        <tr><th>#</th><th>Title</th><th>Date</th><th>Category</th><th>Materiality</th><th>Impact</th><th>Summary</th></tr>
-      </thead>
-      <tbody>{all_table}</tbody>
-    </table>
-  </div>
+    <div class="card">
+      <div class="section-index">Section 5</div>
+      <h2>Materiality-High Articles (at least one H)</h2>
+      <table>
+        <thead>
+          <tr><th>#</th><th>Title</th><th>Date</th><th>Category</th><th>Materiality</th><th>Impact</th><th>Summary</th></tr>
+        </thead>
+        <tbody>{evidence_table}</tbody>
+      </table>
+    </div>
 
-  <div class="card">
-    <h2>External News (Optional Enrichment)</h2>
-    <ul>{web_html}</ul>
+    <div class="card">
+      <div class="section-index">Section 6</div>
+      <h2>All Internal Alert-Window Articles</h2>
+      <table>
+        <thead>
+          <tr><th>#</th><th>Title</th><th>Date</th><th>Category</th><th>Materiality</th><th>Impact</th><th>Summary</th></tr>
+        </thead>
+        <tbody>{all_table}</tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="section-index">Section 7</div>
+      <h2>External News (Optional Enrichment)</h2>
+      <ul>{web_html}</ul>
+    </div>
   </div>
 </body>
 </html>
