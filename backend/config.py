@@ -187,6 +187,23 @@ class Config:
         """Get proxy configuration."""
         return self._config.get("proxy", {})
 
+    def get_logging_config(self) -> Dict[str, Any]:
+        """Get logging configuration with sensible defaults."""
+        defaults: Dict[str, Any] = {
+            "dir": "~/.ts_pit/logs",
+            "file_pattern": "app_{time:YYYYMMDD}.jsonl",
+            "level": "INFO",
+            "rotation": "10 MB",
+            "retention": "14 days",
+            "compression": "zip",
+        }
+        cfg = self._config.get("logging", {})
+        if not isinstance(cfg, dict):
+            return defaults
+        merged = dict(defaults)
+        merged.update(cfg)
+        return merged
+
     def get_impact_label_aliases(self) -> Dict[str, str]:
         """
         Get optional impact-label aliases.

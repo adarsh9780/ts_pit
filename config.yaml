@@ -247,3 +247,17 @@ proxy:
   # Set to false if running in VDI/Corporate network with self-signed certificates
   # This disables SSL verification for external tools (DuckDuckGo, Scraper)
   ssl_verify: true
+
+# Logging Configuration
+# =====================
+logging:
+  # Directory for application logs.
+  # Supports ~ expansion. Relative paths are resolved from project root.
+  dir: "~/.ts_pit/logs"
+  # Rotating log file pattern (Loguru format placeholders are supported).
+  file_pattern: "app_{time:YYYYMMDD}.jsonl"
+  # Default log level; can be overridden with LOG_LEVEL env var.
+  level: "INFO"
+  rotation: "10 MB"
+  retention: "14 days"
+  compression: "zip"

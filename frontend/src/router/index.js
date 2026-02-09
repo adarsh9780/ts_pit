@@ -1,6 +1,4 @@
 import { createRouter, createWebHistory } from 'vue-router';
-import AlertsTable from '../views/AlertsTable.vue';
-import AlertDetail from '../views/AlertDetail.vue';
 
 const routes = [
     {

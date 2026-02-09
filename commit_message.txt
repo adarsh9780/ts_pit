@@ -1,18 +1,8 @@
-Report filename format now saved as: {ticker}_{alert_id}_{alert_date_in_human_language}.html
-Example: AAPL_ALT-1023_Feb_09_2026.html
+refactor(backend): modularize alert analysis, routing, and service layers
 
-1. If same name already exists, it auto-appends _2, _3, etc. (to avoid overwrite).
-2. Article count cap + priority logic. For internal report evidence (H-only articles):
-    if <= 10: show all
-    if > 10: show top 10
-    Ranking used:
-    1. number of H in materiality (desc, so effectively HHH first, then 2H, then 1H)
-    absolute impact score (desc)
-    2. created date (desc)
-
-3. NEEDS_REVIEW reasoning upgraded for both flows
-4. Added shared enrichment so both Analyze with AI and Agent now include:
-    why it is not DISMISS
-    why it is not ESCALATE_L2
-    what additional info is needed to move toward dismissal
-    evidence snapshot counts
+- split main API surface into dedicated routers (alerts, market, agent, reports, settings)
+- normalize alert response shape at backend source for consistent frontend consumption
+- refactor alert_analysis into orchestration + dedicated policy/data service modules
+- extract market/price cache provider helpers and keep prices.py as a stable facade
+- wire config-driven loguru logger and remove fallback logging path
+- remove legacy mappings endpoint and clean stale frontend router imports

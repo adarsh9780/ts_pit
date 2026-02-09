@@ -1,92 +1,72 @@
-import os
-import json
-import yfinance as yf
-import requests
-import asyncio
+from __future__ import annotations
+
 import aiosqlite
-import pandas as pd
-from datetime import datetime, timezone
-from pathlib import Path
+import os
 from contextlib import asynccontextmanager
-from typing import Optional, AsyncGenerator
-from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
+from pathlib import Path
+
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from .database import get_db_connection, remap_row
-from .config import get_config
-from .llm import get_llm_model, generate_article_analysis
-from .prices import fetch_and_cache_prices, get_ticker_from_isin
-from .alert_analysis import analyze_alert_non_persisting
-from .reporting import (
-    REPORTS_ROOT,
-    sanitize_session_id,
-    generate_alert_report_html,
-    save_chart_snapshot,
+from .agent.graph import workflow
+from .api.routers import (
+    agent_router,
+    alerts_router,
+    market_router,
+    reports_router,
+    settings_router,
 )
-from .agent.graph import workflow  # Import the workflow blueprint
+from .config import get_config
+from .database import get_db_connection
+from .llm import get_llm_model
+from .logger import init_logger, logprint
 
-# Load configuration
+
 config = get_config()
+init_logger()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Configure Proxy if set
     proxy_config = config.get_proxy_config()
     if proxy_config.get("http"):
         os.environ["HTTP_PROXY"] = proxy_config["http"]
-        print(f"Proxy configured: HTTP_PROXY={proxy_config['http']}")
+        logprint("Proxy configured: HTTP_PROXY set", proxy=proxy_config["http"])
     if proxy_config.get("https"):
         os.environ["HTTPS_PROXY"] = proxy_config["https"]
-        print(f"Proxy configured: HTTPS_PROXY={proxy_config['https']}")
+        logprint("Proxy configured: HTTPS_PROXY set", proxy=proxy_config["https"])
     if proxy_config.get("no_proxy"):
         os.environ["NO_PROXY"] = proxy_config["no_proxy"]
-        print(f"Proxy Bypass configured: NO_PROXY={proxy_config['no_proxy']}")
+        logprint("Proxy bypass configured", no_proxy=proxy_config["no_proxy"])
 
-    # Startup: Initialize LLM & Agent
-    print("Initializing LLM Model...")
+    logprint("Initializing LLM model...")
     app.state.llm = get_llm_model()
 
-    # Initialize Persistent Memory for Agent
     db_path = Path.home() / ".ts_pit" / "agent_memory.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
+    logprint("Initializing agent memory", db_path=str(db_path))
 
-    print(f"Initializing Agent Memory at {db_path}...")
-    # Open async connection for the application lifespan
     async with aiosqlite.connect(db_path) as conn:
         app.state.agent_params = {"conn": conn}
         checkpointer = AsyncSqliteSaver(conn)
-
-        # Compile the graph ONCE with the checkpointer
         app.state.agent = workflow.compile(checkpointer=checkpointer)
-
         yield
 
-    # Shutdown
-    print("Shutting down...")
+    logprint("Application shutdown complete")
 
 
 app = FastAPI(lifespan=lifespan)
 
-# Load configuration
-# Load configuration
-config = get_config()
 
-
-# Ensure DB schema is up to date (Migration)
 def run_migrations():
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # 1. Migrate Alerts Table
     table_name = config.get_table_name("alerts")
-
-    # Check for new columns in alerts
     cursor.execute(f'PRAGMA table_info("{table_name}")')
     columns = [row["name"] for row in cursor.fetchall()]
 
@@ -103,14 +83,18 @@ def run_migrations():
 
     for col, dtype in new_cols.items():
         if col not in columns:
-            print(f"Migrating: Adding {col} to {table_name}")
+            logprint("Migration adding column", table=table_name, column=col, dtype=dtype)
             cursor.execute(f'ALTER TABLE "{table_name}" ADD COLUMN "{col}" {dtype}')
 
-    # Ensure status column exists and is backfilled to a valid default.
     status_col = config.get_column("alerts", "status")
     default_status = config.get_valid_statuses()[0]
     if status_col not in columns:
-        print(f"Migrating: Adding {status_col} to {table_name} with default '{default_status}'")
+        logprint(
+            "Migration adding status column",
+            table=table_name,
+            column=status_col,
+            default_status=default_status,
+        )
         default_status_sql = default_status.replace("'", "''")
         cursor.execute(
             f'ALTER TABLE "{table_name}" ADD COLUMN "{status_col}" TEXT DEFAULT \'{default_status_sql}\''
@@ -120,7 +104,6 @@ def run_migrations():
         (default_status,),
     )
 
-    # 2. Migrate Articles Table
     articles_table = config.get_table_name("articles")
     cursor.execute(f'PRAGMA table_info("{articles_table}")')
     art_columns = [row["name"] for row in cursor.fetchall()]
@@ -134,19 +117,18 @@ def run_migrations():
 
     for col, dtype in new_art_cols.items():
         if col and col not in art_columns:
-            print(f"Migrating: Adding {col} to {articles_table}")
+            logprint("Migration adding article column", table=articles_table, column=col, dtype=dtype)
             cursor.execute(f'ALTER TABLE "{articles_table}" ADD COLUMN "{col}" {dtype}')
 
-    # 3. Ensure 'article_themes' table exists
     themes_table = config.get_table_name("article_themes")
-    articles_table = config.get_table_name("articles")
     articles_id_col = config.get_column("articles", "id")
     art_id_col = config.get_column("article_themes", "art_id")
     theme_col = config.get_column("article_themes", "theme")
     summary_col = config.get_column("article_themes", "summary")
     analysis_col = config.get_column("article_themes", "analysis")
 
-    cursor.execute(f'''
+    cursor.execute(
+        f'''
         CREATE TABLE IF NOT EXISTS "{themes_table}" (
             "{art_id_col}" TEXT PRIMARY KEY,
             "{theme_col}" TEXT,
@@ -154,14 +136,14 @@ def run_migrations():
             "{analysis_col}" TEXT,
             FOREIGN KEY("{art_id_col}") REFERENCES "{articles_table}"("{articles_id_col}")
         )
-    ''')
+    '''
+    )
 
-    # Ensure article_themes has P1 prominence as the single source of truth.
     p1_col = config.get_column("article_themes", "p1_prominence")
     cursor.execute(f'PRAGMA table_info("{themes_table}")')
     theme_columns = [row["name"] for row in cursor.fetchall()]
     if p1_col not in theme_columns:
-        print(f"Migrating: Adding {p1_col} to {themes_table}")
+        logprint("Migration adding p1 prominence column", table=themes_table, column=p1_col)
         cursor.execute(f'ALTER TABLE "{themes_table}" ADD COLUMN "{p1_col}" TEXT')
 
     conn.commit()
@@ -171,305 +153,9 @@ def run_migrations():
 run_migrations()
 
 
-def _get_alert_id_candidates(cursor, table_name: str) -> list[str]:
-    """
-    Return ID-column candidates available in the alerts table.
-    Keeps configured mapping first, then common fallbacks.
-    """
-    cursor.execute(f'PRAGMA table_info("{table_name}")')
-    available_cols = {row["name"] for row in cursor.fetchall()}
-    preferred = [
-        config.get_column("alerts", "id"),
-        "alert_id",
-        "Alert ID",
-        "id",
-    ]
-    return [c for c in dict.fromkeys(preferred) if c in available_cols]
-
-
-def _resolve_alert_row(cursor, table_name: str, alert_id: str | int):
-    """
-    Resolve an alert row across possible ID columns and value types.
-    Returns (row, id_column, matched_value) or (None, None, None).
-    """
-    id_cols = _get_alert_id_candidates(cursor, table_name)
-    probe_values = [alert_id]
-    if not isinstance(alert_id, str):
-        probe_values.append(str(alert_id))
-    elif alert_id.isdigit():
-        probe_values.append(int(alert_id))
-
-    for value in probe_values:
-        for id_col in id_cols:
-            cursor.execute(
-                f'SELECT * FROM "{table_name}" WHERE "{id_col}" = ? LIMIT 1', (value,)
-            )
-            row = cursor.fetchone()
-            if row:
-                return row, id_col, value
-
-    return None, None, None
-
-
-def normalize_and_validate_status(raw_status: str) -> str:
-    """
-    Normalize status for API output.
-    Read paths must be tolerant to legacy/dirty values so UI doesn't fail hard.
-    """
-    normalized = config.normalize_status(raw_status)
-    if config.is_status_enforced() and not config.is_valid_status(normalized):
-        fallback_status = config.get_valid_statuses()[0]
-        print(
-            f"Warning: Invalid alert status '{raw_status}' encountered on read. "
-            f"Returning fallback '{fallback_status}'."
-        )
-        return fallback_status
-    return normalized
-
-
-def normalize_impact_label(raw_label: str) -> str:
-    """Normalize impact labels to canonical business labels for API responses."""
-    normalized = config.normalize_impact_label(raw_label)
-    return normalized if normalized else raw_label
-
-
-def _parse_datetime(value: str | None) -> datetime | None:
-    """Parse common date/datetime formats used in alerts/articles."""
-    if value is None:
-        return None
-    raw = str(value).strip()
-    if not raw:
-        return None
-    normalized = raw.replace("Z", "+00:00")
-    try:
-        dt = datetime.fromisoformat(normalized)
-        # Normalize to UTC-naive so comparisons never mix aware/naive datetimes.
-        if dt.tzinfo is not None:
-            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-        return dt
-    except ValueError:
-        pass
-
-    for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S"):
-        try:
-            return datetime.strptime(raw, fmt)
-        except ValueError:
-            continue
-    return None
-
-
-def _is_high_impact(score: float | int | None) -> bool:
-    try:
-        # Canonical thresholds: Low < 2.0, Medium >= 2.0 and < 4.0, High >= 4.0.
-        return abs(float(score)) >= 4.0
-    except (TypeError, ValueError):
-        return False
-
-
-def _is_material_news(article: dict) -> bool:
-    """Material if entity prominence or theme relevance is high (P1/P3 == H)."""
-    materiality = str(article.get("materiality") or "").upper()
-    if len(materiality) >= 3 and (materiality[0] == "H" or materiality[2] == "H"):
-        return True
-    return False
-
-
-def _run_deterministic_summary_gates(
-    alert,
-    articles: list[dict],
-    start_date: str | None,
-    end_date: str | None,
-    trade_type: str | None,
-):
-    """
-    Run deterministic gates before LLM summarization.
-    Returns (override_result_or_none, filtered_articles_for_llm).
-    """
-    missing_fields = []
-    if not trade_type:
-        missing_fields.append("trade_type")
-    if not start_date:
-        missing_fields.append("start_date")
-    if not end_date:
-        missing_fields.append("end_date")
-
-    execution_col = config.get_column("alerts", "execution_date")
-    trade_ts = None
-    if execution_col and execution_col in alert.keys():
-        trade_ts = _parse_datetime(alert[execution_col])
-    if trade_ts is None:
-        trade_ts = _parse_datetime(end_date)
-
-    if trade_ts is None:
-        missing_fields.append("trade timestamp (execution_date or end_date)")
-
-    if missing_fields:
-        reason = (
-            "- Data readiness check failed.\n"
-            f"- Missing required fields: {', '.join(missing_fields)}.\n"
-            "- Deterministic policy requires manual review when key fields are missing."
-        )
-        return (
-            {
-                "narrative_theme": "NEEDS_REVIEW_DATA_GAP",
-                "narrative_summary": "Insufficient data for deterministic validation. Manual review required before AI justification.",
-                "bullish_events": [],
-                "bearish_events": [],
-                "neutral_events": [],
-                "recommendation": "NEEDS_REVIEW",
-                "recommendation_reason": reason,
-            },
-            articles,
-        )
-
-    if not articles:
-        reason = (
-            "- No linked news articles found for the alert window.\n"
-            "- Deterministic policy blocks auto-justification without evidence."
-        )
-        return (
-            {
-                "narrative_theme": "NEEDS_REVIEW_NO_NEWS",
-                "narrative_summary": "No linked news available for deterministic causality checks. Manual review required.",
-                "bullish_events": [],
-                "bearish_events": [],
-                "neutral_events": [],
-                "recommendation": "NEEDS_REVIEW",
-                "recommendation_reason": reason,
-            },
-            articles,
-        )
-
-    parsed_articles = []
-    for article in articles:
-        article_ts = _parse_datetime(article.get("created_date"))
-        if article_ts is None:
-            reason = (
-                "- At least one linked article is missing a valid timestamp.\n"
-                "- Deterministic policy requires valid article timestamps for causality checks."
-            )
-            return (
-                {
-                    "narrative_theme": "NEEDS_REVIEW_INVALID_TIMESTAMP",
-                    "narrative_summary": "Article timestamp quality check failed. Manual review required.",
-                    "bullish_events": [],
-                    "bearish_events": [],
-                    "neutral_events": [],
-                    "recommendation": "NEEDS_REVIEW",
-                    "recommendation_reason": reason,
-                },
-                articles,
-            )
-        parsed_articles.append((article, article_ts))
-
-    # Gate 1: only pre-trade (or at-trade) articles can justify the trade.
-    pre_trade_articles = [a for a, ts in parsed_articles if ts <= trade_ts]
-
-    if not pre_trade_articles:
-        has_high_any = any(_is_high_impact(a.get("impact_score")) for a in articles)
-        if has_high_any:
-            reason = (
-                f"- Trade timestamp boundary: {trade_ts.isoformat()}.\n"
-                "- No pre-trade public articles were found to justify the move.\n"
-                "- High-impact movement exists without valid causal public evidence."
-            )
-            recommendation = "ESCALATE_L2"
-            theme = "ESCALATE_NO_PRETRADE_NEWS"
-            summary = "High-impact behavior found, but no pre-trade public news evidence was available for justification."
-        else:
-            reason = (
-                f"- Trade timestamp boundary: {trade_ts.isoformat()}.\n"
-                "- No pre-trade public articles were found.\n"
-                "- Deterministic policy requires manual review when causality cannot be established."
-            )
-            recommendation = "NEEDS_REVIEW"
-            theme = "NEEDS_REVIEW_NO_PRETRADE_NEWS"
-            summary = "No pre-trade public news evidence was available to establish deterministic causality."
-
-        return (
-            {
-                "narrative_theme": theme,
-                "narrative_summary": summary,
-                "bullish_events": [],
-                "bearish_events": [],
-                "neutral_events": [],
-                "recommendation": recommendation,
-                "recommendation_reason": reason,
-            },
-            pre_trade_articles,
-        )
-
-    # Gate 3: high-impact + no material pre-trade news => escalate
-    has_high_impact = any(_is_high_impact(a.get("impact_score")) for a in pre_trade_articles)
-    has_material_pretrade = any(_is_material_news(a) for a in pre_trade_articles)
-    if has_high_impact and not has_material_pretrade:
-        reason = (
-            f"- Trade timestamp boundary: {trade_ts.isoformat()}.\n"
-            "- Pre-trade public articles exist, but none meet materiality criteria (P1/P3 high).\n"
-            "- High-impact movement without material pre-trade public news."
-        )
-        return (
-            {
-                "narrative_theme": "ESCALATE_HIGH_IMPACT_NO_MATERIAL_NEWS",
-                "narrative_summary": "Deterministic gates detected high-impact behavior without material pre-trade public justification.",
-                "bullish_events": [],
-                "bearish_events": [],
-                "neutral_events": [],
-                "recommendation": "ESCALATE_L2",
-                "recommendation_reason": reason,
-            },
-            pre_trade_articles,
-        )
-
-    # Gates passed: allow LLM, but only on causally valid pre-trade articles.
-    return None, pre_trade_articles
-
-
-def _db_column_exists(table_name: str, column_name: str) -> bool:
-    """Check if a physical DB column exists."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute(f'PRAGMA table_info("{table_name}")')
-        columns = {row["name"] for row in cursor.fetchall()}
-        return column_name in columns
-    finally:
-        conn.close()
-
-
-def _has_materiality_support() -> bool:
-    """
-    Determine if materiality should be enabled in UI.
-    Requires both configured mappings and physical DB columns.
-    """
-    required_mappings = [
-        ("articles", "created_date"),
-        ("articles", "theme"),
-        ("article_themes", "art_id"),
-        ("article_themes", "p1_prominence"),
-    ]
-    for table_key, col_key in required_mappings:
-        if not config.has_column(table_key, col_key):
-            return False
-
-    required_db_columns = [
-        (config.get_table_name("articles"), config.get_column("articles", "created_date")),
-        (config.get_table_name("articles"), config.get_column("articles", "theme")),
-        (
-            config.get_table_name("article_themes"),
-            config.get_column("article_themes", "art_id"),
-        ),
-        (
-            config.get_table_name("article_themes"),
-            config.get_column("article_themes", "p1_prominence"),
-        ),
-    ]
-    return all(_db_column_exists(table, col) for table, col in required_db_columns)
-
-# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for development
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -478,846 +164,37 @@ app.add_middleware(
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """Log detailed validation errors for debugging VDI/Production issues."""
-    print(f"Validation Error for {request.url}: {exc.errors()}")
-    print(f"Body: {exc.body}")
+    request_id = request.headers.get("x-request-id", "-")
+    logprint(
+        "Request validation error",
+        level="ERROR",
+        request_id=request_id,
+        path=str(request.url),
+        errors=exc.errors(),
+        body=exc.body,
+    )
     return JSONResponse(
         status_code=422,
         content={"detail": exc.errors(), "body": str(exc.body)},
     )
 
 
-# Serve built frontend from /ui if it exists
+app.include_router(settings_router)
+app.include_router(alerts_router)
+app.include_router(market_router)
+app.include_router(agent_router)
+app.include_router(reports_router)
+
+
 STATIC_DIR = Path(__file__).parent / "static"
 if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
-    # Mount static files for assets (js, css, etc.)
     app.mount("/ui/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
 
     @app.get("/ui")
     @app.get("/ui/{path:path}")
     async def serve_frontend(path: str = ""):
-        """Serve the frontend SPA. All routes fall back to index.html for client-side routing."""
-        # Check if the path is a file that exists
         file_path = STATIC_DIR / path
         if path and file_path.exists() and file_path.is_file():
             return FileResponse(file_path)
-        # Otherwise serve index.html for SPA routing
         return FileResponse(STATIC_DIR / "index.html")
 
-
-@app.post("/articles/{id}/analyze")
-def analyze_article(id: str, request: Request):
-    """
-    Generate AI analysis for a specific article using its price impact context.
-    """
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    # Get table info
-    articles_table = config.get_table_name("articles")
-    article_id_col = config.get_column("articles", "id")
-
-    # Fetch article and its calculated impact score
-    cursor.execute(
-        f'SELECT * FROM "{articles_table}" WHERE "{article_id_col}" = ?', (id,)
-    )
-    row = cursor.fetchone()
-
-    if not row:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Article not found")
-
-    article = dict(row)
-
-    # Extract context
-    title = article.get("title", "")
-    summary = article.get("summary", "")
-    z_score = article.get("impact_score") or 0.0
-    # Price change isn't directly in articles table usually, but we can imply intensity from z-score
-    # Or we could fetch it from prices if we had the timestamp logic here.
-    # For now, let's use z_score as the primary proxy for "Price Movement".
-    # We can pass a dummy price_change or 0 if not available, relying on Z-score for magnitude.
-    price_change = 0.0  # Placeholder, LLM will rely on Z-Score
-
-    # 2. Generate Analysis using Singleton LLM
-    llm = request.app.state.llm
-    analysis_result = generate_article_analysis(
-        title, summary, z_score, price_change, llm=llm
-    )
-
-    if analysis_result.get("theme") == "Error":
-        conn.close()
-        raise HTTPException(status_code=500, detail=analysis_result.get("analysis"))
-
-    # 3. Save to article_themes
-    themes_table = config.get_table_name("article_themes")
-    art_id_col = config.get_column("article_themes", "art_id")
-    theme_col = config.get_column("article_themes", "theme")
-    summary_col = config.get_column("article_themes", "summary")
-    analysis_col = config.get_column("article_themes", "analysis")
-
-    try:
-        cursor.execute(
-            f'''
-            INSERT OR REPLACE INTO "{themes_table}" 
-            ("{art_id_col}", "{theme_col}", "{summary_col}", "{analysis_col}")
-            VALUES (?, ?, ?, ?)
-        ''',
-            (
-                id,
-                analysis_result["theme"],
-                analysis_result["summary"] or "",  # Handle None
-                analysis_result["analysis"],
-            ),
-        )
-        conn.commit()
-    except Exception as e:
-        print(f"Error saving analysis: {e}")
-        # Return result even if save fails
-
-    conn.close()
-
-    return analysis_result
-
-
-class StatusUpdate(BaseModel):
-    status: str
-
-
-@app.get("/config")
-def get_config_endpoint():
-    """Return configuration for the frontend."""
-    payload = config.get_mappings_for_api()
-    payload["has_materiality"] = _has_materiality_support()
-    return payload
-
-
-# For backwards compatibility, also serve at /mappings
-@app.get("/mappings")
-def get_mappings():
-    """Legacy endpoint - returns same as /config."""
-    payload = config.get_mappings_for_api()
-    payload["has_materiality"] = _has_materiality_support()
-    return payload
-
-
-@app.get("/alerts")
-def get_alerts(date: Optional[str] = None):
-    """Get all alerts, optionally filtered by date."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    table_name = config.get_table_name("alerts")
-    alert_date_col = config.get_column("alerts", "alert_date")
-
-    if date:
-        cursor.execute(
-            f'SELECT * FROM "{table_name}" WHERE "{alert_date_col}" = ?', (date,)
-        )
-    else:
-        cursor.execute(f'SELECT * FROM "{table_name}"')
-
-    rows = cursor.fetchall()
-    conn.close()
-
-    results = []
-    for row in rows:
-        remapped = remap_row(dict(row), "alerts")
-        if "status" in remapped:
-            remapped["status"] = normalize_and_validate_status(remapped["status"])
-        results.append(remapped)
-    return results
-
-
-@app.patch("/alerts/{alert_id}/status")
-def update_alert_status(alert_id: str | int, update: StatusUpdate):
-    """Update the status of an alert."""
-    normalized_status = config.normalize_status(update.status)
-    valid_statuses = config.get_valid_statuses()
-    if config.is_status_enforced() and normalized_status not in valid_statuses:
-        raise HTTPException(
-            status_code=400, detail=f"Invalid status. Must be one of: {valid_statuses}"
-        )
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    table_name = config.get_table_name("alerts")
-    status_col = config.get_column("alerts", "status")
-    _, matched_id_col, matched_id_value = _resolve_alert_row(cursor, table_name, alert_id)
-    if not matched_id_col:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Alert not found")
-
-    cursor.execute(
-        f'UPDATE "{table_name}" SET "{status_col}" = ? WHERE "{matched_id_col}" = ?',
-        (normalized_status, matched_id_value),
-    )
-    conn.commit()
-
-    if cursor.rowcount == 0:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Alert not found")
-
-    conn.close()
-    return {"message": "Status updated", "alert_id": alert_id, "status": normalized_status}
-
-
-@app.get("/alerts/{alert_id}")
-def get_alert_detail(alert_id: str | int):
-    """Get details for a specific alert."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    table_name = config.get_table_name("alerts")
-    row, _, _ = _resolve_alert_row(cursor, table_name, alert_id)
-    conn.close()
-
-    if row is None:
-        raise HTTPException(status_code=404, detail="Alert not found")
-
-    result = remap_row(dict(row), "alerts")
-    if "status" in result:
-        result["status"] = normalize_and_validate_status(result["status"])
-    return result
-
-
-@app.post("/alerts/{alert_id}/summary")
-def generate_summary(alert_id: str, request: Request):
-    """Generate AI summary for the alert."""
-    conn = get_db_connection()
-    try:
-        cursor = conn.cursor()
-        alerts_table = config.get_table_name("alerts")
-        alert_id_col = config.get_column("alerts", "id")
-
-        analysis = analyze_alert_non_persisting(
-            conn=conn, config=config, alert_id=alert_id, llm=request.app.state.llm
-        )
-        if not analysis.get("ok"):
-            if analysis.get("error") == "Alert not found":
-                raise HTTPException(status_code=404, detail="Alert not found")
-            raise HTTPException(status_code=500, detail=analysis.get("error", "Analysis failed"))
-
-        result = analysis["result"]
-        matched_id_col = analysis.get("matched_id_col")
-        matched_id_value = analysis.get("matched_id_value")
-        now_str = datetime.now().isoformat()
-
-        bullish_json = json.dumps(result.get("bullish_events", []))
-        bearish_json = json.dumps(result.get("bearish_events", []))
-        neutral_json = json.dumps(result.get("neutral_events", []))
-
-        recommendation = result.get(
-            "recommendation", "NEEDS_REVIEW"
-        )
-        recommendation_reason = result.get(
-            "recommendation_reason", "AI analysis completed."
-        )
-
-        cursor.execute(
-            f'UPDATE "{alerts_table}" SET "narrative_theme" = ?, "narrative_summary" = ?, "bullish_events" = ?, "bearish_events" = ?, "neutral_events" = ?, "summary_generated_at" = ?, "recommendation" = ?, "recommendation_reason" = ? WHERE "{matched_id_col or alert_id_col}" = ?',
-            (
-                result["narrative_theme"],
-                result["narrative_summary"],
-                bullish_json,
-                bearish_json,
-                neutral_json,
-                now_str,
-                recommendation,
-                recommendation_reason,
-                matched_id_value if matched_id_col else alert_id,
-            ),
-        )
-        conn.commit()
-
-        return {
-            "narrative_theme": result["narrative_theme"],
-            "narrative_summary": result["narrative_summary"],
-            "bullish_events": result.get("bullish_events", []),
-            "bearish_events": result.get("bearish_events", []),
-            "neutral_events": result.get("neutral_events", []),
-            "recommendation": recommendation,
-            "recommendation_reason": recommendation_reason,
-            "summary_generated_at": now_str,
-        }
-    finally:
-        conn.close()
-
-
-# fetch_and_cache_prices and get_ticker_from_isin moved to backend/prices.py
-
-
-@app.get("/prices/{ticker}")
-def get_prices(
-    ticker: str,
-    period: str = Query(None, pattern="^(1mo|3mo|6mo|1y|ytd|max)$"),
-    start_date: str = Query(None),
-    end_date: str = Query(None),
-):
-    """Get price data for a ticker with industry comparison."""
-    # Use custom date range if provided, otherwise use period
-    if start_date and end_date:
-        start_date_str, actual_ticker = fetch_and_cache_prices(
-            ticker, "1y", start_date, end_date
-        )
-    else:
-        start_date_str, actual_ticker = fetch_and_cache_prices(ticker, period or "1y")
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    table_name = config.get_table_name("prices")
-    ticker_col = config.get_column("prices", "ticker")
-    date_col = config.get_column("prices", "date")
-
-    # 2. Get Ticker Data
-    query = (
-        f'SELECT * FROM "{table_name}" WHERE "{ticker_col}" = ? AND "{date_col}" >= ? '
-    )
-    params = [actual_ticker, start_date_str]
-
-    if end_date:
-        query += f'AND "{date_col}" <= ? '
-        params.append(end_date)
-
-    query += f'ORDER BY "{date_col}" ASC'
-
-    cursor.execute(query, tuple(params))
-    rows = cursor.fetchall()
-    conn.close()
-
-    ticker_data = [remap_row(dict(row), "prices") for row in rows]
-
-    # 3. Determine Sector and fetch ETF for comparison
-    industry_data = []
-    industry_name = "Industry Error"
-
-    if ticker_data:
-        etf_ticker = None
-        sector_etf_mapping = config.get_sector_etf_mapping()
-
-        try:
-            info = yf.Ticker(actual_ticker).info
-            sector = info.get("sector")
-            industry_name = sector
-
-            if sector in sector_etf_mapping:
-                etf_ticker = sector_etf_mapping[sector]
-            else:
-                # Fallback to SPY
-                etf_ticker = "SPY"
-                industry_name = "Market (SPY)"
-        except Exception as e:
-            print(f"Error fetching sector: {e}")
-            etf_ticker = "SPY"
-            industry_name = "Market (SPY)"
-
-        if etf_ticker:
-            # Fetch ETF data
-            if start_date and end_date:
-                fetch_and_cache_prices(
-                    etf_ticker, "1y", start_date, end_date, is_etf=True
-                )
-            else:
-                fetch_and_cache_prices(etf_ticker, period, is_etf=True)
-
-            # Query ETF data
-            conn = get_db_connection()
-            cursor = conn.cursor()
-
-            query_etf = f'SELECT * FROM "{table_name}" WHERE "{ticker_col}" = ? AND "{date_col}" >= ? '
-            params_etf = [etf_ticker, start_date_str]
-
-            if end_date:
-                query_etf += f'AND "{date_col}" <= ? '
-                params_etf.append(end_date)
-
-            query_etf += f'ORDER BY "{date_col}" ASC'
-
-            cursor.execute(query_etf, tuple(params_etf))
-            etf_rows = cursor.fetchall()
-            conn.close()
-
-            industry_data = [remap_row(dict(row), "prices") for row in etf_rows]
-
-    return {
-        "ticker": ticker_data,
-        "industry": industry_data,
-        "industry_name": industry_name,
-    }
-
-
-from .scoring import calculate_p2, calculate_p3
-
-
-@app.get("/news/{isin}")
-def get_news(
-    isin: str,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-):
-    """Get news articles for an ISIN."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    table_name = config.get_table_name("articles")
-    isin_col = config.get_column("articles", "isin")
-    date_col = config.get_column("articles", "created_date")
-
-    # Join query to prefer AI analysis if available
-    themes_table = config.get_table_name("article_themes")
-    art_id_col = config.get_column("articles", "id")
-    theme_art_id_col = config.get_column("article_themes", "art_id")
-    ai_theme_col = config.get_column("article_themes", "theme")
-    ai_summary_col = config.get_column("article_themes", "summary")
-    ai_analysis_col = config.get_column("article_themes", "analysis")
-    ai_p1_col = config.get_column("article_themes", "p1_prominence")
-
-    impact_score_col = config.get_column("articles", "impact_score")
-    original_theme_col = config.get_column("articles", "theme")
-    original_summary_col = config.get_column("articles", "summary")
-    query = f'''
-        SELECT 
-            a.*,
-            a."{original_theme_col}" as original_theme,
-            a."{original_summary_col}" as original_summary,
-            t."{ai_theme_col}" as ai_theme,
-            t."{ai_summary_col}" as ai_summary,
-            t."{ai_analysis_col}" as ai_analysis,
-            t."{ai_p1_col}" as ai_p1
-        FROM "{table_name}" a
-        LEFT JOIN "{themes_table}" t ON a."{art_id_col}" = t."{theme_art_id_col}"
-        WHERE a."{isin_col}" = ?
-    '''
-    params = [isin]
-
-    if start_date:
-        query += f' AND "{date_col}" >= ?'
-        params.append(start_date)
-
-    if end_date:
-        query += f' AND "{date_col}" <= ?'
-        params.append(end_date)
-
-    query += f' ORDER BY "{date_col}" DESC'
-
-    cursor.execute(query, params)
-    rows = cursor.fetchall()
-
-    # Materiality Scoring Weights for Sorting
-    mat_score_map = {"H": 3, "M": 2, "L": 1}
-
-    results = []
-    for row in rows:
-        r = dict(row)
-        remapped = remap_row(r, "articles")
-        if "impact_label" in remapped:
-            remapped["impact_label"] = normalize_impact_label(remapped["impact_label"])
-
-        # Fallback logic for theme and summary
-        ai_theme = r.get("ai_theme")
-        if ai_theme and ai_theme.lower() != "string":
-            remapped["theme"] = ai_theme
-
-        # Ensure theme is never None (fallback to original or uncategorized)
-        if remapped.get("theme") is None:
-            remapped["theme"] = r.get("original_theme") or "UNCATEGORIZED"
-
-        # ------------------------------------------------------------------
-        # Dynamic Materiality Calculation (P1 + P2 + P3)
-        # ------------------------------------------------------------------
-        # Single source: P1 comes from article_themes only.
-        p1 = r.get("ai_p1") or "L"
-        # p3 is now calculated dynamically from the theme
-        p2 = calculate_p2(remapped.get("created_date"), start_date, end_date)
-        p3 = calculate_p3(remapped.get("theme"))
-
-        final_score = f"{p1}{p2}{p3}"
-        remapped["materiality"] = final_score
-
-        # Detailed Breakdown for Tooltip
-        remapped["materiality_details"] = {
-            "p1": {"score": p1, "reason": "Entity Mention (Title/Lead/Body)"},
-            "p2": {
-                "score": p2,
-                "reason": f"Proximity to Window ({start_date} to {end_date})",
-            },
-            "p3": {"score": p3, "reason": f"Theme Priority ({remapped['theme']})"},
-        }
-
-        # Calculate numeric sort score (e.g., HHH=9, LLL=3)
-        sort_score = (
-            mat_score_map.get(p1, 1)
-            + mat_score_map.get(p2, 1)
-            + mat_score_map.get(p3, 1)
-        )
-        remapped["_sort_score"] = sort_score
-
-        results.append(remapped)
-
-    conn.close()
-
-    # Sort by Materiality Score (descending), then by date
-    results.sort(key=lambda x: (x["_sort_score"], x["created_date"]), reverse=True)
-
-    # Remove temporary sort key
-    for res in results:
-        del res["_sort_score"]
-
-    return results
-
-
-# ==============================================================================
-# AI AGENT ENDPOINTS
-# ==============================================================================
-
-
-class AlertContext(BaseModel):
-    """Full alert context passed from frontend to avoid re-fetching."""
-
-    id: str | int
-    ticker: str
-    isin: str
-    start_date: str
-    end_date: str
-    instrument_name: Optional[str] = None
-    trade_type: Optional[str] = None
-    status: Optional[str] = None
-
-
-class ChatRequest(BaseModel):
-    message: str
-    session_id: str
-    alert_context: Optional[AlertContext] = None  # Full context from frontend
-
-
-class ReportRequest(BaseModel):
-    session_id: str
-    include_web_news: bool = False
-
-
-class ChartSnapshotRequest(BaseModel):
-    session_id: str
-    alert_id: str | int
-    image_data_url: str
-
-
-def _session_artifacts_root(session_id: str) -> Path:
-    safe_session = sanitize_session_id(session_id)
-    return (REPORTS_ROOT / safe_session).resolve()
-
-
-def _artifact_meta(session_root: Path, file_path: Path) -> dict:
-    stat = file_path.stat()
-    rel_path = file_path.relative_to(session_root).as_posix()
-    return {
-        "name": file_path.name,
-        "relative_path": rel_path,
-        "size_bytes": stat.st_size,
-        "created_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
-    }
-
-
-@app.get("/agent/history/{session_id}")
-async def get_chat_history(session_id: str, request: Request):
-    """
-    Retrieve chat history for a given session from the LangGraph checkpointer.
-    Returns messages in a format suitable for the frontend.
-    """
-    agent = request.app.state.agent
-    config = {"configurable": {"thread_id": session_id}}
-
-    try:
-        # Get the current state from the checkpointer
-        state = await agent.aget_state(config)
-
-        # Debug logging - Removed
-
-        if not state or not state.values:
-            return {"messages": []}
-
-        messages = state.values.get("messages", [])
-
-        # Convert LangChain messages to frontend format
-        frontend_messages = []
-        for msg in messages:
-            # Skip system messages and tool outputs
-            if hasattr(msg, "type"):
-                if msg.type == "system":
-                    continue
-                if msg.type == "tool":
-                    continue
-
-            role = "user" if (hasattr(msg, "type") and msg.type == "human") else "agent"
-            content = msg.content if hasattr(msg, "content") else str(msg)
-
-            # Handle case where content is a list (e.g., Gemini/Anthropic response structure)
-            if isinstance(content, list):
-                text_parts = []
-                for part in content:
-                    if isinstance(part, str):
-                        text_parts.append(part)
-                    elif isinstance(part, dict) and "text" in part:
-                        text_parts.append(part["text"])
-                content = " ".join(text_parts)
-
-            # Skip empty messages
-            if not content or (isinstance(content, str) and not content.strip()):
-                continue
-
-            # For user messages, strip the [CURRENT ALERT CONTEXT] prefix if present
-            if role == "user" and "[USER QUESTION]" in content:
-                # Extract just the user's question from the enriched message
-                parts = content.split("[USER QUESTION]")
-                if len(parts) > 1:
-                    content = parts[1].strip()
-
-            frontend_messages.append(
-                {
-                    "role": role,
-                    "content": content,
-                    "tools": [],  # Historical messages don't need tool indicators
-                }
-            )
-
-        return {"messages": frontend_messages}
-
-    except Exception as e:
-        print(f"Error fetching chat history: {e}")
-        return {"messages": []}
-
-
-@app.delete("/agent/history/{session_id}")
-async def delete_chat_history(session_id: str, request: Request):
-    """
-    Delete chat history for a given session from the LangGraph checkpointer.
-    """
-    import aiosqlite
-
-    db_path = Path.home() / ".ts_pit" / "agent_memory.db"
-
-    if not db_path.exists():
-        return {
-            "status": "deleted",
-            "session_id": session_id,
-            "message": "No history database found",
-        }
-
-    try:
-        async with aiosqlite.connect(str(db_path)) as conn:
-            deleted_count = 0
-
-            # Try to delete from each table (some may not exist)
-            for table in ["checkpoints", "checkpoint_writes", "checkpoint_blobs"]:
-                try:
-                    cursor = await conn.execute(
-                        f"DELETE FROM {table} WHERE thread_id = ?", (session_id,)
-                    )
-                    deleted_count += cursor.rowcount
-                except Exception:
-                    pass  # Table doesn't exist, skip
-
-            await conn.commit()
-
-        return {
-            "status": "deleted",
-            "session_id": session_id,
-            "deleted_rows": deleted_count,
-        }
-
-    except Exception as e:
-        print(f"Error deleting chat history: {e}")
-        from fastapi.responses import JSONResponse
-
-        return JSONResponse(
-            status_code=500, content={"status": "error", "message": str(e)}
-        )
-
-
-@app.post("/agent/chat")
-async def chat_agent(request: Request, body: ChatRequest):
-    """
-    Chat with the Trade Surveillance Agent.
-    Streams the response using Server-Sent Events (SSE).
-    """
-    agent = request.app.state.agent
-
-    # Configure session
-    config = {"configurable": {"thread_id": body.session_id}}
-
-    # Build enriched user message with alert context
-    if body.alert_context:
-        ctx = body.alert_context
-        enriched_message = f"""[CURRENT ALERT CONTEXT]
-Alert ID: {ctx.id}
-Session ID: {body.session_id}
-Ticker: {ctx.ticker} ({ctx.instrument_name or "N/A"})
-ISIN: {ctx.isin}
-Investigation Window: {ctx.start_date} to {ctx.end_date}
-Trade Type: {ctx.trade_type or "N/A"}
-Status: {ctx.status or "N/A"}
-
-[USER QUESTION]
-{body.message}"""
-    else:
-        enriched_message = body.message
-
-    # Input State - no more current_alert_id, context is in message
-    input_state = {
-        "messages": [("user", enriched_message)],
-    }
-
-    async def event_generator():
-        """Generates SSE events from the agent graph."""
-        try:
-            async for event in agent.astream_events(input_state, config, version="v1"):
-                kind = event["event"]
-
-                # Filter interesting events to stream to frontend
-                if kind == "on_chat_model_stream":
-                    # Only stream tokens from the AGENT node, not internal tool LLM calls
-                    if event.get("metadata", {}).get("langgraph_node") != "agent":
-                        continue
-
-                    chunk = event["data"]["chunk"]
-                    content = chunk.content
-
-                    # Handle case where content is a list (e.g., Anthropic/Gemini structure)
-                    if isinstance(content, list):
-                        text_content = ""
-                        for block in content:
-                            if isinstance(block, str):
-                                text_content += block
-                            elif isinstance(block, dict) and "text" in block:
-                                text_content += block["text"]
-                        content = text_content
-
-                    if content:
-                        yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
-
-                elif kind == "on_tool_start":
-                    tool_name = event["name"]
-                    yield f"data: {json.dumps({'type': 'tool_start', 'tool': tool_name})}\n\n"
-
-                elif kind == "on_tool_end":
-                    tool_name = event["name"]
-                    tool_output = event.get("data", {}).get("output")
-                    if (
-                        tool_name == "generate_current_alert_report"
-                        and isinstance(tool_output, str)
-                    ):
-                        try:
-                            parsed = json.loads(tool_output)
-                            if parsed.get("ok"):
-                                data = parsed.get("data") or {}
-                                yield (
-                                    f"data: {json.dumps({'type': 'artifact_created', 'tool': tool_name, 'session_id': data.get('session_id'), 'artifact_name': data.get('report_filename'), 'relative_path': data.get('report_filename'), 'expires_at': data.get('expires_at')})}\n\n"
-                                )
-                        except Exception:
-                            pass
-                    yield f"data: {json.dumps({'type': 'tool_end', 'tool': tool_name, 'output': 'Hidden'})}\n\n"
-
-            # End of stream
-            yield f"data: {json.dumps({'type': 'done'})}\n\n"
-
-        except Exception as e:
-            print(f"Agent Error: {e}")
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
-
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
-
-
-@app.post("/alerts/{alert_id}/report")
-def generate_alert_report(alert_id: str, body: ReportRequest, request: Request):
-    """
-    Generate a downloadable investigation report for an alert.
-    Stored under artifacts/reports/{session_id}/{alert_id}_{timestamp}.html
-    """
-    conn = get_db_connection()
-    try:
-        session_id = sanitize_session_id(body.session_id)
-        result = generate_alert_report_html(
-            conn=conn,
-            config=config,
-            llm=request.app.state.llm,
-            alert_id=alert_id,
-            session_id=session_id,
-            include_web_news=body.include_web_news,
-        )
-        if not result.get("ok"):
-            if result.get("error") == "Alert not found":
-                raise HTTPException(status_code=404, detail="Alert not found")
-            raise HTTPException(status_code=500, detail=result.get("error", "Report generation failed"))
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    finally:
-        conn.close()
-
-
-@app.post("/reports/chart-snapshot")
-def upload_chart_snapshot(body: ChartSnapshotRequest):
-    """Store a UI-captured chart snapshot for a session+alert."""
-    try:
-        session_id = sanitize_session_id(body.session_id)
-        result = save_chart_snapshot(
-            session_id=session_id,
-            alert_id=body.alert_id,
-            image_data_url=body.image_data_url,
-        )
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.get("/reports/{session_id}/{report_filename}")
-def download_report(session_id: str, report_filename: str):
-    """Download a generated report artifact."""
-    session_id = sanitize_session_id(session_id)
-    safe_name = Path(report_filename).name
-    target = (REPORTS_ROOT / session_id / safe_name).resolve()
-    root = REPORTS_ROOT.resolve()
-
-    if not str(target).startswith(str(root)):
-        raise HTTPException(status_code=400, detail="Invalid report path")
-    if not target.exists() or not target.is_file():
-        raise HTTPException(status_code=404, detail="Report not found")
-
-    return FileResponse(target, filename=safe_name, media_type="text/html")
-
-
-@app.get("/artifacts/{session_id}")
-def list_session_artifacts(session_id: str):
-    """List artifacts for a session (excluding internal cache/snapshot files)."""
-    session_root = _session_artifacts_root(session_id)
-    if not session_root.exists() or not session_root.is_dir():
-        return {"session_id": session_id, "artifacts": []}
-
-    artifacts = []
-    for p in session_root.rglob("*"):
-        if not p.is_file():
-            continue
-        rel = p.relative_to(session_root).as_posix()
-        if rel.startswith("chart_snapshots/"):
-            continue
-        artifacts.append(_artifact_meta(session_root, p))
-
-    artifacts.sort(key=lambda x: x["created_at"], reverse=True)
-    return {"session_id": session_id, "artifacts": artifacts}
-
-
-@app.get("/artifacts/{session_id}/download")
-def download_session_artifact(session_id: str, path: str = Query(..., min_length=1)):
-    """Download artifact by relative path under a session directory."""
-    session_root = _session_artifacts_root(session_id)
-    if not session_root.exists() or not session_root.is_dir():
-        raise HTTPException(status_code=404, detail="Session artifacts not found")
-
-    candidate = (session_root / path).resolve()
-    if not str(candidate).startswith(str(session_root)):
-        raise HTTPException(status_code=400, detail="Invalid artifact path")
-    if not candidate.exists() or not candidate.is_file():
-        raise HTTPException(status_code=404, detail="Artifact not found")
-
-    return FileResponse(candidate, filename=candidate.name)
