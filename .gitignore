@@ -35,3 +35,4 @@ __pycache__/
 *.sln
 *.bak_*
 backend/agent_v2
+artifacts/reports/*

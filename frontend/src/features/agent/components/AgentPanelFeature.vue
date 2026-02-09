@@ -1,0 +1,543 @@
+<script setup>
+import { toRef } from 'vue';
+import { marked } from 'marked';
+import ConfirmDialog from '../../../components/ConfirmDialog.vue';
+import { useAgentChat } from '../composables/useAgentChat.js';
+
+marked.setOptions({ breaks: true, gfm: true });
+const renderer = new marked.Renderer();
+renderer.link = ({ href, title, text }) => {
+  const titleAttr = title ? ` title="${title}"` : '';
+  return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
+};
+marked.use({ renderer });
+
+const renderMarkdown = (content) => (content ? marked.parse(content) : '');
+
+const props = defineProps({ alertId: String });
+defineEmits(['close']);
+
+const {
+  messages,
+  inputMessage,
+  isLoading,
+  messagesContainer,
+  inputRef,
+  panelWidth,
+  composerRef,
+  artifacts,
+  artifactsLoading,
+  showArtifactsMenu,
+  showDeleteDialog,
+  deleteDialogMessage,
+  deleteDialogTitle,
+  deleteDialogShowButtons,
+  isDeleting,
+  clearChat,
+  showDeleteConfirmation,
+  cancelDelete,
+  confirmDelete,
+  toggleArtifactsMenu,
+  downloadArtifact,
+  handleComposerKeydown,
+  sendMessage,
+  stopGeneration,
+  startResize,
+} = useAgentChat(toRef(props, 'alertId'));
+</script>
+<template>
+  <div class="agent-panel" :style="{ width: panelWidth + 'px' }">
+    <div class="resize-handle" @mousedown="startResize">
+      <div class="handle-line"></div>
+    </div>
+
+    <div class="panel-header">
+      <h3>AI Assistant</h3>
+      <div class="header-actions">
+        <button @click="clearChat" class="action-btn" title="Clear chat (new session)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 20H7L3 16l9-13 8 8-5 9"/>
+            <path d="M6.5 13.5l5 5"/>
+          </svg>
+        </button>
+        <button @click="showDeleteConfirmation" class="action-btn delete-btn" title="Delete history from server">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14M10 11v6M14 11v6"/>
+          </svg>
+        </button>
+        <button @click="$emit('close')" class="close-btn">×</button>
+      </div>
+    </div>
+
+    <div class="messages-area" ref="messagesContainer">
+      <div v-for="(msg, index) in messages" :key="index" :class="['message', msg.role]">
+        <template v-if="msg.role === 'context-switch'">
+          <div class="context-switch-divider">
+            <div class="divider-line"></div>
+            <div class="divider-content">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+              <span>Switched to <strong>{{ msg.alertId }}</strong></span>
+              <span class="date-range">{{ msg.startDate }} → {{ msg.endDate }}</span>
+            </div>
+            <div class="divider-line"></div>
+          </div>
+        </template>
+
+        <div v-else class="message-content">
+          <div
+            v-if="msg.content"
+            :key="`md-${index}-${msg.content.length}`"
+            class="text markdown-content"
+            v-html="renderMarkdown(msg.content)"
+          ></div>
+
+          <div v-if="msg.tools && msg.tools.length > 0" class="tools-container">
+            <div v-for="tool in msg.tools" :key="tool.name" class="tool-badge">
+              <span class="status-dot" :class="tool.status"></span>
+              {{ tool.name }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="isLoading" class="loading-container">
+        <div class="spinner"></div>
+      </div>
+    </div>
+
+    <div class="composer-wrap" ref="composerRef">
+      <textarea
+        ref="inputRef"
+        v-model="inputMessage"
+        @keydown="handleComposerKeydown"
+        class="composer-textarea"
+        placeholder="Ask about this alert..."
+        :disabled="isLoading"
+        rows="2"
+      ></textarea>
+
+      <div class="composer-toolbar">
+        <div class="input-left-tools">
+          <button class="artifact-btn" @click.stop="toggleArtifactsMenu" :disabled="!sessionId" title="Artifacts">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+          </button>
+
+          <div v-if="showArtifactsMenu" class="artifacts-menu">
+            <div v-if="artifactsLoading" class="artifacts-empty">Loading...</div>
+            <template v-else>
+              <button
+                v-for="artifact in artifacts"
+                :key="artifact.relative_path"
+                class="artifact-item"
+                @click="downloadArtifact(artifact)"
+              >
+                <span class="artifact-name">{{ artifact.name }}</span>
+                <span class="artifact-meta">{{ artifact.created_at }}</span>
+              </button>
+              <div v-if="artifacts.length === 0" class="artifacts-empty">No artifacts yet</div>
+            </template>
+          </div>
+        </div>
+
+        <button v-if="!isLoading" @click="sendMessage" class="send-circle-btn" :disabled="!inputMessage.trim()" title="Send">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="19" x2="12" y2="5"/>
+            <polyline points="5 12 12 5 19 12"/>
+          </svg>
+        </button>
+        <button v-else @click="stopGeneration" class="send-circle-btn stop-btn" title="Stop">
+          <span class="stop-icon">■</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <ConfirmDialog
+    :isOpen="showDeleteDialog"
+    :title="deleteDialogTitle"
+    :message="deleteDialogMessage"
+    :confirmText="isDeleting ? 'Deleting...' : 'Delete'"
+    cancelText="Cancel"
+    :showButtons="deleteDialogShowButtons"
+    @confirm="confirmDelete"
+    @cancel="cancelDelete"
+  />
+</template>
+
+<style scoped>
+.agent-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--color-surface);
+  border-left: 1px solid var(--color-border);
+  box-shadow: -2px 0 10px rgba(0, 0, 0, 0.1);
+  position: relative;
+  max-width: 90vw;
+}
+
+.resize-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  cursor: ew-resize;
+  z-index: 10;
+}
+
+.resize-handle:hover,
+.resize-handle:active {
+  background: #3b82f6;
+}
+
+.panel-header {
+  padding: var(--spacing-4);
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--color-surface-hover);
+  padding-left: 12px;
+}
+
+.panel-header h3 {
+  margin: 0;
+  font-size: var(--font-size-md);
+  color: var(--color-text-main);
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.action-btn {
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.action-btn:hover {
+  background: var(--color-surface-hover);
+}
+
+.action-btn.delete-btn:hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.close-btn {
+  border: none;
+  background: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: var(--color-text-subtle);
+}
+
+.messages-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--spacing-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+}
+
+.message {
+  max-width: 85%;
+  padding: var(--spacing-3);
+  border-radius: 8px;
+  font-size: var(--font-size-sm);
+  line-height: 1.4;
+}
+
+.message.user {
+  align-self: flex-end;
+  background-color: var(--color-primary);
+  color: white;
+  border-bottom-right-radius: 2px;
+}
+
+.message.agent {
+  align-self: stretch;
+  max-width: 100%;
+  background-color: var(--color-background);
+  color: var(--color-text-main);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  margin: 4px 8px;
+}
+
+.markdown-content {
+  line-height: 1.6;
+}
+
+.markdown-content :deep(p) { margin: 0 0 0.5em 0; }
+.markdown-content :deep(p:last-child) { margin-bottom: 0; }
+.markdown-content :deep(ul),
+.markdown-content :deep(ol) { margin: 0.5em 0; padding-left: 1.5em; }
+.markdown-content :deep(li) { margin: 0.25em 0; }
+.markdown-content :deep(strong) { font-weight: 600; color: var(--color-text-main); }
+.markdown-content :deep(code) {
+  background: rgba(0, 0, 0, 0.08);
+  padding: 0.15em 0.4em;
+  border-radius: 3px;
+  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  font-size: 0.9em;
+}
+
+.tools-container {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tool-badge {
+  font-size: 10px;
+  background: rgba(0, 0, 0, 0.05);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ccc;
+}
+
+.status-dot.running { background: #3498db; animation: pulse 1s infinite; }
+.status-dot.done { background: #2ecc71; }
+
+@keyframes pulse {
+  0% { opacity: 0.5; }
+  50% { opacity: 1; }
+  100% { opacity: 0.5; }
+}
+
+.loading-container {
+  padding: var(--spacing-3);
+  padding-left: 0;
+  display: flex;
+  justify-content: flex-start;
+}
+
+.spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--color-border);
+  border-top: 2px solid var(--color-primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.message.context-switch {
+  max-width: 100%;
+  padding: 0;
+  background: none;
+  border: none;
+}
+
+.context-switch-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  width: 100%;
+}
+
+.divider-line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--color-border), transparent);
+}
+
+.divider-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+  padding: 4px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.divider-content strong {
+  color: var(--color-text-main);
+  font-weight: 600;
+}
+
+.divider-content .date-range {
+  color: var(--color-text-subtle);
+  font-size: 10px;
+  padding-left: 8px;
+  border-left: 1px solid var(--color-border);
+}
+
+.composer-wrap {
+  margin: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 20px;
+  background: var(--color-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+  position: relative;
+}
+
+.composer-textarea {
+  width: 100%;
+  resize: none;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--color-text-main);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.5;
+  min-height: 48px;
+}
+
+.composer-textarea::placeholder {
+  color: var(--color-text-subtle);
+}
+
+.composer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.input-left-tools {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.artifact-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-subtle);
+  cursor: pointer;
+}
+
+.artifact-btn:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text-main);
+}
+
+.artifacts-menu {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 0;
+  width: 320px;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+  z-index: 30;
+}
+
+.artifact-item {
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  cursor: pointer;
+}
+
+.artifact-item:hover {
+  background: var(--color-surface-hover);
+}
+
+.artifact-name {
+  color: var(--color-text-main);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.artifact-meta {
+  color: var(--color-text-subtle);
+  font-size: 11px;
+}
+
+.artifacts-empty {
+  padding: 12px;
+  color: var(--color-text-subtle);
+  font-size: 12px;
+}
+
+.send-circle-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #0f172a;
+  color: #fff;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.send-circle-btn:hover {
+  background: #020617;
+}
+
+.send-circle-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.send-circle-btn.stop-btn {
+  background: #dc2626;
+}
+
+.send-circle-btn.stop-btn:hover {
+  background: #b91c1c;
+}
+
+.stop-icon {
+  font-size: 0.8em;
+}
+</style>
