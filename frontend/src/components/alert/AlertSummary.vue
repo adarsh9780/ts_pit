@@ -39,7 +39,8 @@ const parseReasoning = (text) => {
     for (const rawLine of lines) {
         const isBullet = /^[-*•]\s+/.test(rawLine);
         const clean = rawLine.replace(/^[-*•]\s*/, '');
-        const isHeader = !isBullet && clean.endsWith(':');
+        // Treat subsection headers consistently even if older data stored them with bullet prefix.
+        const isHeader = clean.endsWith(':');
 
         if (isHeader) {
             currentSection = { title: clean.slice(0, -1), items: [] };
