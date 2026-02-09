@@ -197,7 +197,6 @@ def _render_report_html(payload: dict[str, Any]) -> str:
     alert = payload["alert"]
     analysis = payload["analysis"]
     h_articles = payload["high_materiality_articles"]
-    all_articles = payload.get("all_internal_articles", [])
     price_svg = payload["price_svg"]
     chart_snapshot = payload.get("chart_snapshot_data_url")
     web_news = payload.get("web_news", [])
@@ -206,25 +205,22 @@ def _render_report_html(payload: dict[str, Any]) -> str:
     def _e(v: Any) -> str:
         return html.escape(str(v if v is not None else "-"))
 
-    evidence_rows = []
+    evidence_cards = []
     for idx, a in enumerate(h_articles, start=1):
         title = _e(a.get("title"))
         url = a.get("url")
         title_html = f'<a href="{html.escape(url)}" target="_blank" rel="noopener noreferrer">{title}</a>' if url else title
-        evidence_rows.append(
-            f"<tr><td>{idx}</td><td>{title_html}</td><td>{_e(a.get('created_date'))}</td><td>{_e(a.get('theme'))}</td><td>{_e(a.get('materiality'))}</td><td>{_format_num(a.get('impact_score'), 2)}</td><td>{_e(a.get('summary'))}</td></tr>"
+        evidence_cards.append(
+            f"""
+<article class="news-item">
+  <div class="news-kicker">Evidence {idx}</div>
+  <h3 class="news-title">{title_html}</h3>
+  <p class="news-meta">{_e(a.get('created_date'))} | {_e(a.get('theme'))} | Materiality {_e(a.get('materiality'))} | Impact {_format_num(a.get('impact_score'), 2)}</p>
+  <p class="news-summary">{_e(a.get('summary'))}</p>
+</article>
+""".strip()
         )
-    evidence_table = "\n".join(evidence_rows) if evidence_rows else "<tr><td colspan='7'>No articles with materiality containing H in alert window.</td></tr>"
-
-    all_rows = []
-    for idx, a in enumerate(all_articles, start=1):
-        title = _e(a.get("title"))
-        url = a.get("url")
-        title_html = f'<a href="{html.escape(url)}" target="_blank" rel="noopener noreferrer">{title}</a>' if url else title
-        all_rows.append(
-            f"<tr><td>{idx}</td><td>{title_html}</td><td>{_e(a.get('created_date'))}</td><td>{_e(a.get('theme'))}</td><td>{_e(a.get('materiality'))}</td><td>{_format_num(a.get('impact_score'), 2)}</td><td>{_e(a.get('summary'))}</td></tr>"
-        )
-    all_table = "\n".join(all_rows) if all_rows else "<tr><td colspan='7'>No internal alert-window articles found.</td></tr>"
+    evidence_html = "\n".join(evidence_cards) if evidence_cards else "<p class='muted'>No internal alert-window articles with materiality containing H were found.</p>"
 
     citation_items = []
     for c in analysis.get("citations", []):
@@ -239,15 +235,21 @@ def _render_report_html(payload: dict[str, Any]) -> str:
         if w.get("url"):
             title_html = f'<a href="{html.escape(w.get("url"))}" target="_blank" rel="noopener noreferrer">{title_html}</a>'
         web_items.append(
-            f"<li>{title_html} | {_e(w.get('source'))} | {_e(w.get('date'))}<br/><span class='small'>{_e(w.get('summary'))}</span></li>"
+            f"""
+<article class="news-item web-item">
+  <h3 class="news-title">{title_html}</h3>
+  <p class="news-meta">{_e(w.get('source'))} | {_e(w.get('date'))}</p>
+  <p class="news-summary">{_e(w.get('summary'))}</p>
+</article>
+""".strip()
         )
-    web_html = "\n".join(web_items) if web_items else "<li>Web news enrichment not included.</li>"
+    web_html = "\n".join(web_items) if web_items else "<p class='muted'>Web news enrichment not included.</p>"
 
     rec = analysis["analysis"].get("recommendation", "NEEDS_REVIEW")
     rec_norm = str(rec or "NEEDS_REVIEW").upper()
     rec_class = {
-        "ESCALATE": "badge-escalate",
-        "CLOSE_ALERT": "badge-close",
+        "ESCALATE_L2": "badge-escalate",
+        "DISMISS": "badge-close",
         "NEEDS_REVIEW": "badge-review",
     }.get(rec_norm, "badge-review")
     rec_reason = _e(analysis["analysis"].get("recommendation_reason", ""))
@@ -331,6 +333,49 @@ def _render_report_html(payload: dict[str, Any]) -> str:
       overflow: hidden;
       background: var(--surface-soft);
       padding: 8px;
+    }}
+    .news-feed {{
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }}
+    .news-item {{
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px 14px;
+      background: #fff;
+    }}
+    .news-kicker {{
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 4px;
+    }}
+    .news-title {{
+      margin: 0 0 4px 0;
+      font-size: 17px;
+      line-height: 1.35;
+    }}
+    .news-title a {{
+      color: #1d4ed8;
+      text-decoration: none;
+    }}
+    .news-title a:hover {{
+      text-decoration: underline;
+    }}
+    .news-meta {{
+      margin: 0 0 6px 0;
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      color: var(--muted);
+      font-size: 12px;
+    }}
+    .news-summary {{
+      margin: 0;
+    }}
+    .web-item .news-title {{
+      font-size: 16px;
     }}
     table {{
       width: 100%;
@@ -417,30 +462,14 @@ def _render_report_html(payload: dict[str, Any]) -> str:
 
     <div class="card">
       <div class="section-index">Section 5</div>
-      <h2>Materiality-High Articles (at least one H)</h2>
-      <table>
-        <thead>
-          <tr><th>#</th><th>Title</th><th>Date</th><th>Category</th><th>Materiality</th><th>Impact</th><th>Summary</th></tr>
-        </thead>
-        <tbody>{evidence_table}</tbody>
-      </table>
+      <h2>Internal Evidence Articles (Materiality contains H)</h2>
+      <div class="news-feed">{evidence_html}</div>
     </div>
 
     <div class="card">
       <div class="section-index">Section 6</div>
-      <h2>All Internal Alert-Window Articles</h2>
-      <table>
-        <thead>
-          <tr><th>#</th><th>Title</th><th>Date</th><th>Category</th><th>Materiality</th><th>Impact</th><th>Summary</th></tr>
-        </thead>
-        <tbody>{all_table}</tbody>
-      </table>
-    </div>
-
-    <div class="card">
-      <div class="section-index">Section 7</div>
       <h2>External News (Optional Enrichment)</h2>
-      <ul>{web_html}</ul>
+      <div class="news-feed">{web_html}</div>
     </div>
   </div>
 </body>
@@ -472,15 +501,14 @@ def generate_alert_report_html(
     # Internal alert-window news and materiality filter
     news_data = get_current_alert_news_non_persisting(conn=conn, config=config, alert_id=alert_id, limit=500)
     articles = news_data.get("articles", []) if news_data.get("ok") else []
-    all_internal_articles = list(articles)
     high_materiality_articles = [
-        a for a in all_internal_articles if "H" in str(a.get("materiality") or "").upper()
+        a for a in articles if "H" in str(a.get("materiality") or "").upper()
     ]
 
     # Optional URL enrichment
-    article_ids = [a.get("article_id") for a in all_internal_articles if a.get("article_id") is not None]
+    article_ids = [a.get("article_id") for a in high_materiality_articles if a.get("article_id") is not None]
     url_map = _article_urls_by_id(conn, config, article_ids)
-    for a in all_internal_articles:
+    for a in high_materiality_articles:
         if a.get("article_id") in url_map:
             a["url"] = url_map[a["article_id"]]
 
@@ -511,7 +539,6 @@ def generate_alert_report_html(
             "analysis": analysis.get("result", {}),
             "citations": analysis.get("citations", []),
         },
-        "all_internal_articles": all_internal_articles,
         "high_materiality_articles": high_materiality_articles,
         "price_svg": price_svg,
         "chart_snapshot_data_url": chart_snapshot_data_url,

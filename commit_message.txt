@@ -1,34 +1,18 @@
-feat(agent): add artifact-driven report workflow with UI chart capture and improved chat composer
+feat(agent): enforce strong-evidence dismissal guardrail and refine report evidence UX
 
-- add non-persisting report generation flow accessible via agent tool
-  - introduce `generate_current_alert_report` and bind it in the agent graph
-  - enforce JSON-structured tool outputs and keep report generation read-only from agent side
+- add shared post-analysis safety gate in `backend/alert_analysis.py`:
+  - introduce `enforce_dismiss_evidence_requirements(...)`
+  - only allow `DISMISS` when strong evidence thresholds are met
+  - auto-downgrade weak `DISMISS` outcomes to `NEEDS_REVIEW` with detailed gap-based reasoning
+  - include explicit observed vs missing evidence in `recommendation_reason`
 
-- align report content with investigation workflow
-  - include deterministic + LLM analysis with citations
-  - include both materiality-high section and all internal alert-window articles
-  - add optional external web-news enrichment
-  - save reports under session-scoped artifacts path and expose download metadata
+- tighten recommendation policy prompt in `backend/prompts.py`:
+  - remove low-impact-only dismissal behavior
+  - require `NEEDS_REVIEW` when evidence is sparse/generic/conflicting
+  - require explicit “present evidence / missing evidence / why blocked” reasoning for review decisions
 
-- capture the exact chart shown in UI for reports
-  - add frontend chart snapshot capture hook from alert view
-  - add backend chart snapshot upload endpoint
-  - make report renderer prefer uploaded UI snapshot, fallback to backend-generated chart SVG
-
-- move from inline chat links to artifact-centric downloads
-  - add backend session artifact listing endpoint
-  - add secure artifact download endpoint by relative path
-  - emit `artifact_created` event from agent stream on report generation
-  - update chat UI to show artifact menu and refresh artifacts on new outputs
-
-- redesign agent composer for better UX
-  - replace single-line input with multiline textarea composer
-  - support Enter-to-send and Shift+Enter for newline
-  - add compact icon-only artifact trigger and circular send/stop control
-  - normalize textarea typography and reduce icon/button visual weight
-  - set default composer height to two lines
-
-- strengthen agent behavior guidelines
-  - always include “Next steps” after recommendation responses
-  - ask explicit HTML confirmation before generating downloadable report
-  - require confirmation before calling report tool unless HTML is already explicit
+- improve report evidence curation and presentation in `backend/reporting.py`:
+  - include only internal articles with at least one `H` in materiality
+  - replace internal evidence table with blog-style clickable article cards
+  - render external news in the same card-based format
+  - fix recommendation badge mapping to canonical enums (`DISMISS`, `ESCALATE_L2`, `NEEDS_REVIEW`)

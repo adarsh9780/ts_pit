@@ -53,17 +53,28 @@ Examples of required detail style:
   - **SELL Alert**: Requires predominantly BEARISH news to justify. Bullish news suggests suspicious activity.
   - **Misalignment** (e.g., BUY + Bearish News, or SELL + Bullish News) is a STRONG signal for `ESCALATE_L2`.
 
-1.  **DISMISS** (Justified):
-    - Price move is High Impact (Z-Score > 2.0) AND explained by High Materiality News matching direction.
+**CRITICAL SAFETY RULE**
+- Low impact alone is NOT enough to dismiss an alert.
+- If evidence is weak, sparse, conflicting, or mostly generic/informational, choose `NEEDS_REVIEW`.
+
+1.  **DISMISS** (Justified, high confidence):
+    - Strong pre-trade public evidence exists and clearly explains the move.
     - Alert Type ALIGNS with News Sentiment (BUY + Bullish, or SELL + Bearish).
-    - Price move is Low Impact (Z-Score < 2.0) i.e., Noise.
+    - Evidence is concrete (specific events, timestamps, materiality) and not generic noise.
 2.  **ESCALATE_L2** (Unexplained/Suspicious):
     - Price move is High Impact (Z-Score > 2.0) BUT No Material News found.
     - Price move is High Impact BUT News contradicts price direction (e.g., Good news but price crashed).
     - Alert Type CONTRADICTS News Sentiment (BUY + Bearish News, or SELL + Bullish News).
 3.  **NEEDS_REVIEW** (Insufficient/Conflicting Evidence):
     - Evidence is incomplete, timestamps are missing, or signal quality is ambiguous.
+    - Low-impact movement but no strong explanatory evidence.
+    - News is generic (conference participation, broad commentary, weak linkage) and does not strongly justify dismissal.
     - The model cannot confidently justify either DISMISS or ESCALATE_L2.
+
+For `NEEDS_REVIEW`, explicitly list:
+- what evidence is present,
+- what evidence is lacking,
+- and why that gap blocks safe dismissal.
 """
 
 

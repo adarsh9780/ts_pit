@@ -218,6 +218,96 @@ def run_deterministic_summary_gates(
     return None, pre_trade_articles
 
 
+def enforce_dismiss_evidence_requirements(
+    result: dict[str, Any],
+    used_articles: list[dict[str, Any]],
+    trade_type: str | None,
+) -> dict[str, Any]:
+    """
+    Guardrail: DISMISS must be backed by strong evidence.
+    If evidence is weak or incomplete, downgrade to NEEDS_REVIEW with detailed gaps.
+    """
+    recommendation = str(result.get("recommendation") or "").upper()
+    if recommendation != "DISMISS":
+        return result
+
+    total_articles = len(used_articles)
+    material_articles = [a for a in used_articles if is_material_news(a)]
+    impactful_articles = []
+    for a in used_articles:
+        try:
+            if abs(float(a.get("impact_score") or 0.0)) >= 2.0:
+                impactful_articles.append(a)
+        except (TypeError, ValueError):
+            continue
+
+    bullish_count = len(result.get("bullish_events") or [])
+    bearish_count = len(result.get("bearish_events") or [])
+    normalized_trade_type = str(trade_type or "").strip().upper()
+
+    missing_evidence = []
+    if total_articles < 2:
+        missing_evidence.append(
+            f"At least 2 pre-trade articles are required, but only {total_articles} were considered."
+        )
+    if len(material_articles) < 2:
+        missing_evidence.append(
+            f"At least 2 material pre-trade articles (materiality containing H) are required, but only {len(material_articles)} were found."
+        )
+    if len(impactful_articles) < 1:
+        missing_evidence.append(
+            "At least 1 article with meaningful market reaction (|impact_score| >= 2.0) is required, but none were found."
+        )
+
+    if normalized_trade_type == "BUY":
+        if bullish_count < 1:
+            missing_evidence.append(
+                "BUY alert requires at least one bullish evidence event, but none were identified."
+            )
+        if bearish_count > bullish_count:
+            missing_evidence.append(
+                "BUY alert has bearish evidence dominating bullish evidence, so directional alignment is weak."
+            )
+    elif normalized_trade_type == "SELL":
+        if bearish_count < 1:
+            missing_evidence.append(
+                "SELL alert requires at least one bearish evidence event, but none were identified."
+            )
+        if bullish_count > bearish_count:
+            missing_evidence.append(
+                "SELL alert has bullish evidence dominating bearish evidence, so directional alignment is weak."
+            )
+    else:
+        missing_evidence.append(
+            "Trade type is missing or non-standard, so directional justification cannot be validated."
+        )
+
+    if not missing_evidence:
+        return result
+
+    observed_metrics = [
+        f"Pre-trade articles considered: {total_articles}",
+        f"Material pre-trade articles (contains H): {len(material_articles)}",
+        f"Impactful articles (|impact_score| >= 2.0): {len(impactful_articles)}",
+        f"Bullish events: {bullish_count}",
+        f"Bearish events: {bearish_count}",
+        f"Trade type: {normalized_trade_type or 'UNKNOWN'}",
+    ]
+
+    reason_lines = ["- Dismissal guardrail triggered: strong evidence threshold not met."]
+    reason_lines.extend([f"- Observed: {line}" for line in observed_metrics])
+    reason_lines.extend([f"- Missing: {line}" for line in missing_evidence])
+    reason_lines.append(
+        "- Decision changed to NEEDS_REVIEW because available evidence is not sufficiently strong for a safe dismissal."
+    )
+
+    downgraded = dict(result)
+    downgraded["recommendation"] = "NEEDS_REVIEW"
+    downgraded["narrative_theme"] = "NEEDS_REVIEW_INSUFFICIENT_DISMISS_EVIDENCE"
+    downgraded["recommendation_reason"] = "\n".join(reason_lines)
+    return downgraded
+
+
 def build_alert_articles(config, cursor, alert, start_date: str | None, end_date: str | None):
     articles_table = config.get_table_name("articles")
     themes_table = config.get_table_name("article_themes")
@@ -354,6 +444,12 @@ def analyze_alert_non_persisting(conn, config, alert_id: str | int, llm):
         )
         used_articles = llm_articles or articles
         source = "llm"
+
+    result = enforce_dismiss_evidence_requirements(
+        result=result,
+        used_articles=used_articles,
+        trade_type=trade_type,
+    )
 
     citations = []
     for article in used_articles[:20]:
