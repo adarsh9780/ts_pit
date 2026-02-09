@@ -25,12 +25,36 @@ const parseEvents = (data) => {
 };
 
 const parseReasoning = (text) => {
-    if (!text) return [];
-    // Split by newlines and remove bullet characters
-    return text.split('\n')
+    if (!text) return { intro: [], sections: [] };
+
+    const lines = text
+        .split('\n')
         .map(line => line.trim())
-        .filter(line => line.length > 0)
-        .map(line => line.replace(/^[-*•]\s*/, '')); // Remove bullet chars (-, *, •) and optional space
+        .filter(line => line.length > 0);
+
+    const intro = [];
+    const sections = [];
+    let currentSection = null;
+
+    for (const rawLine of lines) {
+        const isBullet = /^[-*•]\s+/.test(rawLine);
+        const clean = rawLine.replace(/^[-*•]\s*/, '');
+        const isHeader = !isBullet && clean.endsWith(':');
+
+        if (isHeader) {
+            currentSection = { title: clean.slice(0, -1), items: [] };
+            sections.push(currentSection);
+            continue;
+        }
+
+        if (currentSection) {
+            currentSection.items.push(clean);
+        } else {
+            intro.push(clean);
+        }
+    }
+
+    return { intro, sections };
 };
 
 const recommendationClass = computed(() => {
@@ -41,6 +65,8 @@ const recommendationClass = computed(() => {
     if (rec.includes('NEEDS_REVIEW') || rec.includes('PENDING')) return 'needs_review'; // Amber
     return 'needs_review';
 });
+
+const reasoningParsed = computed(() => parseReasoning(props.alertData?.recommendation_reason || ''));
 </script>
 
 <template>
@@ -110,9 +136,15 @@ const recommendationClass = computed(() => {
                     
                     <div class="reasoning-section">
                         <h5>Decision Logic & Evidence:</h5>
-                        <ul>
-                            <li v-for="(point, i) in parseReasoning(alertData.recommendation_reason)" :key="i">{{ point }}</li>
+                        <ul v-if="reasoningParsed.intro.length">
+                            <li v-for="(point, i) in reasoningParsed.intro" :key="`intro-${i}`">{{ point }}</li>
                         </ul>
+                        <div v-for="(section, idx) in reasoningParsed.sections" :key="`section-${idx}`" class="reason-subsection">
+                            <h6>{{ section.title }}</h6>
+                            <ul>
+                                <li v-for="(item, i) in section.items" :key="`item-${idx}-${i}`">{{ item }}</li>
+                            </ul>
+                        </div>
                         <div v-if="!alertData.recommendation_reason" class="empty-reasoning">
                             No detailed reasoning available. Regenerate the summary to get facts.
                         </div>
@@ -322,6 +354,17 @@ const recommendationClass = computed(() => {
     color: #334155;
     margin-bottom: 0.5rem;
     line-height: 1.5;
+}
+
+.reason-subsection {
+    margin-top: 0.85rem;
+}
+
+.reason-subsection h6 {
+    margin: 0 0 0.35rem 0;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #1e293b;
 }
 
 .empty-reasoning {

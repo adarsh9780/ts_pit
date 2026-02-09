@@ -243,6 +243,46 @@ def _fetch_web_news(query: str, config, max_results: int = 5) -> list[dict[str, 
     return results
 
 
+def _render_reasoning_html(reason: str) -> str:
+    lines = [ln.strip() for ln in str(reason or "").splitlines() if ln.strip()]
+    if not lines:
+        return "<p class='muted'>No reasoning provided.</p>"
+
+    intro_items: list[str] = []
+    sections: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+
+    for ln in lines:
+        is_bullet = ln.startswith("- ")
+        content = ln[2:].strip() if is_bullet else ln
+        is_header = (not is_bullet) and content.endswith(":")
+
+        if is_header:
+            current = {"title": content[:-1].strip(), "items": []}
+            sections.append(current)
+            continue
+
+        if current is None:
+            intro_items.append(content)
+        else:
+            current["items"].append(content)
+
+    parts: list[str] = []
+    if intro_items:
+        parts.append("<ul>" + "".join(f"<li>{html.escape(item)}</li>" for item in intro_items) + "</ul>")
+
+    for section in sections:
+        title = html.escape(str(section.get("title") or ""))
+        items = section.get("items") or []
+        parts.append(f"<h4 class='reason-subtitle'>{title}</h4>")
+        if items:
+            parts.append("<ul>" + "".join(f"<li>{html.escape(item)}</li>" for item in items) + "</ul>")
+        else:
+            parts.append("<p class='muted'>No details provided.</p>")
+
+    return "".join(parts)
+
+
 def _render_report_html(payload: dict[str, Any]) -> str:
     alert = payload["alert"]
     analysis = payload["analysis"]
@@ -272,13 +312,6 @@ def _render_report_html(payload: dict[str, Any]) -> str:
         )
     evidence_html = "\n".join(evidence_cards) if evidence_cards else "<p class='muted'>No internal alert-window articles with materiality containing H were found.</p>"
 
-    citation_items = []
-    for c in analysis.get("citations", []):
-        citation_items.append(
-            f"<li><b>{_e(c.get('article_id'))}</b> | {_e(c.get('created_date'))} | {_e(c.get('title'))} | Impact {_format_num(c.get('impact_score'),2)} | Materiality {_e(c.get('materiality'))}</li>"
-        )
-    citations_html = "\n".join(citation_items) if citation_items else "<li>No citations available</li>"
-
     web_items = []
     for w in web_news:
         title_html = _e(w.get("title"))
@@ -303,19 +336,7 @@ def _render_report_html(payload: dict[str, Any]) -> str:
         "NEEDS_REVIEW": "badge-review",
     }.get(rec_norm, "badge-review")
     rec_reason_raw = str(analysis["analysis"].get("recommendation_reason") or "").strip()
-    reason_lines = [ln.strip() for ln in rec_reason_raw.splitlines() if ln.strip()]
-    reason_bullets = [ln[1:].strip() for ln in reason_lines if ln.startswith("-")]
-    reason_free_text = [ln for ln in reason_lines if not ln.startswith("-")]
-    reason_bullets_html = (
-        "<ul>" + "".join(f"<li>{_e(item)}</li>" for item in reason_bullets) + "</ul>"
-        if reason_bullets
-        else ""
-    )
-    reason_text_html = (
-        "".join(f"<p>{_e(line)}</p>" for line in reason_free_text)
-        if reason_free_text
-        else ""
-    )
+    reason_html = _render_reasoning_html(rec_reason_raw)
     return f"""<!doctype html>
 <html>
 <head>
@@ -411,6 +432,12 @@ def _render_report_html(payload: dict[str, Any]) -> str:
     }}
     .reason-box li {{
       margin-bottom: 5px;
+    }}
+    .reason-subtitle {{
+      margin: 10px 0 6px 0;
+      font-size: 14px;
+      font-weight: 700;
+      color: #1e293b;
     }}
     .chart-frame {{
       border: 1px solid var(--line);
@@ -530,8 +557,7 @@ def _render_report_html(payload: dict[str, Any]) -> str:
       </div>
       <div class="reason-box">
         <b>Reasoning:</b>
-        {reason_text_html}
-        {reason_bullets_html}
+        {reason_html}
       </div>
       <p><b>Narrative Theme:</b> {_e(analysis['analysis'].get('narrative_theme'))}</p>
       <p class="pre"><b>Narrative Summary:</b> {_e(analysis['analysis'].get('narrative_summary'))}</p>
@@ -547,18 +573,12 @@ def _render_report_html(payload: dict[str, Any]) -> str:
 
     <div class="card">
       <div class="section-index">Section 4</div>
-      <h2>Evidence Citations</h2>
-      <ul>{citations_html}</ul>
-    </div>
-
-    <div class="card">
-      <div class="section-index">Section 5</div>
       <h2>Internal Evidence Articles (Materiality contains H)</h2>
       <div class="news-feed">{evidence_html}</div>
     </div>
 
     <div class="card">
-      <div class="section-index">Section 6</div>
+      <div class="section-index">Section 5</div>
       <h2>External News (Optional Enrichment)</h2>
       <div class="news-feed">{web_html}</div>
     </div>
