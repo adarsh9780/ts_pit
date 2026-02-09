@@ -27,6 +27,7 @@ from backend.agent.tools import (
     count_material_news,
     analyze_current_alert,
     get_current_alert_news,
+    generate_current_alert_report,
     search_web_news,
     scrape_websites,
 )
@@ -75,6 +76,7 @@ def agent_node(state: AgentState, config: RunnableConfig):
         count_material_news,
         analyze_current_alert,
         get_current_alert_news,
+        generate_current_alert_report,
         search_web_news,
         scrape_websites,
     ]
@@ -91,7 +93,23 @@ def agent_node(state: AgentState, config: RunnableConfig):
             SystemMessage(
                 content=(
                     "For current-alert analysis requests, call analyze_current_alert first, "
-                    "then answer using that output. Include evidence citations with article_id and created_date."
+                    "then answer using that output. Include evidence citations with article_id and created_date. "
+                    "Always finish with a short Next steps section and ask whether the user wants a downloadable HTML report."
+                )
+            )
+        ]
+
+    report_intent = any(
+        kw in last_content
+        for kw in ("report", "download", "export", "artifact")
+    )
+    html_already_requested = "html" in last_content
+    if report_intent and not html_already_requested:
+        messages = list(messages) + [
+            SystemMessage(
+                content=(
+                    "Before generating a downloadable report, ask for explicit confirmation that HTML format is acceptable. "
+                    "Do not call generate_current_alert_report until the user confirms."
                 )
             )
         ]
@@ -128,6 +146,7 @@ def build_graph():
         count_material_news,
         analyze_current_alert,
         get_current_alert_news,
+        generate_current_alert_report,
         search_web_news,
         scrape_websites,
     ]

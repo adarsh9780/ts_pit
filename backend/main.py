@@ -22,6 +22,12 @@ from .config import get_config
 from .llm import get_llm_model, generate_article_analysis
 from .prices import fetch_and_cache_prices, get_ticker_from_isin
 from .alert_analysis import analyze_alert_non_persisting
+from .reporting import (
+    REPORTS_ROOT,
+    sanitize_session_id,
+    generate_alert_report_html,
+    save_chart_snapshot,
+)
 from .agent.graph import workflow  # Import the workflow blueprint
 
 # Load configuration
@@ -986,6 +992,33 @@ class ChatRequest(BaseModel):
     alert_context: Optional[AlertContext] = None  # Full context from frontend
 
 
+class ReportRequest(BaseModel):
+    session_id: str
+    include_web_news: bool = False
+
+
+class ChartSnapshotRequest(BaseModel):
+    session_id: str
+    alert_id: str | int
+    image_data_url: str
+
+
+def _session_artifacts_root(session_id: str) -> Path:
+    safe_session = sanitize_session_id(session_id)
+    return (REPORTS_ROOT / safe_session).resolve()
+
+
+def _artifact_meta(session_root: Path, file_path: Path) -> dict:
+    stat = file_path.stat()
+    rel_path = file_path.relative_to(session_root).as_posix()
+    return {
+        "name": file_path.name,
+        "relative_path": rel_path,
+        "size_bytes": stat.st_size,
+        "created_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+    }
+
+
 @app.get("/agent/history/{session_id}")
 async def get_chat_history(session_id: str, request: Request):
     """
@@ -1118,6 +1151,7 @@ async def chat_agent(request: Request, body: ChatRequest):
         ctx = body.alert_context
         enriched_message = f"""[CURRENT ALERT CONTEXT]
 Alert ID: {ctx.id}
+Session ID: {body.session_id}
 Ticker: {ctx.ticker} ({ctx.instrument_name or "N/A"})
 ISIN: {ctx.isin}
 Investigation Window: {ctx.start_date} to {ctx.end_date}
@@ -1168,7 +1202,20 @@ Status: {ctx.status or "N/A"}
 
                 elif kind == "on_tool_end":
                     tool_name = event["name"]
-                    # output = str(event["data"].get("output")) # Don't send full output
+                    tool_output = event.get("data", {}).get("output")
+                    if (
+                        tool_name == "generate_current_alert_report"
+                        and isinstance(tool_output, str)
+                    ):
+                        try:
+                            parsed = json.loads(tool_output)
+                            if parsed.get("ok"):
+                                data = parsed.get("data") or {}
+                                yield (
+                                    f"data: {json.dumps({'type': 'artifact_created', 'tool': tool_name, 'session_id': data.get('session_id'), 'artifact_name': data.get('report_filename'), 'relative_path': data.get('report_filename'), 'expires_at': data.get('expires_at')})}\n\n"
+                                )
+                        except Exception:
+                            pass
                     yield f"data: {json.dumps({'type': 'tool_end', 'tool': tool_name, 'output': 'Hidden'})}\n\n"
 
             # End of stream
@@ -1179,3 +1226,98 @@ Status: {ctx.status or "N/A"}
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.post("/alerts/{alert_id}/report")
+def generate_alert_report(alert_id: str, body: ReportRequest, request: Request):
+    """
+    Generate a downloadable investigation report for an alert.
+    Stored under artifacts/reports/{session_id}/{alert_id}_{timestamp}.html
+    """
+    conn = get_db_connection()
+    try:
+        session_id = sanitize_session_id(body.session_id)
+        result = generate_alert_report_html(
+            conn=conn,
+            config=config,
+            llm=request.app.state.llm,
+            alert_id=alert_id,
+            session_id=session_id,
+            include_web_news=body.include_web_news,
+        )
+        if not result.get("ok"):
+            if result.get("error") == "Alert not found":
+                raise HTTPException(status_code=404, detail="Alert not found")
+            raise HTTPException(status_code=500, detail=result.get("error", "Report generation failed"))
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+
+@app.post("/reports/chart-snapshot")
+def upload_chart_snapshot(body: ChartSnapshotRequest):
+    """Store a UI-captured chart snapshot for a session+alert."""
+    try:
+        session_id = sanitize_session_id(body.session_id)
+        result = save_chart_snapshot(
+            session_id=session_id,
+            alert_id=body.alert_id,
+            image_data_url=body.image_data_url,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/reports/{session_id}/{report_filename}")
+def download_report(session_id: str, report_filename: str):
+    """Download a generated report artifact."""
+    session_id = sanitize_session_id(session_id)
+    safe_name = Path(report_filename).name
+    target = (REPORTS_ROOT / session_id / safe_name).resolve()
+    root = REPORTS_ROOT.resolve()
+
+    if not str(target).startswith(str(root)):
+        raise HTTPException(status_code=400, detail="Invalid report path")
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    return FileResponse(target, filename=safe_name, media_type="text/html")
+
+
+@app.get("/artifacts/{session_id}")
+def list_session_artifacts(session_id: str):
+    """List artifacts for a session (excluding internal cache/snapshot files)."""
+    session_root = _session_artifacts_root(session_id)
+    if not session_root.exists() or not session_root.is_dir():
+        return {"session_id": session_id, "artifacts": []}
+
+    artifacts = []
+    for p in session_root.rglob("*"):
+        if not p.is_file():
+            continue
+        rel = p.relative_to(session_root).as_posix()
+        if rel.startswith("chart_snapshots/"):
+            continue
+        artifacts.append(_artifact_meta(session_root, p))
+
+    artifacts.sort(key=lambda x: x["created_at"], reverse=True)
+    return {"session_id": session_id, "artifacts": artifacts}
+
+
+@app.get("/artifacts/{session_id}/download")
+def download_session_artifact(session_id: str, path: str = Query(..., min_length=1)):
+    """Download artifact by relative path under a session directory."""
+    session_root = _session_artifacts_root(session_id)
+    if not session_root.exists() or not session_root.is_dir():
+        raise HTTPException(status_code=404, detail="Session artifacts not found")
+
+    candidate = (session_root / path).resolve()
+    if not str(candidate).startswith(str(session_root)):
+        raise HTTPException(status_code=400, detail="Invalid artifact path")
+    if not candidate.exists() or not candidate.is_file():
+        raise HTTPException(status_code=404, detail="Artifact not found")
+
+    return FileResponse(candidate, filename=candidate.name)

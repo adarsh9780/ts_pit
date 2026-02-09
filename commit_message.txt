@@ -1,1 +1,34 @@
-Add a vertical straight line to on the price chart to show alert date.
+feat(agent): add artifact-driven report workflow with UI chart capture and improved chat composer
+
+- add non-persisting report generation flow accessible via agent tool
+  - introduce `generate_current_alert_report` and bind it in the agent graph
+  - enforce JSON-structured tool outputs and keep report generation read-only from agent side
+
+- align report content with investigation workflow
+  - include deterministic + LLM analysis with citations
+  - include both materiality-high section and all internal alert-window articles
+  - add optional external web-news enrichment
+  - save reports under session-scoped artifacts path and expose download metadata
+
+- capture the exact chart shown in UI for reports
+  - add frontend chart snapshot capture hook from alert view
+  - add backend chart snapshot upload endpoint
+  - make report renderer prefer uploaded UI snapshot, fallback to backend-generated chart SVG
+
+- move from inline chat links to artifact-centric downloads
+  - add backend session artifact listing endpoint
+  - add secure artifact download endpoint by relative path
+  - emit `artifact_created` event from agent stream on report generation
+  - update chat UI to show artifact menu and refresh artifacts on new outputs
+
+- redesign agent composer for better UX
+  - replace single-line input with multiline textarea composer
+  - support Enter-to-send and Shift+Enter for newline
+  - add compact icon-only artifact trigger and circular send/stop control
+  - normalize textarea typography and reduce icon/button visual weight
+  - set default composer height to two lines
+
+- strengthen agent behavior guidelines
+  - always include “Next steps” after recommendation responses
+  - ask explicit HTML confirmation before generating downloadable report
+  - require confirmation before calling report tool unless HTML is already explicit

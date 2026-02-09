@@ -17,6 +17,7 @@ from backend.alert_analysis import (
     analyze_alert_non_persisting,
     get_current_alert_news_non_persisting,
 )
+from backend.reporting import generate_alert_report_html, sanitize_session_id
 
 # Load the database schema for the SQL tool docstring
 SCHEMA_PATH = Path(__file__).parent / "db_schema.yaml"
@@ -550,6 +551,46 @@ def analyze_current_alert(alert_id: str) -> str:
         )
     except Exception as e:
         return _error(f"Error analyzing current alert: {str(e)}", code="ANALYSIS_ERROR")
+    finally:
+        conn.close()
+
+
+@tool
+def generate_current_alert_report(
+    alert_id: str, session_id: str, include_web_news: bool = True
+) -> str:
+    """
+    Generate a downloadable investigation report for the current alert.
+    The report includes deterministic + LLM analysis, internal alert-window news,
+    materiality-high evidence, optional web news enrichment, and (when available)
+    the chart snapshot captured from the UI.
+
+    Args:
+        alert_id: Current alert ID from [CURRENT ALERT CONTEXT]
+        session_id: Current chat session_id from [CURRENT ALERT CONTEXT]
+        include_web_news: Whether to enrich report with external web news
+
+    Returns:
+        JSON with report metadata and download_url.
+    """
+    conn = get_db_connection()
+    try:
+        from backend.llm import get_llm_model
+
+        safe_session = sanitize_session_id(session_id)
+        result = generate_alert_report_html(
+            conn=conn,
+            config=get_config(),
+            llm=get_llm_model(),
+            alert_id=alert_id,
+            session_id=safe_session,
+            include_web_news=include_web_news,
+        )
+        if not result.get("ok"):
+            return _error(result.get("error", "Report generation failed"), code="REPORT_ERROR")
+        return _ok(result, message="Report generated")
+    except Exception as e:
+        return _error(f"Error generating report: {str(e)}", code="REPORT_ERROR")
     finally:
         conn.close()
 

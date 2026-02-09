@@ -1,0 +1,413 @@
+from __future__ import annotations
+
+import html
+import json
+import base64
+import re
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+from ddgs import DDGS
+
+from .alert_analysis import (
+    analyze_alert_non_persisting,
+    build_price_history,
+    get_current_alert_news_non_persisting,
+    resolve_alert_row,
+)
+
+
+REPORTS_ROOT = Path(__file__).parent.parent / "artifacts" / "reports"
+CHART_SNAPSHOTS_DIR = "chart_snapshots"
+SESSION_ID_PATTERN = re.compile(r"^[a-zA-Z0-9._-]{1,128}$")
+DATA_URL_PATTERN = re.compile(r"^data:image/(png|jpeg);base64,", re.IGNORECASE)
+
+
+def sanitize_session_id(session_id: str) -> str:
+    if not session_id or not SESSION_ID_PATTERN.match(session_id):
+        raise ValueError("Invalid session_id format")
+    return session_id
+
+
+def _format_num(value: Any, decimals: int = 2) -> str:
+    try:
+        return f"{float(value):,.{decimals}f}"
+    except Exception:
+        return "-"
+
+
+def _build_price_svg(price_history: list[dict], width: int = 900, height: int = 240) -> str:
+    if not price_history:
+        return '<svg width="900" height="240" xmlns="http://www.w3.org/2000/svg"><text x="20" y="30" font-size="14">No price data for alert window</text></svg>'
+
+    points = []
+    closes = []
+    for row in price_history:
+        close = row.get("close")
+        try:
+            closes.append(float(close))
+        except Exception:
+            continue
+
+    if not closes:
+        return '<svg width="900" height="240" xmlns="http://www.w3.org/2000/svg"><text x="20" y="30" font-size="14">No valid close prices in alert window</text></svg>'
+
+    min_p = min(closes)
+    max_p = max(closes)
+    y_range = (max_p - min_p) or 1.0
+    x_pad = 45
+    y_pad = 25
+    w = width - (x_pad * 2)
+    h = height - (y_pad * 2)
+
+    valid_rows = []
+    for row in price_history:
+        try:
+            valid_rows.append((row.get("date", ""), float(row.get("close"))))
+        except Exception:
+            continue
+
+    for idx, (_, close) in enumerate(valid_rows):
+        x = x_pad + (idx / max(1, len(valid_rows) - 1)) * w
+        y = y_pad + (1 - ((close - min_p) / y_range)) * h
+        points.append(f"{x:.2f},{y:.2f}")
+
+    polyline = " ".join(points)
+    start_label = html.escape(str(valid_rows[0][0])) if valid_rows else "-"
+    end_label = html.escape(str(valid_rows[-1][0])) if valid_rows else "-"
+
+    return f"""
+<svg width="{width}" height="{height}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Alert window price chart">
+  <rect x="0" y="0" width="{width}" height="{height}" fill="#ffffff" stroke="#e2e8f0"/>
+  <line x1="{x_pad}" y1="{y_pad}" x2="{x_pad}" y2="{height-y_pad}" stroke="#94a3b8"/>
+  <line x1="{x_pad}" y1="{height-y_pad}" x2="{width-x_pad}" y2="{height-y_pad}" stroke="#94a3b8"/>
+  <polyline fill="none" stroke="#2563eb" stroke-width="2.5" points="{polyline}"/>
+  <text x="{x_pad}" y="16" font-size="12" fill="#334155">Close ({len(valid_rows)} points)</text>
+  <text x="{x_pad}" y="{height-6}" font-size="11" fill="#64748b">{start_label}</text>
+  <text x="{width-x_pad-120}" y="{height-6}" font-size="11" fill="#64748b">{end_label}</text>
+  <text x="{width-x_pad+4}" y="{y_pad+4}" font-size="11" fill="#475569">{_format_num(max_p)}</text>
+  <text x="{width-x_pad+4}" y="{height-y_pad}" font-size="11" fill="#475569">{_format_num(min_p)}</text>
+</svg>
+""".strip()
+
+
+def save_chart_snapshot(
+    session_id: str,
+    alert_id: str | int,
+    image_data_url: str,
+) -> dict[str, Any]:
+    """
+    Persist a UI-captured chart snapshot for later embedding in reports.
+    """
+    session_id = sanitize_session_id(session_id)
+    if not image_data_url or not DATA_URL_PATTERN.match(image_data_url):
+        raise ValueError("Invalid image_data_url; expected data:image/png;base64,...")
+
+    header, b64_data = image_data_url.split(",", 1)
+    image_ext = "png" if "png" in header.lower() else "jpg"
+    try:
+        image_bytes = base64.b64decode(b64_data, validate=True)
+    except Exception as e:
+        raise ValueError(f"Invalid base64 image payload: {e}") from e
+
+    safe_alert_id = str(alert_id).replace("/", "_")
+    session_dir = REPORTS_ROOT / session_id / CHART_SNAPSHOTS_DIR
+    session_dir.mkdir(parents=True, exist_ok=True)
+    snapshot_path = session_dir / f"{safe_alert_id}_latest.{image_ext}"
+    snapshot_path.write_bytes(image_bytes)
+
+    return {
+        "ok": True,
+        "session_id": session_id,
+        "alert_id": safe_alert_id,
+        "snapshot_abs_path": str(snapshot_path),
+        "snapshot_rel_path": f"{session_id}/{CHART_SNAPSHOTS_DIR}/{snapshot_path.name}",
+    }
+
+
+def _get_chart_snapshot_data_url(session_id: str, alert_id: str | int) -> str | None:
+    session_id = sanitize_session_id(session_id)
+    safe_alert_id = str(alert_id).replace("/", "_")
+    snapshot_dir = REPORTS_ROOT / session_id / CHART_SNAPSHOTS_DIR
+    if not snapshot_dir.exists():
+        return None
+
+    for ext, mime in (("png", "image/png"), ("jpg", "image/jpeg"), ("jpeg", "image/jpeg")):
+        path = snapshot_dir / f"{safe_alert_id}_latest.{ext}"
+        if path.exists():
+            encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+            return f"data:{mime};base64,{encoded}"
+    return None
+
+
+def _article_urls_by_id(conn, config, article_ids: list[Any]) -> dict[Any, str]:
+    if not article_ids:
+        return {}
+    cursor = conn.cursor()
+    table_name = config.get_table_name("articles")
+    id_col = config.get_column("articles", "id")
+
+    cursor.execute(f'PRAGMA table_info("{table_name}")')
+    cols = [row["name"] for row in cursor.fetchall()]
+    url_col = next(
+        (c for c in ("url", "article_url", "art_url", "link", "news_url") if c in cols),
+        None,
+    )
+    if not url_col:
+        return {}
+
+    placeholders = ",".join(["?"] * len(article_ids))
+    query = (
+        f'SELECT "{id_col}" as article_id, "{url_col}" as article_url '
+        f'FROM "{table_name}" WHERE "{id_col}" IN ({placeholders})'
+    )
+    cursor.execute(query, tuple(article_ids))
+    return {row["article_id"]: row["article_url"] for row in cursor.fetchall()}
+
+
+def _fetch_web_news(query: str, config, max_results: int = 5) -> list[dict[str, str]]:
+    proxy_config = config.get_proxy_config()
+    proxy_url = proxy_config.get("https") or proxy_config.get("http")
+    kwargs: dict[str, Any] = {"verify": proxy_config.get("ssl_verify", True)}
+    if proxy_url:
+        kwargs["proxy"] = proxy_url
+
+    try:
+        with DDGS(**kwargs) as ddgs:
+            rows = list(ddgs.news(query, max_results=max_results))
+    except Exception:
+        return []
+
+    results = []
+    for r in rows[:max_results]:
+        results.append(
+            {
+                "title": str(r.get("title") or "No title"),
+                "source": str(r.get("source") or "Unknown"),
+                "date": str(r.get("date") or "Unknown"),
+                "url": str(r.get("url") or ""),
+                "summary": str(r.get("body") or "").strip(),
+            }
+        )
+    return results
+
+
+def _render_report_html(payload: dict[str, Any]) -> str:
+    alert = payload["alert"]
+    analysis = payload["analysis"]
+    h_articles = payload["high_materiality_articles"]
+    all_articles = payload.get("all_internal_articles", [])
+    price_svg = payload["price_svg"]
+    chart_snapshot = payload.get("chart_snapshot_data_url")
+    web_news = payload.get("web_news", [])
+    generated_at = payload["generated_at"]
+
+    def _e(v: Any) -> str:
+        return html.escape(str(v if v is not None else "-"))
+
+    evidence_rows = []
+    for idx, a in enumerate(h_articles, start=1):
+        title = _e(a.get("title"))
+        url = a.get("url")
+        title_html = f'<a href="{html.escape(url)}" target="_blank" rel="noopener noreferrer">{title}</a>' if url else title
+        evidence_rows.append(
+            f"<tr><td>{idx}</td><td>{title_html}</td><td>{_e(a.get('created_date'))}</td><td>{_e(a.get('theme'))}</td><td>{_e(a.get('materiality'))}</td><td>{_format_num(a.get('impact_score'), 2)}</td><td>{_e(a.get('summary'))}</td></tr>"
+        )
+    evidence_table = "\n".join(evidence_rows) if evidence_rows else "<tr><td colspan='7'>No articles with materiality containing H in alert window.</td></tr>"
+
+    all_rows = []
+    for idx, a in enumerate(all_articles, start=1):
+        title = _e(a.get("title"))
+        url = a.get("url")
+        title_html = f'<a href="{html.escape(url)}" target="_blank" rel="noopener noreferrer">{title}</a>' if url else title
+        all_rows.append(
+            f"<tr><td>{idx}</td><td>{title_html}</td><td>{_e(a.get('created_date'))}</td><td>{_e(a.get('theme'))}</td><td>{_e(a.get('materiality'))}</td><td>{_format_num(a.get('impact_score'), 2)}</td><td>{_e(a.get('summary'))}</td></tr>"
+        )
+    all_table = "\n".join(all_rows) if all_rows else "<tr><td colspan='7'>No internal alert-window articles found.</td></tr>"
+
+    citation_items = []
+    for c in analysis.get("citations", []):
+        citation_items.append(
+            f"<li><b>{_e(c.get('article_id'))}</b> | {_e(c.get('created_date'))} | {_e(c.get('title'))} | Impact {_format_num(c.get('impact_score'),2)} | Materiality {_e(c.get('materiality'))}</li>"
+        )
+    citations_html = "\n".join(citation_items) if citation_items else "<li>No citations available</li>"
+
+    web_items = []
+    for w in web_news:
+        title_html = _e(w.get("title"))
+        if w.get("url"):
+            title_html = f'<a href="{html.escape(w.get("url"))}" target="_blank" rel="noopener noreferrer">{title_html}</a>'
+        web_items.append(
+            f"<li>{title_html} | {_e(w.get('source'))} | {_e(w.get('date'))}<br/><span class='small'>{_e(w.get('summary'))}</span></li>"
+        )
+    web_html = "\n".join(web_items) if web_items else "<li>Web news enrichment not included.</li>"
+
+    rec = analysis["analysis"].get("recommendation", "NEEDS_REVIEW")
+    rec_reason = _e(analysis["analysis"].get("recommendation_reason", ""))
+    return f"""<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Alert Report { _e(alert.get('id')) }</title>
+  <style>
+    body {{ font-family: Arial, sans-serif; margin: 24px; color: #0f172a; }}
+    h1,h2,h3 {{ margin: 0 0 10px 0; }}
+    .muted {{ color: #64748b; }}
+    .card {{ border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; margin: 14px 0; }}
+    table {{ width: 100%; border-collapse: collapse; font-size: 12px; }}
+    th, td {{ border: 1px solid #e2e8f0; padding: 6px; text-align: left; vertical-align: top; }}
+    th {{ background: #f8fafc; }}
+    .small {{ font-size: 12px; }}
+    .pre {{ white-space: pre-wrap; }}
+  </style>
+</head>
+<body>
+  <h1>Investigation Report</h1>
+  <p class="muted small">Generated: {_e(generated_at)} | Session: {_e(payload.get('session_id'))} | Alert: {_e(alert.get('id'))}</p>
+
+  <div class="card">
+    <h2>Alert Context</h2>
+    <p><b>Ticker:</b> {_e(alert.get('ticker'))} ({_e(alert.get('instrument_name'))})</p>
+    <p><b>ISIN:</b> {_e(alert.get('isin'))}</p>
+    <p><b>Window:</b> {_e(alert.get('start_date'))} to {_e(alert.get('end_date'))}</p>
+    <p><b>Trade Type:</b> {_e(alert.get('trade_type'))} | <b>Status:</b> {_e(alert.get('status'))}</p>
+  </div>
+
+  <div class="card">
+    <h2>Price Chart (Alert Window)</h2>
+    {"<img src='" + html.escape(chart_snapshot) + "' alt='Alert chart snapshot' style='max-width:100%;border:1px solid #e2e8f0;border-radius:4px;'/>" if chart_snapshot else price_svg}
+  </div>
+
+  <div class="card">
+    <h2>LLM Analysis</h2>
+    <p><b>Source:</b> {_e(analysis.get('source'))}</p>
+    <p><b>Narrative Theme:</b> {_e(analysis['analysis'].get('narrative_theme'))}</p>
+    <p class="pre"><b>Summary:</b> {_e(analysis['analysis'].get('narrative_summary'))}</p>
+    <p><b>Recommendation:</b> {_e(rec)}</p>
+    <p class="pre"><b>Recommendation Reason:</b> {rec_reason}</p>
+    <h3>Evidence Citations</h3>
+    <ul>{citations_html}</ul>
+  </div>
+
+  <div class="card">
+    <h2>Materiality-High Articles (at least one H)</h2>
+    <table>
+      <thead>
+        <tr><th>#</th><th>Title</th><th>Date</th><th>Category</th><th>Materiality</th><th>Impact</th><th>Summary</th></tr>
+      </thead>
+      <tbody>{evidence_table}</tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>All Internal Alert-Window Articles</h2>
+    <table>
+      <thead>
+        <tr><th>#</th><th>Title</th><th>Date</th><th>Category</th><th>Materiality</th><th>Impact</th><th>Summary</th></tr>
+      </thead>
+      <tbody>{all_table}</tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>External News (Optional Enrichment)</h2>
+    <ul>{web_html}</ul>
+  </div>
+</body>
+</html>
+"""
+
+
+def generate_alert_report_html(
+    conn,
+    config,
+    llm,
+    alert_id: str | int,
+    session_id: str,
+    include_web_news: bool = False,
+) -> dict[str, Any]:
+    session_id = sanitize_session_id(session_id)
+
+    cursor = conn.cursor()
+    alerts_table = config.get_table_name("alerts")
+    alert_row, _, _ = resolve_alert_row(config, cursor, alerts_table, alert_id)
+    if not alert_row:
+        return {"ok": False, "error": "Alert not found"}
+    alert = dict(alert_row)
+
+    analysis = analyze_alert_non_persisting(conn=conn, config=config, alert_id=alert_id, llm=llm)
+    if not analysis.get("ok"):
+        return {"ok": False, "error": analysis.get("error", "Analysis failed")}
+
+    # Internal alert-window news and materiality filter
+    news_data = get_current_alert_news_non_persisting(conn=conn, config=config, alert_id=alert_id, limit=500)
+    articles = news_data.get("articles", []) if news_data.get("ok") else []
+    all_internal_articles = list(articles)
+    high_materiality_articles = [
+        a for a in all_internal_articles if "H" in str(a.get("materiality") or "").upper()
+    ]
+
+    # Optional URL enrichment
+    article_ids = [a.get("article_id") for a in all_internal_articles if a.get("article_id") is not None]
+    url_map = _article_urls_by_id(conn, config, article_ids)
+    for a in all_internal_articles:
+        if a.get("article_id") in url_map:
+            a["url"] = url_map[a["article_id"]]
+
+    price_history = build_price_history(config, cursor, alert_row)
+    price_svg = _build_price_svg(price_history)
+    chart_snapshot_data_url = _get_chart_snapshot_data_url(session_id=session_id, alert_id=alert_id)
+
+    web_news = []
+    if include_web_news:
+        query = f"{alert.get(config.get_column('alerts', 'ticker'), '')} stock news"
+        web_news = _fetch_web_news(query=query, config=config, max_results=5)
+
+    now = datetime.now()
+    report_payload = {
+        "session_id": session_id,
+        "alert": {
+            "id": alert.get(config.get_column("alerts", "id")),
+            "ticker": alert.get(config.get_column("alerts", "ticker")),
+            "instrument_name": alert.get(config.get_column("alerts", "instrument_name")),
+            "isin": alert.get(config.get_column("alerts", "isin")),
+            "start_date": alert.get(config.get_column("alerts", "start_date")),
+            "end_date": alert.get(config.get_column("alerts", "end_date")),
+            "trade_type": alert.get(config.get_column("alerts", "trade_type")),
+            "status": alert.get(config.get_column("alerts", "status")),
+        },
+        "analysis": {
+            "source": analysis.get("source"),
+            "analysis": analysis.get("result", {}),
+            "citations": analysis.get("citations", []),
+        },
+        "all_internal_articles": all_internal_articles,
+        "high_materiality_articles": high_materiality_articles,
+        "price_svg": price_svg,
+        "chart_snapshot_data_url": chart_snapshot_data_url,
+        "web_news": web_news,
+        "generated_at": now.isoformat(),
+    }
+
+    report_html = _render_report_html(report_payload)
+    ts = now.strftime("%Y%m%d_%H%M%S")
+    alert_id_str = str(report_payload["alert"]["id"] or alert_id).replace("/", "_")
+    session_dir = REPORTS_ROOT / session_id
+    session_dir.mkdir(parents=True, exist_ok=True)
+    report_filename = f"{alert_id_str}_{ts}.html"
+    report_path = session_dir / report_filename
+    report_path.write_text(report_html, encoding="utf-8")
+
+    expires_at = (now + timedelta(hours=24)).isoformat()
+    return {
+        "ok": True,
+        "session_id": session_id,
+        "alert_id": alert_id_str,
+        "report_filename": report_filename,
+        "report_rel_path": f"{session_id}/{report_filename}",
+        "report_abs_path": str(report_path),
+        "download_url": f"/reports/{session_id}/{report_filename}",
+        "expires_at": expires_at,
+        "generated_at": now.isoformat(),
+    }

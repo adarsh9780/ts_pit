@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed, watch, shallowRef } from 'vue';
+import { ref, onMounted, onBeforeUnmount, computed, watch, shallowRef } from 'vue';
 import axios from 'axios';
 import ConfirmDialog from '../components/ConfirmDialog.vue';
 import VChart from 'vue-echarts';
@@ -862,6 +862,29 @@ const loadData = async () => {
         prepareChartData();
     }
 };
+
+const captureCurrentChartImage = () => {
+    const canvas = document.querySelector('.chart canvas');
+    if (!canvas || typeof canvas.toDataURL !== 'function') {
+        return null;
+    }
+    try {
+        return canvas.toDataURL('image/png');
+    } catch (e) {
+        console.error('Failed to capture chart image:', e);
+        return null;
+    }
+};
+
+onMounted(() => {
+    window.__tsPitCaptureAlertChart = captureCurrentChartImage;
+});
+
+onBeforeUnmount(() => {
+    if (window.__tsPitCaptureAlertChart === captureCurrentChartImage) {
+        delete window.__tsPitCaptureAlertChart;
+    }
+});
 
 </script>
 
