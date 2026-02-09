@@ -157,6 +157,7 @@ def main():
             ticker = random.choice(tickers)
             a_start = start_dt + timedelta(days=random.randint(5, 30))
             a_end = a_start + timedelta(days=random.randint(5, 15))
+            alert_date = a_end + timedelta(days=1)
             isin = f"US{random.randint(100, 999)}PIT{i}"
 
             # Insert Alert
@@ -170,7 +171,7 @@ def main():
                     alt["columns"]["status"]: random.choice(cfg["valid_statuses"]),
                     alt["columns"]["start_date"]: a_start.strftime("%Y-%m-%d"),
                     alt["columns"]["end_date"]: a_end.strftime("%Y-%m-%d"),
-                    alt["columns"]["alert_date"]: a_end.strftime("%Y-%m-%d"),
+                    alt["columns"]["alert_date"]: alert_date.strftime("%Y-%m-%d"),
                     alt["columns"][
                         "narrative_summary"
                     ]: f"Detected movement in {ticker}.",

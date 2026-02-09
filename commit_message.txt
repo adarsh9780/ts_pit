@@ -1,8 +1,1 @@
-Refactor agent to use non-persisting alert analysis and JSON tool contracts
-
-- add shared non-persisting analysis module (deterministic gates + LLM summary + citations)
-- route /alerts/{id}/summary through shared analysis core, then persist only in API endpoint
-- add agent tools: analyze_current_alert and get_current_alert_news (strict in-window evidence)
-- remove write-capable and generic ticker-news tools from agent binding
-- enforce analysis-first behavior for current alert intents and require evidence citations
-- standardize bound tool outputs to structured JSON {ok,data,error,meta}
+Add a vertical straight line to on the price chart to show alert date.

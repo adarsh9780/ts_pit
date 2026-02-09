@@ -6,14 +6,14 @@ import VChart from 'vue-echarts';
 import { use } from 'echarts/core';
 import { CanvasRenderer } from 'echarts/renderers';
 import { LineChart, ScatterChart, BarChart, CandlestickChart } from 'echarts/charts';
-import { GridComponent, TooltipComponent, LegendComponent, MarkAreaComponent } from 'echarts/components';
+import { GridComponent, TooltipComponent, LegendComponent, MarkAreaComponent, MarkLineComponent } from 'echarts/components';
 import AlertHeader from '../components/alert/AlertHeader.vue';
 import AlertChart from '../components/alert/AlertChart.vue';
 import AlertSummary from '../components/alert/AlertSummary.vue';
 import AlertNews from '../components/alert/AlertNews.vue';
 
 // Register ECharts components
-use([CanvasRenderer, LineChart, ScatterChart, BarChart, CandlestickChart, GridComponent, TooltipComponent, LegendComponent, MarkAreaComponent]);
+use([CanvasRenderer, LineChart, ScatterChart, BarChart, CandlestickChart, GridComponent, TooltipComponent, LegendComponent, MarkAreaComponent, MarkLineComponent]);
 
 
 const props = defineProps({
@@ -120,6 +120,7 @@ const chartOptions = computed(() => {
     
     // Calculate mark area for period highlighting
     let markAreaData = [];
+    let alertMarkerDate = null;
     
     if (alertData.value && chartLabels.value.length > 0) {
         let targetStart = alertData.value.start_date;
@@ -145,6 +146,7 @@ const chartOptions = computed(() => {
 
         targetStart = findClosestDate(targetStart, chartLabels.value);
         targetEnd = findClosestDate(targetEnd, chartLabels.value);
+        alertMarkerDate = findClosestDate(alertData.value.alert_date, chartLabels.value);
 
         markAreaData = [[
             { xAxis: targetStart },
@@ -175,7 +177,24 @@ const chartOptions = computed(() => {
                     borderType: 'dashed'
                 },
                 data: markAreaData
-            }
+            },
+            markLine: alertMarkerDate ? {
+                symbol: ['none', 'none'],
+                silent: true,
+                lineStyle: {
+                    type: 'dotted',
+                    color: '#ef4444',
+                    width: 2
+                },
+                label: {
+                    show: true,
+                    formatter: 'Alert Date',
+                    position: 'insideEndTop',
+                    color: '#ef4444',
+                    fontSize: 10
+                },
+                data: [{ xAxis: alertMarkerDate }]
+            } : undefined
         });
     } else {
         // Line mode - show either Actual or Rebased pair based on priceMode
@@ -199,7 +218,24 @@ const chartOptions = computed(() => {
                         borderType: 'dashed'
                     },
                     data: markAreaData
-                }
+                },
+                markLine: alertMarkerDate ? {
+                    symbol: ['none', 'none'],
+                    silent: true,
+                    lineStyle: {
+                        type: 'dotted',
+                        color: '#ef4444',
+                        width: 2
+                    },
+                    label: {
+                        show: true,
+                        formatter: 'Alert Date',
+                        position: 'insideEndTop',
+                        color: '#ef4444',
+                        fontSize: 10
+                    },
+                    data: [{ xAxis: alertMarkerDate }]
+                } : undefined
             });
             
             // Industry Actual (on secondary y-axis for different scale)
@@ -234,7 +270,24 @@ const chartOptions = computed(() => {
                         borderType: 'dashed'
                     },
                     data: markAreaData
-                }
+                },
+                markLine: alertMarkerDate ? {
+                    symbol: ['none', 'none'],
+                    silent: true,
+                    lineStyle: {
+                        type: 'dotted',
+                        color: '#ef4444',
+                        width: 2
+                    },
+                    label: {
+                        show: true,
+                        formatter: 'Alert Date',
+                        position: 'insideEndTop',
+                        color: '#ef4444',
+                        fontSize: 10
+                    },
+                    data: [{ xAxis: alertMarkerDate }]
+                } : undefined
             });
             
             // Industry Rebased (same y-axis since both start at 100)
