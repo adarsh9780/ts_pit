@@ -1,6 +1,5 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed, watch, shallowRef } from 'vue';
-import axios from 'axios';
 import ConfirmDialog from '../components/ConfirmDialog.vue';
 import VChart from 'vue-echarts';
 import { use } from 'echarts/core';
@@ -11,6 +10,15 @@ import AlertHeader from '../components/alert/AlertHeader.vue';
 import AlertChart from '../components/alert/AlertChart.vue';
 import AlertSummary from '../components/alert/AlertSummary.vue';
 import AlertNews from '../components/alert/AlertNews.vue';
+import {
+    analyzeArticle,
+    generateSummary as generateAlertSummary,
+    getAlertDetail,
+    getConfig,
+    getNews,
+    getPrices,
+    updateAlertStatus as patchAlertStatus,
+} from '../api/service.js';
 
 // Register ECharts components
 use([CanvasRenderer, LineChart, ScatterChart, BarChart, CandlestickChart, GridComponent, TooltipComponent, LegendComponent, MarkAreaComponent, MarkLineComponent]);
@@ -448,9 +456,9 @@ const chartOptions = computed(() => {
 const fetchAlertDetail = async () => {
     if (!props.alertId) return;
     try {
-        const response = await axios.get(`http://localhost:8000/alerts/${props.alertId}`);
-        alertData.value = response.data;
-        return response.data;
+        const data = await getAlertDetail(props.alertId);
+        alertData.value = data;
+        return data;
     } catch (error) {
         console.error('Error fetching alert detail:', error);
     }
@@ -467,8 +475,7 @@ const analyzeArticles = async () => {
         // Parallel is better for UX speed.
         const promises = filteredNews.value.map(async (article) => {
             try {
-                const response = await axios.post(`http://localhost:8000/articles/${article.id}/analyze`);
-                const result = response.data;
+                const result = await analyzeArticle(article.id);
                 
                 // Update local state immediately
                 article.theme = result.theme;
@@ -501,17 +508,17 @@ const analyzeArticles = async () => {
 const generateSummary = async () => {
     isGeneratingSummary.value = true;
     try {
-        const response = await axios.post(`http://localhost:8000/alerts/${props.alertId}/summary`);
+        const response = await generateAlertSummary(props.alertId);
         // Update local state with new summary data
         if (alertData.value) {
-            alertData.value.narrative_theme = response.data.narrative_theme;
-            alertData.value.narrative_summary = response.data.narrative_summary;
-            alertData.value.bullish_events = response.data.bullish_events;
-            alertData.value.bearish_events = response.data.bearish_events;
-            alertData.value.neutral_events = response.data.neutral_events;
-            alertData.value.recommendation = response.data.recommendation;
-            alertData.value.recommendation_reason = response.data.recommendation_reason;
-            alertData.value.summary_generated_at = response.data.summary_generated_at;
+            alertData.value.narrative_theme = response.narrative_theme;
+            alertData.value.narrative_summary = response.narrative_summary;
+            alertData.value.bullish_events = response.bullish_events;
+            alertData.value.bearish_events = response.bearish_events;
+            alertData.value.neutral_events = response.neutral_events;
+            alertData.value.recommendation = response.recommendation;
+            alertData.value.recommendation_reason = response.recommendation_reason;
+            alertData.value.summary_generated_at = response.summary_generated_at;
         }
     } catch (error) {
         console.error('Error generating summary:', error);
@@ -531,7 +538,7 @@ const refreshSummary = () => {
 
 const updateStatus = async (newStatus) => {
     try {
-        await axios.patch(`http://localhost:8000/alerts/${props.alertId}/status`, { status: newStatus });
+        await patchAlertStatus(props.alertId, newStatus);
         alertData.value.status = newStatus;
     } catch (error) {
         console.error('Error updating status:', error);
@@ -562,8 +569,7 @@ const fetchPrices = async (ticker, period) => {
             };
         }
         
-        const response = await axios.get(`http://localhost:8000/prices/${ticker}`, { params });
-        prices.value = response.data;
+        prices.value = await getPrices(ticker, params);
         prepareChartData();
     } catch (error) {
         console.error('Error fetching prices:', error);
@@ -574,10 +580,10 @@ const fetchPrices = async (ticker, period) => {
 
 const fetchNews = async (isin, startDate, endDate) => {
     try {
-        const response = await axios.get(`http://localhost:8000/news/${isin}`, {
-            params: { start_date: startDate, end_date: endDate }
+        news.value = await getNews(isin, {
+            start_date: startDate,
+            end_date: endDate
         });
-        news.value = response.data;
     } catch (error) {
         console.error('Error fetching news:', error);
     }
@@ -585,8 +591,7 @@ const fetchNews = async (isin, startDate, endDate) => {
 
 const fetchConfig = async () => {
     try {
-        const response = await axios.get('http://localhost:8000/config');
-        config.value = response.data;
+        config.value = await getConfig();
     } catch (error) {
         console.error('Error fetching config:', error);
     }

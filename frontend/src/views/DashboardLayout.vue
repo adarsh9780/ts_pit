@@ -1,9 +1,9 @@
 <script setup>
 import { ref, onMounted } from 'vue';
-import axios from 'axios';
 import AlertsSidebar from '../components/AlertsSidebar.vue';
 import AlertDetail from './AlertDetail.vue'; 
 import AgentPanel from '../components/AgentPanel.vue';
+import { getAlerts, getConfig } from '../api/service.js';
 
 // State
 const alerts = ref([]);
@@ -35,10 +35,10 @@ const resolveAlertId = (item) => {
 
 const fetchConfig = async () => {
   try {
-    const response = await axios.get('http://localhost:8000/config');
-    mappings.value = response.data;
-    if (Array.isArray(response.data?.valid_statuses) && response.data.valid_statuses.length > 0) {
-      validStatuses.value = response.data.valid_statuses;
+    const data = await getConfig();
+    mappings.value = data;
+    if (Array.isArray(data?.valid_statuses) && data.valid_statuses.length > 0) {
+      validStatuses.value = data.valid_statuses;
     }
   } catch (error) {
     console.error('Error fetching config:', error);
@@ -50,8 +50,7 @@ const fetchAlerts = async (date = null) => {
   loading.value = true;
   try {
     const params = date ? { date } : {};
-    const response = await axios.get('http://localhost:8000/alerts', { params });
-    alerts.value = response.data;
+    alerts.value = await getAlerts(params);
     applyFilters(); // Initial filter application
     
     // Extract dates if not already set (or always update if needed)

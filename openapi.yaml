@@ -1,0 +1,642 @@
+openapi: 3.1.0
+info:
+  title: FastAPI
+  version: 0.1.0
+paths:
+  /ui/{path}:
+    get:
+      summary: Serve Frontend
+      description: Serve the frontend SPA. All routes fall back to index.html for
+        client-side routing.
+      operationId: serve_frontend_ui__path__get
+      parameters:
+      - name: path
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Path
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /ui:
+    get:
+      summary: Serve Frontend
+      description: Serve the frontend SPA. All routes fall back to index.html for
+        client-side routing.
+      operationId: serve_frontend_ui_get
+      parameters:
+      - name: path
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Path
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /articles/{id}/analyze:
+    post:
+      summary: Analyze Article
+      description: Generate AI analysis for a specific article using its price impact
+        context.
+      operationId: analyze_article_articles__id__analyze_post
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /config:
+    get:
+      summary: Get Config Endpoint
+      description: Return configuration for the frontend.
+      operationId: get_config_endpoint_config_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /mappings:
+    get:
+      summary: Get Mappings
+      description: Legacy endpoint - returns same as /config.
+      operationId: get_mappings_mappings_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /alerts:
+    get:
+      summary: Get Alerts
+      description: Get all alerts, optionally filtered by date.
+      operationId: get_alerts_alerts_get
+      parameters:
+      - name: date
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Date
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /alerts/{alert_id}/status:
+    patch:
+      summary: Update Alert Status
+      description: Update the status of an alert.
+      operationId: update_alert_status_alerts__alert_id__status_patch
+      parameters:
+      - name: alert_id
+        in: path
+        required: true
+        schema:
+          anyOf:
+          - type: string
+          - type: integer
+          title: Alert Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StatusUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /alerts/{alert_id}:
+    get:
+      summary: Get Alert Detail
+      description: Get details for a specific alert.
+      operationId: get_alert_detail_alerts__alert_id__get
+      parameters:
+      - name: alert_id
+        in: path
+        required: true
+        schema:
+          anyOf:
+          - type: string
+          - type: integer
+          title: Alert Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /alerts/{alert_id}/summary:
+    post:
+      summary: Generate Summary
+      description: Generate AI summary for the alert.
+      operationId: generate_summary_alerts__alert_id__summary_post
+      parameters:
+      - name: alert_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Alert Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /prices/{ticker}:
+    get:
+      summary: Get Prices
+      description: Get price data for a ticker with industry comparison.
+      operationId: get_prices_prices__ticker__get
+      parameters:
+      - name: ticker
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Ticker
+      - name: period
+        in: query
+        required: false
+        schema:
+          type: string
+          pattern: ^(1mo|3mo|6mo|1y|ytd|max)$
+          title: Period
+      - name: start_date
+        in: query
+        required: false
+        schema:
+          type: string
+          title: Start Date
+      - name: end_date
+        in: query
+        required: false
+        schema:
+          type: string
+          title: End Date
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /news/{isin}:
+    get:
+      summary: Get News
+      description: Get news articles for an ISIN.
+      operationId: get_news_news__isin__get
+      parameters:
+      - name: isin
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Isin
+      - name: start_date
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Start Date
+      - name: end_date
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: End Date
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agent/history/{session_id}:
+    get:
+      summary: Get Chat History
+      description: 'Retrieve chat history for a given session from the LangGraph checkpointer.
+
+        Returns messages in a format suitable for the frontend.'
+      operationId: get_chat_history_agent_history__session_id__get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      summary: Delete Chat History
+      description: Delete chat history for a given session from the LangGraph checkpointer.
+      operationId: delete_chat_history_agent_history__session_id__delete
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agent/chat:
+    post:
+      summary: Chat Agent
+      description: 'Chat with the Trade Surveillance Agent.
+
+        Streams the response using Server-Sent Events (SSE).'
+      operationId: chat_agent_agent_chat_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /alerts/{alert_id}/report:
+    post:
+      summary: Generate Alert Report
+      description: 'Generate a downloadable investigation report for an alert.
+
+        Stored under artifacts/reports/{session_id}/{alert_id}_{timestamp}.html'
+      operationId: generate_alert_report_alerts__alert_id__report_post
+      parameters:
+      - name: alert_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Alert Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /reports/chart-snapshot:
+    post:
+      summary: Upload Chart Snapshot
+      description: Store a UI-captured chart snapshot for a session+alert.
+      operationId: upload_chart_snapshot_reports_chart_snapshot_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChartSnapshotRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /reports/{session_id}/{report_filename}:
+    get:
+      summary: Download Report
+      description: Download a generated report artifact.
+      operationId: download_report_reports__session_id___report_filename__get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      - name: report_filename
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Report Filename
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /artifacts/{session_id}:
+    get:
+      summary: List Session Artifacts
+      description: List artifacts for a session (excluding internal cache/snapshot
+        files).
+      operationId: list_session_artifacts_artifacts__session_id__get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /artifacts/{session_id}/download:
+    get:
+      summary: Download Session Artifact
+      description: Download artifact by relative path under a session directory.
+      operationId: download_session_artifact_artifacts__session_id__download_get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      - name: path
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          title: Path
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+components:
+  schemas:
+    AlertContext:
+      properties:
+        id:
+          anyOf:
+          - type: string
+          - type: integer
+          title: Id
+        ticker:
+          type: string
+          title: Ticker
+        isin:
+          type: string
+          title: Isin
+        start_date:
+          type: string
+          title: Start Date
+        end_date:
+          type: string
+          title: End Date
+        instrument_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Instrument Name
+        trade_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Trade Type
+        status:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Status
+      type: object
+      required:
+      - id
+      - ticker
+      - isin
+      - start_date
+      - end_date
+      title: AlertContext
+      description: Full alert context passed from frontend to avoid re-fetching.
+    ChartSnapshotRequest:
+      properties:
+        session_id:
+          type: string
+          title: Session Id
+        alert_id:
+          anyOf:
+          - type: string
+          - type: integer
+          title: Alert Id
+        image_data_url:
+          type: string
+          title: Image Data Url
+      type: object
+      required:
+      - session_id
+      - alert_id
+      - image_data_url
+      title: ChartSnapshotRequest
+    ChatRequest:
+      properties:
+        message:
+          type: string
+          title: Message
+        session_id:
+          type: string
+          title: Session Id
+        alert_context:
+          anyOf:
+          - $ref: '#/components/schemas/AlertContext'
+          - type: 'null'
+      type: object
+      required:
+      - message
+      - session_id
+      title: ChatRequest
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    ReportRequest:
+      properties:
+        session_id:
+          type: string
+          title: Session Id
+        include_web_news:
+          type: boolean
+          title: Include Web News
+          default: false
+      type: object
+      required:
+      - session_id
+      title: ReportRequest
+    StatusUpdate:
+      properties:
+        status:
+          type: string
+          title: Status
+      type: object
+      required:
+      - status
+      title: StatusUpdate
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError

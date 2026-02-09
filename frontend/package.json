@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "generate:openapi": "uv run ../scripts/export_openapi.py --output ../openapi.yaml",
+    "generate:client": "npx -y swagger-typescript-api generate --path ../openapi.yaml --output src/api/generated --name index.js --axios --js && rm -f src/api/generated/*.d.ts",
+    "generate:api": "npm run generate:openapi && npm run generate:client"
   },
   "dependencies": {
     "axios": "^1.13.4",

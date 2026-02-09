@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue';
-import axios from 'axios';
 import { useRouter } from 'vue-router';
+import { getAlerts, getConfig, updateAlertStatus } from '../api/service.js';
 
 const alerts = ref([]);
 const config = ref({});
@@ -16,8 +16,7 @@ const displayColumns = computed(() => {
 
 const fetchConfig = async () => {
   try {
-    const response = await axios.get('http://localhost:8000/config');
-    config.value = response.data;
+    config.value = await getConfig();
   } catch (error) {
     console.error('Error fetching config:', error);
   }
@@ -26,8 +25,7 @@ const fetchConfig = async () => {
 const fetchAlerts = async (date = null) => {
   try {
     const params = date ? { date } : {};
-    const response = await axios.get('http://localhost:8000/alerts', { params });
-    alerts.value = response.data;
+    alerts.value = await getAlerts(params);
     
     // Extract unique dates for the date filter
     if (!date && alerts.value.length > 0) {
@@ -42,7 +40,7 @@ const fetchAlerts = async (date = null) => {
 const updateStatus = async (alertId, newStatus, event) => {
   event.stopPropagation(); // Prevent row click
   try {
-    await axios.patch(`http://localhost:8000/alerts/${alertId}/status`, { status: newStatus });
+    await updateAlertStatus(alertId, newStatus);
     // Update locally
     const alert = alerts.value.find(a => a.id === alertId);
     if (alert) alert.status = newStatus;

@@ -2,6 +2,15 @@
 import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
 import { marked } from 'marked';
 import ConfirmDialog from './ConfirmDialog.vue';
+import {
+  buildArtifactDownloadUrl,
+  deleteChatHistory,
+  getAgentChatUrl,
+  getAlertDetail,
+  getChatHistory,
+  listArtifacts,
+  uploadChartSnapshot,
+} from '../api/service.js';
 
 marked.setOptions({ breaks: true, gfm: true });
 const renderer = new marked.Renderer();
@@ -63,9 +72,7 @@ const fetchArtifacts = async () => {
   }
   artifactsLoading.value = true;
   try {
-    const response = await fetch(`http://localhost:8000/artifacts/${sessionId.value}`);
-    if (!response.ok) throw new Error('Failed to fetch artifacts');
-    const data = await response.json();
+    const data = await listArtifacts(sessionId.value);
     artifacts.value = data.artifacts || [];
   } catch (e) {
     console.error('Failed to fetch artifacts:', e);
@@ -78,12 +85,9 @@ const fetchArtifacts = async () => {
 const fetchChatHistory = async (sid) => {
   messages.value = [];
   try {
-    const response = await fetch(`http://localhost:8000/agent/history/${sid}`);
-    if (response.ok) {
-      const data = await response.json();
-      if (data.messages?.length) {
-        messages.value = data.messages;
-      }
+    const data = await getChatHistory(sid);
+    if (data.messages?.length) {
+      messages.value = data.messages;
     }
   } catch (e) {
     console.error('Failed to fetch chat history:', e);
@@ -95,9 +99,7 @@ const initializeSession = async (alertId) => {
   if (!alertId) return;
 
   try {
-    const response = await fetch(`http://localhost:8000/alerts/${alertId}`);
-    if (!response.ok) throw new Error('Failed to fetch alert info');
-    const newAlertInfo = await response.json();
+    const newAlertInfo = await getAlertDetail(alertId);
 
     const previousTicker = alertInfo.value ? alertInfo.value.ticker : null;
     const newTicker = newAlertInfo.ticker;
@@ -164,9 +166,8 @@ const confirmDelete = async () => {
   isDeleting.value = true;
   deleteDialogMessage.value = 'Deleting...';
   try {
-    const response = await fetch(`http://localhost:8000/agent/history/${sessionId.value}`, { method: 'DELETE' });
-    const data = await response.json();
-    if (!response.ok || data.status === 'error') throw new Error(data.message || 'Unknown error');
+    const data = await deleteChatHistory(sessionId.value);
+    if (data.status === 'error') throw new Error(data.message || 'Unknown error');
 
     deleteDialogTitle.value = 'Success';
     deleteDialogMessage.value = 'Conversation history deleted successfully.';
@@ -195,9 +196,8 @@ const toggleArtifactsMenu = async () => {
 
 const downloadArtifact = (artifact) => {
   if (!artifact?.relative_path || !sessionId.value) return;
-  const url = new URL(`http://localhost:8000/artifacts/${sessionId.value}/download`);
-  url.searchParams.set('path', artifact.relative_path);
-  window.open(url.toString(), '_blank', 'noopener,noreferrer');
+  const url = buildArtifactDownloadUrl(sessionId.value, artifact.relative_path);
+  window.open(url, '_blank', 'noopener,noreferrer');
 };
 
 const handleComposerKeydown = (e) => {
@@ -228,14 +228,10 @@ const captureAndUploadChartSnapshot = async () => {
   if (!imageDataUrl || typeof imageDataUrl !== 'string') return;
 
   try {
-    await fetch('http://localhost:8000/reports/chart-snapshot', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    await uploadChartSnapshot({
         session_id: sessionId.value,
         alert_id: props.alertId,
         image_data_url: imageDataUrl,
-      }),
     });
   } catch (e) {
     console.error('Failed to upload chart snapshot:', e);
@@ -279,7 +275,7 @@ const sendMessage = async () => {
         }
       : null;
 
-    const response = await fetch('http://localhost:8000/agent/chat', {
+    const response = await fetch(getAgentChatUrl(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

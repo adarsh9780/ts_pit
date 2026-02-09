@@ -32,6 +32,28 @@ Use only these two docs as source of truth:
    cd frontend && npm run dev
    ```
 
+## Export OpenAPI Contract
+
+Generate the current FastAPI contract as JSON:
+
+```bash
+uv run scripts/export_openapi.py --output openapi.json
+```
+
+Generate YAML instead:
+
+```bash
+uv run scripts/export_openapi.py --output openapi.yaml
+```
+
+Generate frontend API client from the OpenAPI contract:
+
+```bash
+cd frontend && npm run generate:api
+```
+
+This creates a generated JavaScript client under `frontend/src/api/generated`.
+
 ## Configuration
 
 Edit `config.yaml` to map your database tables/columns.
