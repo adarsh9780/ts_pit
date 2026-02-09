@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:backend-static": "vite build",
+    "prepare:backend": "npm run generate:api && npm run build:backend-static",
     "preview": "vite preview",
     "generate:openapi": "uv run ../scripts/export_openapi.py --output ../openapi.yaml",
     "generate:client": "npx -y swagger-typescript-api generate --path ../openapi.yaml --output src/api/generated --name index.js --axios --js && rm -f src/api/generated/*.d.ts",

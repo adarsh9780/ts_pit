@@ -19,6 +19,7 @@ logs/
 dist/
 dist-ssr/
 build/
+backend/static/
 wheels/
 *.egg-info
 __pycache__/
@@ -34,4 +35,3 @@ __pycache__/
 *.sln
 *.bak_*
 backend/agent_v2
-

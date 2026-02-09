@@ -32,6 +32,22 @@ Use only these two docs as source of truth:
    cd frontend && npm run dev
    ```
 
+## Frontend Build Artifacts
+
+The frontend production build is emitted to `backend/static` and should be generated during build/release, not tracked in Git.
+
+Create backend-served frontend assets:
+
+```bash
+cd frontend && npm run build:backend-static
+```
+
+Prepare backend release artifacts (API client + static assets):
+
+```bash
+cd frontend && npm run prepare:backend
+```
+
 ## Export OpenAPI Contract
 
 Generate the current FastAPI contract as JSON:
