@@ -302,7 +302,20 @@ def _render_report_html(payload: dict[str, Any]) -> str:
         "DISMISS": "badge-close",
         "NEEDS_REVIEW": "badge-review",
     }.get(rec_norm, "badge-review")
-    rec_reason = _e(analysis["analysis"].get("recommendation_reason", ""))
+    rec_reason_raw = str(analysis["analysis"].get("recommendation_reason") or "").strip()
+    reason_lines = [ln.strip() for ln in rec_reason_raw.splitlines() if ln.strip()]
+    reason_bullets = [ln[1:].strip() for ln in reason_lines if ln.startswith("-")]
+    reason_free_text = [ln for ln in reason_lines if not ln.startswith("-")]
+    reason_bullets_html = (
+        "<ul>" + "".join(f"<li>{_e(item)}</li>" for item in reason_bullets) + "</ul>"
+        if reason_bullets
+        else ""
+    )
+    reason_text_html = (
+        "".join(f"<p>{_e(line)}</p>" for line in reason_free_text)
+        if reason_free_text
+        else ""
+    )
     return f"""<!doctype html>
 <html>
 <head>
@@ -320,33 +333,38 @@ def _render_report_html(payload: dict[str, Any]) -> str:
     * {{ box-sizing: border-box; }}
     body {{
       margin: 0;
-      background: #f1f5f9;
+      background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
       color: var(--text);
-      font-family: Georgia, "Times New Roman", serif;
-      font-size: 15px;
+      font-family: "Inter", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      font-size: 14px;
       line-height: 1.6;
-      padding: 32px 24px;
+      padding: 28px 20px;
     }}
     .report {{
-      max-width: 980px;
+      max-width: 1040px;
       margin: 0 auto;
       background: var(--surface);
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 28px 34px 34px 34px;
-      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+      border: 1px solid #dbe3ef;
+      border-radius: 14px;
+      padding: 26px 30px 34px 30px;
+      box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
     }}
-    h1, h2, h3 {{ margin: 0 0 10px 0; color: var(--title); font-family: "Helvetica Neue", Arial, sans-serif; }}
-    h1 {{ font-size: 30px; margin-bottom: 4px; }}
-    h2 {{ font-size: 20px; margin-bottom: 12px; }}
+    .report-head {{
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 10px;
+      margin-bottom: 14px;
+    }}
+    h1, h2, h3 {{ margin: 0 0 10px 0; color: var(--title); font-family: "Inter", "Segoe UI", "Helvetica Neue", Arial, sans-serif; }}
+    h1 {{ font-size: 38px; letter-spacing: -0.02em; margin-bottom: 6px; }}
+    h2 {{ font-size: 22px; margin-bottom: 12px; letter-spacing: -0.01em; }}
     h3 {{ font-size: 16px; margin-top: 6px; }}
-    .subtitle {{ color: var(--muted); font-family: "Helvetica Neue", Arial, sans-serif; font-size: 13px; }}
+    .subtitle {{ color: var(--muted); font-family: "Inter", "Segoe UI", Arial, sans-serif; font-size: 13px; }}
     .muted {{ color: var(--muted); }}
     .card {{
       border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 16px 18px;
-      margin: 18px 0;
+      border-radius: 12px;
+      padding: 16px 18px 14px 18px;
+      margin: 16px 0;
       background: var(--surface);
     }}
     .meta-grid {{
@@ -377,6 +395,23 @@ def _render_report_html(payload: dict[str, Any]) -> str:
     .badge-escalate {{ color: #991b1b; background: #fee2e2; border-color: #fecaca; }}
     .badge-close {{ color: #065f46; background: #d1fae5; border-color: #a7f3d0; }}
     .badge-review {{ color: #92400e; background: #fef3c7; border-color: #fde68a; }}
+    .reason-box {{
+      background: #fafcff;
+      border: 1px solid #e6edf7;
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin: 8px 0 10px 0;
+    }}
+    .reason-box p {{
+      margin: 0 0 6px 0;
+    }}
+    .reason-box ul {{
+      margin: 0 0 0 18px;
+      padding: 0;
+    }}
+    .reason-box li {{
+      margin-bottom: 5px;
+    }}
     .chart-frame {{
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -391,7 +426,7 @@ def _render_report_html(payload: dict[str, Any]) -> str:
     }}
     .news-item {{
       border: 1px solid var(--line);
-      border-radius: 8px;
+      border-radius: 10px;
       padding: 12px 14px;
       background: #fff;
     }}
@@ -405,7 +440,7 @@ def _render_report_html(payload: dict[str, Any]) -> str:
     }}
     .news-title {{
       margin: 0 0 4px 0;
-      font-size: 17px;
+      font-size: 18px;
       line-height: 1.35;
     }}
     .news-title a {{
@@ -452,12 +487,12 @@ def _render_report_html(payload: dict[str, Any]) -> str:
     .small {{ font-size: 12px; }}
     .pre {{ white-space: pre-wrap; }}
     .section-index {{
-      font-family: "Helvetica Neue", Arial, sans-serif;
-      font-size: 12px;
+      font-family: "Inter", "Segoe UI", Arial, sans-serif;
+      font-size: 11px;
       color: var(--muted);
       margin-bottom: 4px;
       text-transform: uppercase;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.1em;
     }}
     @media print {{
       body {{ background: #fff; padding: 0; }}
@@ -468,23 +503,13 @@ def _render_report_html(payload: dict[str, Any]) -> str:
 </head>
 <body>
   <div class="report">
-    <h1>Investigation Report</h1>
-    <p class="subtitle">Generated: {_e(generated_at)} | Session: {_e(payload.get('session_id'))} | Alert: {_e(alert.get('id'))}</p>
-
-    <div class="card">
-      <div class="section-index">Section 1</div>
-      <h2>Executive Summary</h2>
-      <div class="recommendation-row">
-        <b>Recommendation:</b>
-        <span class="rec-badge {rec_class}">{_e(rec_norm)}</span>
-      </div>
-      <p class="pre"><b>Reasoning:</b> {rec_reason}</p>
-      <p><b>Narrative Theme:</b> {_e(analysis['analysis'].get('narrative_theme'))}</p>
-      <p class="pre"><b>Narrative Summary:</b> {_e(analysis['analysis'].get('narrative_summary'))}</p>
+    <div class="report-head">
+      <h1>Investigation Report</h1>
+      <p class="subtitle">Generated: {_e(generated_at)} | Session: {_e(payload.get('session_id'))} | Alert: {_e(alert.get('id'))}</p>
     </div>
 
     <div class="card">
-      <div class="section-index">Section 2</div>
+      <div class="section-index">Section 1</div>
       <h2>Alert Context</h2>
       <div class="meta-grid">
         <div class="meta-item"><b>Ticker:</b> {_e(alert.get('ticker'))} ({_e(alert.get('instrument_name'))})</div>
@@ -494,6 +519,22 @@ def _render_report_html(payload: dict[str, Any]) -> str:
         <div class="meta-item"><b>Status:</b> {_e(alert.get('status'))}</div>
         <div class="meta-item"><b>Analysis Source:</b> {_e(analysis.get('source'))}</div>
       </div>
+    </div>
+
+    <div class="card">
+      <div class="section-index">Section 2</div>
+      <h2>Executive Summary</h2>
+      <div class="recommendation-row">
+        <b>Recommendation:</b>
+        <span class="rec-badge {rec_class}">{_e(rec_norm)}</span>
+      </div>
+      <div class="reason-box">
+        <b>Reasoning:</b>
+        {reason_text_html}
+        {reason_bullets_html}
+      </div>
+      <p><b>Narrative Theme:</b> {_e(analysis['analysis'].get('narrative_theme'))}</p>
+      <p class="pre"><b>Narrative Summary:</b> {_e(analysis['analysis'].get('narrative_summary'))}</p>
     </div>
 
     <div class="card">
