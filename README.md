@@ -70,6 +70,14 @@ cd frontend && npm run generate:api
 
 This creates a generated JavaScript client under `frontend/src/api/generated`.
 
+## Backend Tests
+
+Run backend non-LLM unit tests:
+
+```bash
+uv run python -m unittest discover -s tests -p 'test_*.py'
+```
+
 ## Configuration
 
 Edit `config.yaml` to map your database tables/columns.
