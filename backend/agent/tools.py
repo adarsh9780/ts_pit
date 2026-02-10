@@ -522,6 +522,87 @@ def get_current_alert_news(alert_id: str, limit: int = 50) -> str:
 
 
 @tool
+def get_article_by_id(article_id: str) -> str:
+    """
+    Fetch a single internal article by article_id, including full body when available.
+
+    Use this tool when the user asks to dissect a specific news item from the UI list.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    config = get_config()
+    try:
+        table_name = config.get_table_name("articles")
+        id_col = config.get_column("articles", "id") or "id"
+
+        cursor.execute(f'PRAGMA table_info("{table_name}")')
+        available_cols = [row["name"] for row in cursor.fetchall()]
+        available_set = set(available_cols)
+
+        id_candidates = [id_col, "id", "article_id", "art_id"]
+        id_candidates = [c for c in dict.fromkeys(id_candidates) if c in available_set]
+        if not id_candidates:
+            return _error("No article id column found in configured articles table.", code="CONFIG_ERROR")
+
+        probe_values: list[Any] = [article_id]
+        if isinstance(article_id, str) and article_id.isdigit():
+            probe_values.append(int(article_id))
+        elif not isinstance(article_id, str):
+            probe_values.append(str(article_id))
+
+        row = None
+        matched_col = None
+        matched_value = None
+        for value in probe_values:
+            for candidate_col in id_candidates:
+                cursor.execute(
+                    f'SELECT * FROM "{table_name}" WHERE "{candidate_col}" = ? LIMIT 1',
+                    (value,),
+                )
+                found = cursor.fetchone()
+                if found:
+                    row = found
+                    matched_col = candidate_col
+                    matched_value = value
+                    break
+            if row:
+                break
+
+        if not row:
+            return _error(f"Article {article_id} not found.", code="ARTICLE_NOT_FOUND")
+
+        remapped = remap_row(dict(row), "articles")
+        body_value = remapped.get("body")
+        body_present = isinstance(body_value, str) and body_value.strip() != ""
+
+        data = {
+            "id": remapped.get("id") or remapped.get("article_id") or remapped.get("art_id"),
+            "title": remapped.get("title"),
+            "created_date": remapped.get("created_date"),
+            "theme": remapped.get("theme"),
+            "sentiment": remapped.get("sentiment"),
+            "summary": remapped.get("summary"),
+            "url": remapped.get("url") or remapped.get("article_url") or remapped.get("link"),
+            "isin": remapped.get("isin"),
+            "impact_score": remapped.get("impact_score"),
+            "impact_label": remapped.get("impact_label"),
+            "body": remapped.get("body"),
+            "body_available": body_present,
+        }
+
+        return _ok(
+            data,
+            article_id=article_id,
+            matched_id_col=matched_col,
+            matched_id_value=matched_value,
+        )
+    except Exception as e:
+        return _error(f"Error fetching article by id: {str(e)}", code="ARTICLE_FETCH_ERROR")
+    finally:
+        conn.close()
+
+
+@tool
 def analyze_current_alert(alert_id: str) -> str:
     """
     Run deterministic-first analysis for the current alert without persisting anything to DB.

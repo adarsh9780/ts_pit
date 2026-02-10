@@ -20,6 +20,8 @@ const getMaterialityColor = (code) => {
     if (!props.config || !props.config.materiality_colors) return '#808080';
     return props.config.materiality_colors[code] || props.config.materiality_colors['DEFAULT'] || '#808080';
 };
+
+const resolveArticleId = (article) => article?.id ?? article?.article_id ?? article?.art_id ?? '-';
 </script>
 
 <template>
@@ -37,9 +39,9 @@ const getMaterialityColor = (code) => {
             <slot name="summary"></slot>
 
             <div v-if="news.length > 0" class="news-feed">
-                <div v-for="article in news" :key="article.art_id" class="news-item" :class="{ 'analyzed': article.analysis }">
+                <div v-for="article in news" :key="resolveArticleId(article)" class="news-item" :class="{ 'analyzed': article.analysis }">
                     <div class="news-meta">
-                        <span class="news-date">{{ article.created_date }}</span>
+                        <span class="news-date">#{{ resolveArticleId(article) }} • {{ article.created_date }}</span>
                         <span class="news-theme">{{ article.theme.replace(/_/g, ' ') }}</span>
                     </div>
                     <h4 class="news-title">{{ article.title }}</h4>

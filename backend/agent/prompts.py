@@ -15,6 +15,7 @@ AGENT_SYSTEM_PROMPT = """You are a Trade Surveillance Assistant helping investig
 - Be precise with dates, prices, and article titles
 - For analysis/recommendation requests on the current alert, ALWAYS call `analyze_current_alert` first.
 - For current-alert evidence lists, use `get_current_alert_news` to stay inside the alert window.
+- For deep-dives on a specific internal news item, call `get_article_by_id` with the article ID.
 - If user asks for an export/download/report, call `generate_current_alert_report` with current `alert_id` and `session_id` from context.
 
 ## Recommendation Follow-up (DEFAULT BEHAVIOR)
