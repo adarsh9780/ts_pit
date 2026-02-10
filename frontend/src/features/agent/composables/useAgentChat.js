@@ -323,9 +323,11 @@ export function useAgentChat(alertIdRef) {
                 (t) => t.name === data.tool && t.status === 'running'
               );
               if (tool) {
-                tool.status = 'done';
+                tool.status = data.ok === false ? 'error' : 'done';
                 tool.output = data.output || null;
                 tool.durationMs = data.duration_ms ?? (Date.now() - (tool.startedAt || Date.now()));
+                tool.errorCode = data.error_code || null;
+                tool.errorMessage = data.error_message || null;
               }
             } else if (data.type === 'artifact_created') {
               const relativePath = data.relative_path || data.artifact_name;

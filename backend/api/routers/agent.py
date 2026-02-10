@@ -181,6 +181,30 @@ Status: {ctx.status or "N/A"}
                     started = tool_started_at.pop(tool_name, None)
                     if started is not None:
                         duration_ms = int((time.time() - started) * 1000)
+                    ok = True
+                    error_code = None
+                    error_message = None
+                    if isinstance(tool_output, str):
+                        try:
+                            parsed_output = json.loads(tool_output)
+                            if isinstance(parsed_output, dict) and parsed_output.get("ok") is False:
+                                ok = False
+                                err = parsed_output.get("error") or {}
+                                if isinstance(err, dict):
+                                    error_code = err.get("code")
+                                    error_message = err.get("message")
+                                else:
+                                    error_message = str(err)
+                                logprint(
+                                    "Tool execution returned error payload",
+                                    level="ERROR",
+                                    session_id=body.session_id,
+                                    tool=tool_name,
+                                    error_code=error_code,
+                                    error_message=error_message,
+                                )
+                        except Exception:
+                            pass
                     if (
                         tool_name == "generate_current_alert_report"
                         and isinstance(tool_output, str)
@@ -195,7 +219,7 @@ Status: {ctx.status or "N/A"}
                         except Exception:
                             pass
                     yield (
-                        f"data: {json.dumps({'type': 'tool_end', 'tool': tool_name, 'output': _safe_preview(tool_output), 'duration_ms': duration_ms})}\n\n"
+                        f"data: {json.dumps({'type': 'tool_end', 'tool': tool_name, 'ok': ok, 'error_code': error_code, 'error_message': error_message, 'output': _safe_preview(tool_output), 'duration_ms': duration_ms})}\n\n"
                     )
 
             yield f"data: {json.dumps({'type': 'done'})}\n\n"

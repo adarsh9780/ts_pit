@@ -118,7 +118,12 @@ const {
           ></div>
 
           <div v-if="msg.tools && msg.tools.length > 0" class="tools-container">
-            <details v-for="tool in msg.tools" :key="tool.id || `${tool.name}-${tool.startedAt || 0}`" class="tool-trace">
+            <details
+              v-for="tool in msg.tools"
+              :key="tool.id || `${tool.name}-${tool.startedAt || 0}`"
+              class="tool-trace"
+              :open="tool.status === 'error'"
+            >
               <summary class="tool-summary">
                 <span class="tool-main">
                   <span class="status-dot" :class="tool.status"></span>
@@ -139,6 +144,11 @@ const {
                 <div v-if="tool.output" class="tool-section">
                   <div class="tool-section-title">Output</div>
                   <pre class="tool-pre">{{ prettyToolData(tool.output) }}</pre>
+                </div>
+                <div v-if="tool.errorCode || tool.errorMessage" class="tool-section tool-error">
+                  <div class="tool-section-title">Error</div>
+                  <div v-if="tool.errorCode" class="tool-error-line">Code: {{ tool.errorCode }}</div>
+                  <div v-if="tool.errorMessage" class="tool-error-line">Message: {{ tool.errorMessage }}</div>
                 </div>
               </div>
             </details>
@@ -429,6 +439,19 @@ const {
 
 .status-dot.running { background: #3498db; animation: pulse 1s infinite; }
 .status-dot.done { background: #2ecc71; }
+.status-dot.error { background: #ef4444; }
+
+.tool-error {
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 4px;
+  padding: 8px;
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.tool-error-line {
+  font-size: 12px;
+  color: #991b1b;
+}
 
 @keyframes pulse {
   0% { opacity: 0.5; }
