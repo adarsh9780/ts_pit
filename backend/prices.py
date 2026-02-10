@@ -10,13 +10,12 @@ from .services.market_provider import (
 )
 from .services.price_cache import (
     clear_ticker_prices,
-    ensure_ohlc_columns,
-    ensure_price_table,
     get_alert_isin_for_ticker,
     has_missing_ohlc,
     needs_fetch,
     upsert_price_rows,
     update_alert_ticker,
+    validate_price_schema,
 )
 
 
@@ -35,9 +34,7 @@ def fetch_and_cache_prices(
 
     conn = get_db_connection()
     cursor = conn.cursor()
-    ensure_price_table(cursor)
-    ensure_ohlc_columns(cursor)
-    conn.commit()
+    validate_price_schema(cursor)
 
     should_fetch = needs_fetch(cursor, ticker, start_str)
     if not should_fetch and has_missing_ohlc(cursor, ticker):
@@ -84,4 +81,3 @@ def fetch_and_cache_prices(
 
     conn.close()
     return start_str, ticker
-

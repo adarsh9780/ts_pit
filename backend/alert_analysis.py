@@ -82,6 +82,7 @@ def analyze_alert_non_persisting(conn, config, alert_id: str | int, llm):
 
     return {
         "ok": True,
+        "alert_id": str(alert[config.get_column("alerts", "id")]),
         "source": source,
         "result": result,
         "citations": citations,

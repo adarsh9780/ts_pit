@@ -3,6 +3,7 @@ from __future__ import annotations
 import aiosqlite
 import os
 from contextlib import asynccontextmanager
+from importlib import import_module
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -12,7 +13,6 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from .agent.graph import workflow
 from .api.routers import (
     agent_router,
     alerts_router,
@@ -21,13 +21,31 @@ from .api.routers import (
     settings_router,
 )
 from .config import get_config
-from .database import get_db_connection
+from .db import validate_required_schema
 from .llm import get_llm_model
 from .logger import init_logger, logprint
 
 
 config = get_config()
 init_logger()
+
+
+def _load_agent_workflow():
+    mode = config.get_agent_mode()
+    module_name = ".agent.graph" if mode == "v1" else ".agent_v2.graph"
+    try:
+        module = import_module(module_name, package=__package__)
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to load configured agent mode '{mode}' from {module_name}: {e}"
+        ) from e
+
+    workflow = getattr(module, "workflow", None)
+    if workflow is None:
+        raise RuntimeError(
+            f"Configured agent mode '{mode}' does not expose 'workflow' in {module_name}"
+        )
+    return workflow, mode
 
 
 @asynccontextmanager
@@ -43,6 +61,14 @@ async def lifespan(app: FastAPI):
         os.environ["NO_PROXY"] = proxy_config["no_proxy"]
         logprint("Proxy bypass configured", no_proxy=proxy_config["no_proxy"])
 
+    missing_schema = validate_required_schema(config=config)
+    if missing_schema:
+        joined = ", ".join(missing_schema)
+        raise RuntimeError(
+            "Database schema validation failed. Missing required tables/columns: "
+            f"{joined}. Apply migrations/schema setup before starting the app."
+        )
+
     logprint("Initializing LLM model...")
     app.state.llm = get_llm_model()
 
@@ -50,107 +76,20 @@ async def lifespan(app: FastAPI):
     db_path.parent.mkdir(parents=True, exist_ok=True)
     logprint("Initializing agent memory", db_path=str(db_path))
 
+    workflow, agent_mode = _load_agent_workflow()
+    logprint("Selected agent runtime", mode=agent_mode)
+
     async with aiosqlite.connect(db_path) as conn:
         app.state.agent_params = {"conn": conn}
         checkpointer = AsyncSqliteSaver(conn)
         app.state.agent = workflow.compile(checkpointer=checkpointer)
+        app.state.agent_mode = agent_mode
         yield
 
     logprint("Application shutdown complete")
 
 
 app = FastAPI(lifespan=lifespan)
-
-
-def run_migrations():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    table_name = config.get_table_name("alerts")
-    cursor.execute(f'PRAGMA table_info("{table_name}")')
-    columns = [row["name"] for row in cursor.fetchall()]
-
-    new_cols = {
-        "narrative_theme": "TEXT",
-        "narrative_summary": "TEXT",
-        "summary_generated_at": "TEXT",
-        "bullish_events": "TEXT",
-        "bearish_events": "TEXT",
-        "neutral_events": "TEXT",
-        "recommendation": "TEXT",
-        "recommendation_reason": "TEXT",
-    }
-
-    for col, dtype in new_cols.items():
-        if col not in columns:
-            logprint("Migration adding column", table=table_name, column=col, dtype=dtype)
-            cursor.execute(f'ALTER TABLE "{table_name}" ADD COLUMN "{col}" {dtype}')
-
-    status_col = config.get_column("alerts", "status")
-    default_status = config.get_valid_statuses()[0]
-    if status_col not in columns:
-        logprint(
-            "Migration adding status column",
-            table=table_name,
-            column=status_col,
-            default_status=default_status,
-        )
-        default_status_sql = default_status.replace("'", "''")
-        cursor.execute(
-            f'ALTER TABLE "{table_name}" ADD COLUMN "{status_col}" TEXT DEFAULT \'{default_status_sql}\''
-        )
-    cursor.execute(
-        f'UPDATE "{table_name}" SET "{status_col}" = ? WHERE "{status_col}" IS NULL OR TRIM("{status_col}") = ""',
-        (default_status,),
-    )
-
-    articles_table = config.get_table_name("articles")
-    cursor.execute(f'PRAGMA table_info("{articles_table}")')
-    art_columns = [row["name"] for row in cursor.fetchall()]
-
-    new_art_cols = {
-        config.get_column("articles", "impact_score"): "REAL",
-        config.get_column("articles", "impact_label"): "TEXT",
-        config.get_column("articles", "ticker"): "TEXT",
-        config.get_column("articles", "instrument_name"): "TEXT",
-    }
-
-    for col, dtype in new_art_cols.items():
-        if col and col not in art_columns:
-            logprint("Migration adding article column", table=articles_table, column=col, dtype=dtype)
-            cursor.execute(f'ALTER TABLE "{articles_table}" ADD COLUMN "{col}" {dtype}')
-
-    themes_table = config.get_table_name("article_themes")
-    articles_id_col = config.get_column("articles", "id")
-    art_id_col = config.get_column("article_themes", "art_id")
-    theme_col = config.get_column("article_themes", "theme")
-    summary_col = config.get_column("article_themes", "summary")
-    analysis_col = config.get_column("article_themes", "analysis")
-
-    cursor.execute(
-        f'''
-        CREATE TABLE IF NOT EXISTS "{themes_table}" (
-            "{art_id_col}" TEXT PRIMARY KEY,
-            "{theme_col}" TEXT,
-            "{summary_col}" TEXT,
-            "{analysis_col}" TEXT,
-            FOREIGN KEY("{art_id_col}") REFERENCES "{articles_table}"("{articles_id_col}")
-        )
-    '''
-    )
-
-    p1_col = config.get_column("article_themes", "p1_prominence")
-    cursor.execute(f'PRAGMA table_info("{themes_table}")')
-    theme_columns = [row["name"] for row in cursor.fetchall()]
-    if p1_col not in theme_columns:
-        logprint("Migration adding p1 prominence column", table=themes_table, column=p1_col)
-        cursor.execute(f'ALTER TABLE "{themes_table}" ADD COLUMN "{p1_col}" TEXT')
-
-    conn.commit()
-    conn.close()
-
-
-run_migrations()
 
 
 app.add_middleware(
@@ -197,4 +136,3 @@ if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
         if path and file_path.exists() and file_path.is_file():
             return FileResponse(file_path)
         return FileResponse(STATIC_DIR / "index.html")
-

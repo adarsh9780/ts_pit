@@ -29,35 +29,32 @@ def _price_cols():
     }
 
 
-def ensure_price_table(cursor):
+def validate_price_schema(cursor):
     c = _price_cols()
-    cursor.execute(
-        f'''
-        CREATE TABLE IF NOT EXISTS "{c["table"]}" (
-            "{c["ticker"]}" TEXT,
-            "{c["date"]}" TEXT,
-            "{c["open"]}" REAL,
-            "{c["high"]}" REAL,
-            "{c["low"]}" REAL,
-            "{c["close"]}" REAL,
-            "{c["volume"]}" INTEGER,
-            "{c["industry"]}" TEXT,
-            PRIMARY KEY ("{c["ticker"]}", "{c["date"]}")
+    cursor.execute(f'PRAGMA table_info("{c["table"]}")')
+    rows = cursor.fetchall()
+    if not rows:
+        raise RuntimeError(
+            f'Missing required table "{c["table"]}". Run schema setup/migrations before using price cache.'
         )
-    '''
-    )
 
-
-def ensure_ohlc_columns(cursor):
-    c = _price_cols()
-    try:
-        cursor.execute(f'ALTER TABLE "{c["table"]}" ADD COLUMN "{c["high"]}" REAL')
-    except Exception:
-        pass
-    try:
-        cursor.execute(f'ALTER TABLE "{c["table"]}" ADD COLUMN "{c["low"]}" REAL')
-    except Exception:
-        pass
+    existing_cols = {row["name"] for row in rows}
+    required_cols = [
+        c["ticker"],
+        c["date"],
+        c["open"],
+        c["high"],
+        c["low"],
+        c["close"],
+        c["volume"],
+        c["industry"],
+    ]
+    missing = [col for col in required_cols if col not in existing_cols]
+    if missing:
+        joined = ", ".join(missing)
+        raise RuntimeError(
+            f'Price table "{c["table"]}" is missing required columns: {joined}.'
+        )
 
 
 def needs_fetch(cursor, ticker: str, start_str: str) -> bool:
@@ -137,4 +134,3 @@ def update_alert_ticker(cursor, old_ticker: str, new_ticker: str, isin: str):
         f'UPDATE "{alerts_table}" SET "{ticker_col_alerts}" = ? WHERE "{isin_col_alerts}" = ? AND "{ticker_col_alerts}" = ?',
         (new_ticker, isin, old_ticker),
     )
-

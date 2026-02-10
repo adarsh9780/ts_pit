@@ -1,8 +1,11 @@
-refactor(backend): modularize alert analysis, routing, and service layers
+refactor(db): add SQLAlchemy schema validation and move alert analysis to dedicated table
 
-- split main API surface into dedicated routers (alerts, market, agent, reports, settings)
-- normalize alert response shape at backend source for consistent frontend consumption
-- refactor alert_analysis into orchestration + dedicated policy/data service modules
-- extract market/price cache provider helpers and keep prices.py as a stable facade
-- wire config-driven loguru logger and remove fallback logging path
-- remove legacy mappings endpoint and clean stale frontend router imports
+- add SQLAlchemy Core db layer (engine, schema contract, startup validator)
+- remove runtime schema mutation from app startup and price cache paths
+- fail fast on startup with explicit missing table/column errors
+- add alert_analysis store service and keep API response shape stable
+- switch summary write path to insert into alert_analysis (no writes to alerts analysis columns)
+- switch alert read paths to merge latest alert_analysis record
+- add migration/backfill utility for alert_analysis table
+- add cleanup utility to remove legacy analysis columns from alerts after transition
+- add agent mode config toggle support and dynamic workflow loading (v1/v2)

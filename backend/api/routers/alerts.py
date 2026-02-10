@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request
@@ -11,6 +10,11 @@ from ...config import get_config
 from ...database import get_db_connection, remap_row
 from ...llm import generate_article_analysis
 from ...logger import logprint
+from ...services.alert_analysis_store import (
+    apply_latest_analysis_to_alert,
+    fetch_latest_analysis_map,
+    insert_alert_analysis,
+)
 from ...services.alert_normalizer import normalize_alert_response
 from ...services.db_helpers import resolve_alert_row
 
@@ -106,13 +110,16 @@ def get_alerts(date: str | None = None):
         cursor.execute(f'SELECT * FROM "{table_name}"')
 
     rows = cursor.fetchall()
-    conn.close()
-
     results = []
     for row in rows:
         remapped = remap_row(dict(row), "alerts")
         results.append(normalize_alert_response(remapped))
-    return results
+
+    latest_map = fetch_latest_analysis_map(
+        conn, [str(item.get("id")) for item in results if item.get("id") is not None]
+    )
+    conn.close()
+    return [apply_latest_analysis_to_alert(item, latest_map) for item in results]
 
 
 @router.patch("/alerts/{alert_id}/status")
@@ -155,23 +162,24 @@ def get_alert_detail(alert_id: str | int):
 
     table_name = config.get_table_name("alerts")
     row, _, _ = resolve_alert_row(cursor, table_name, alert_id)
-    conn.close()
-
     if row is None:
+        conn.close()
         raise HTTPException(status_code=404, detail="Alert not found")
 
     result = remap_row(dict(row), "alerts")
-    return normalize_alert_response(result)
+    normalized = normalize_alert_response(result)
+    latest_map = fetch_latest_analysis_map(
+        conn,
+        [str(normalized.get("id"))] if normalized.get("id") is not None else [],
+    )
+    conn.close()
+    return apply_latest_analysis_to_alert(normalized, latest_map)
 
 
 @router.post("/alerts/{alert_id}/summary")
 def generate_summary(alert_id: str, request: Request):
     conn = get_db_connection()
     try:
-        cursor = conn.cursor()
-        alerts_table = config.get_table_name("alerts")
-        alert_id_col = config.get_column("alerts", "id")
-
         analysis = analyze_alert_non_persisting(
             conn=conn, config=config, alert_id=alert_id, llm=request.app.state.llm
         )
@@ -181,30 +189,24 @@ def generate_summary(alert_id: str, request: Request):
             raise HTTPException(status_code=500, detail=analysis.get("error", "Analysis failed"))
 
         result = analysis["result"]
-        matched_id_col = analysis.get("matched_id_col")
-        matched_id_value = analysis.get("matched_id_value")
+        canonical_alert_id = str(analysis.get("alert_id") or alert_id)
         now_str = datetime.now().isoformat()
-
-        bullish_json = json.dumps(result.get("bullish_events", []))
-        bearish_json = json.dumps(result.get("bearish_events", []))
-        neutral_json = json.dumps(result.get("neutral_events", []))
 
         recommendation = result.get("recommendation", "NEEDS_REVIEW")
         recommendation_reason = result.get("recommendation_reason", "AI analysis completed.")
 
-        cursor.execute(
-            f'UPDATE "{alerts_table}" SET "narrative_theme" = ?, "narrative_summary" = ?, "bullish_events" = ?, "bearish_events" = ?, "neutral_events" = ?, "summary_generated_at" = ?, "recommendation" = ?, "recommendation_reason" = ? WHERE "{matched_id_col or alert_id_col}" = ?',
-            (
-                result["narrative_theme"],
-                result["narrative_summary"],
-                bullish_json,
-                bearish_json,
-                neutral_json,
-                now_str,
-                recommendation,
-                recommendation_reason,
-                matched_id_value if matched_id_col else alert_id,
-            ),
+        insert_alert_analysis(
+            conn,
+            alert_id=canonical_alert_id,
+            generated_at=now_str,
+            source=analysis.get("source", "llm"),
+            narrative_theme=result["narrative_theme"],
+            narrative_summary=result["narrative_summary"],
+            bullish_events=result.get("bullish_events", []),
+            bearish_events=result.get("bearish_events", []),
+            neutral_events=result.get("neutral_events", []),
+            recommendation=recommendation,
+            recommendation_reason=recommendation_reason,
         )
         conn.commit()
 

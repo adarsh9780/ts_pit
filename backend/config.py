@@ -204,6 +204,14 @@ class Config:
         merged.update(cfg)
         return merged
 
+    def get_agent_mode(self) -> str:
+        """Get configured agent runtime mode."""
+        agent_cfg = self._config.get("agent", {})
+        mode = str(agent_cfg.get("mode", "v1")).strip().lower()
+        if mode not in {"v1", "v2"}:
+            raise ValueError("Invalid agent.mode in config.yaml. Expected one of: v1, v2")
+        return mode
+
     def get_impact_label_aliases(self) -> Dict[str, str]:
         """
         Get optional impact-label aliases.

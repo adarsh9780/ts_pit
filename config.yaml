@@ -248,6 +248,14 @@ proxy:
   # This disables SSL verification for external tools (DuckDuckGo, Scraper)
   ssl_verify: true
 
+# Agent Runtime Selection
+# =======================
+# Switch between existing agent runtime implementations.
+# - v1: current production graph (backend/agent)
+# - v2: experimental graph entrypoint (backend/agent_v2)
+agent:
+  mode: "v1"
+
 # Logging Configuration
 # =====================
 logging:
