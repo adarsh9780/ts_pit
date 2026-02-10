@@ -1,10 +1,10 @@
-refactor(agent_v2): simplify safe_py_runner runtime config to manual venv path model
+feat(agent-ui): add collapsible tool traces and LaTeX rendering in chat
 
-- replace `agent_v2.python_exec` with `agent_v2.safe_py_runner`
-- remove auto-creation/install manager options (`venv_manager`, `base_python_executable`, `packages`, etc.)
-- require `safe_py_runner.venv_path` to point to runner Python executable
-- simplify runtime validation to path + required import checks only
-- update agent v2 runtime consumers (`main.py`, `tools.py`, diagnostics script)
-- delete `scripts/setup_safe_py_runner_env.py`
-- update docs (`README.md`, `libs/safe_py_runner/README.md`)
-- remove backward-compat config alias, enforcing single config path
+- stream richer tool telemetry from backend SSE (`tool_start` input preview, `tool_end` output preview, duration)
+- keep artifact-created event behavior intact
+- upgrade chat state to track per-tool execution metadata (id, status, input/output, duration)
+- replace flat tool badges with collapsible per-tool sections showing structured input/output
+- improve tool trace readability with dedicated styling and status metadata
+- add markdown LaTeX support via `marked-katex-extension` + `katex`
+- update frontend dependencies and lockfile
+- verify backend compile and frontend production build

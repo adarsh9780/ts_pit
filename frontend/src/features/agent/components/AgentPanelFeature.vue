@@ -1,6 +1,8 @@
 <script setup>
 import { toRef } from 'vue';
 import { marked } from 'marked';
+import markedKatex from 'marked-katex-extension';
+import 'katex/dist/katex.min.css';
 import ConfirmDialog from '../../../components/ConfirmDialog.vue';
 import { useAgentChat } from '../composables/useAgentChat.js';
 
@@ -11,8 +13,28 @@ renderer.link = ({ href, title, text }) => {
   return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
 };
 marked.use({ renderer });
+marked.use(
+  markedKatex({
+    throwOnError: false,
+    output: 'html',
+  })
+);
 
 const renderMarkdown = (content) => (content ? marked.parse(content) : '');
+const formatToolLabel = (name) => name?.replaceAll('_', ' ') || 'tool';
+const formatDuration = (ms) => {
+  if (typeof ms !== 'number' || Number.isNaN(ms)) return '';
+  if (ms < 1000) return `${ms} ms`;
+  return `${(ms / 1000).toFixed(2)} s`;
+};
+const prettyToolData = (value) => {
+  if (!value) return '';
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2);
+  } catch {
+    return String(value);
+  }
+};
 
 const props = defineProps({ alertId: String });
 defineEmits(['close']);
@@ -96,10 +118,30 @@ const {
           ></div>
 
           <div v-if="msg.tools && msg.tools.length > 0" class="tools-container">
-            <div v-for="tool in msg.tools" :key="tool.name" class="tool-badge">
-              <span class="status-dot" :class="tool.status"></span>
-              {{ tool.name }}
-            </div>
+            <details v-for="tool in msg.tools" :key="tool.id || `${tool.name}-${tool.startedAt || 0}`" class="tool-trace">
+              <summary class="tool-summary">
+                <span class="tool-main">
+                  <span class="status-dot" :class="tool.status"></span>
+                  <span class="tool-name">{{ formatToolLabel(tool.name) }}</span>
+                </span>
+                <span class="tool-meta">
+                  <span class="tool-status">{{ tool.status }}</span>
+                  <span v-if="formatDuration(tool.durationMs)" class="tool-duration">
+                    {{ formatDuration(tool.durationMs) }}
+                  </span>
+                </span>
+              </summary>
+              <div class="tool-body">
+                <div v-if="tool.input" class="tool-section">
+                  <div class="tool-section-title">Input</div>
+                  <pre class="tool-pre">{{ prettyToolData(tool.input) }}</pre>
+                </div>
+                <div v-if="tool.output" class="tool-section">
+                  <div class="tool-section-title">Output</div>
+                  <pre class="tool-pre">{{ prettyToolData(tool.output) }}</pre>
+                </div>
+              </div>
+            </details>
           </div>
         </div>
       </div>
@@ -300,19 +342,82 @@ const {
 .tools-container {
   margin-top: 8px;
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+  flex-direction: column;
+  gap: 6px;
 }
 
-.tool-badge {
-  font-size: 10px;
-  background: rgba(0, 0, 0, 0.05);
-  padding: 2px 6px;
-  border-radius: 4px;
-  color: var(--color-text-muted);
+.tool-trace {
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.02);
+  overflow: hidden;
+}
+
+.tool-summary {
   display: flex;
   align-items: center;
-  gap: 4px;
+  justify-content: space-between;
+  cursor: pointer;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.tool-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tool-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tool-name {
+  font-weight: 600;
+  color: var(--color-text-main);
+  text-transform: capitalize;
+}
+
+.tool-status {
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.03em;
+}
+
+.tool-duration {
+  font-size: 10px;
+  color: var(--color-text-subtle);
+}
+
+.tool-body {
+  border-top: 1px solid var(--color-border);
+  padding: 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.tool-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-subtle);
+  margin-bottom: 4px;
+}
+
+.tool-pre {
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 8px;
+  border-radius: 4px;
+  border: 1px solid var(--color-border);
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 11px;
+  line-height: 1.4;
+  font-family: 'SF Mono', Monaco, Consolas, monospace;
 }
 
 .status-dot {

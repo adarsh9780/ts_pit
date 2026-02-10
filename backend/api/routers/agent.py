@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -131,7 +132,19 @@ Status: {ctx.status or "N/A"}
 
     input_state = {"messages": [("user", enriched_message)]}
 
+    def _safe_preview(value, max_len: int = 2000):
+        if value is None:
+            return None
+        try:
+            text_value = json.dumps(value, default=str)
+        except Exception:
+            text_value = str(value)
+        if len(text_value) > max_len:
+            return text_value[:max_len] + "...(truncated)"
+        return text_value
+
     async def event_generator():
+        tool_started_at: dict[str, float] = {}
         try:
             async for event in agent.astream_events(input_state, run_config, version="v1"):
                 kind = event["event"]
@@ -155,11 +168,19 @@ Status: {ctx.status or "N/A"}
 
                 elif kind == "on_tool_start":
                     tool_name = event["name"]
-                    yield f"data: {json.dumps({'type': 'tool_start', 'tool': tool_name})}\n\n"
+                    tool_started_at[tool_name] = time.time()
+                    tool_input = event.get("data", {}).get("input")
+                    yield (
+                        f"data: {json.dumps({'type': 'tool_start', 'tool': tool_name, 'input': _safe_preview(tool_input)})}\n\n"
+                    )
 
                 elif kind == "on_tool_end":
                     tool_name = event["name"]
                     tool_output = event.get("data", {}).get("output")
+                    duration_ms = None
+                    started = tool_started_at.pop(tool_name, None)
+                    if started is not None:
+                        duration_ms = int((time.time() - started) * 1000)
                     if (
                         tool_name == "generate_current_alert_report"
                         and isinstance(tool_output, str)
@@ -173,7 +194,9 @@ Status: {ctx.status or "N/A"}
                                 )
                         except Exception:
                             pass
-                    yield f"data: {json.dumps({'type': 'tool_end', 'tool': tool_name, 'output': 'Hidden'})}\n\n"
+                    yield (
+                        f"data: {json.dumps({'type': 'tool_end', 'tool': tool_name, 'output': _safe_preview(tool_output), 'duration_ms': duration_ms})}\n\n"
+                    )
 
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
         except Exception as e:
@@ -181,4 +204,3 @@ Status: {ctx.status or "N/A"}
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
-

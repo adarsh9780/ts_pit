@@ -34,6 +34,7 @@ export function useAgentChat(alertIdRef) {
   const isDeleting = ref(false);
 
   let abortController = null;
+  let toolSeq = 0;
 
   const generateGreeting = (info) => {
     if (!info) return 'Hello! I am your Trade Surveillance Assistant. How can I help you investigate this alert?';
@@ -307,12 +308,25 @@ export function useAgentChat(alertIdRef) {
             if (data.type === 'token') {
               messages.value[agentMsgIndex].content += data.content;
             } else if (data.type === 'tool_start') {
-              messages.value[agentMsgIndex].tools.push({ name: data.tool, status: 'running' });
+              toolSeq += 1;
+              messages.value[agentMsgIndex].tools.push({
+                id: `${data.tool}-${toolSeq}`,
+                name: data.tool,
+                status: 'running',
+                input: data.input || null,
+                output: null,
+                durationMs: null,
+                startedAt: Date.now(),
+              });
             } else if (data.type === 'tool_end') {
               const tool = messages.value[agentMsgIndex].tools.find(
                 (t) => t.name === data.tool && t.status === 'running'
               );
-              if (tool) tool.status = 'done';
+              if (tool) {
+                tool.status = 'done';
+                tool.output = data.output || null;
+                tool.durationMs = data.duration_ms ?? (Date.now() - (tool.startedAt || Date.now()));
+              }
             } else if (data.type === 'artifact_created') {
               const relativePath = data.relative_path || data.artifact_name;
               const reportUrl = relativePath && sessionId.value
