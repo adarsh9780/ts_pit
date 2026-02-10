@@ -1,10 +1,12 @@
-feat(agent-ui): add collapsible tool traces and LaTeX rendering in chat
+fix(agent-v2): harden python runner + tool diagnostics and stabilize analysis typing
 
-- stream richer tool telemetry from backend SSE (`tool_start` input preview, `tool_end` output preview, duration)
-- keep artifact-created event behavior intact
-- upgrade chat state to track per-tool execution metadata (id, status, input/output, duration)
-- replace flat tool badges with collapsible per-tool sections showing structured input/output
-- improve tool trace readability with dedicated styling and status metadata
-- add markdown LaTeX support via `marked-katex-extension` + `katex`
-- update frontend dependencies and lockfile
-- verify backend compile and frontend production build
+- make safe_py_runner worker cross-platform by handling missing POSIX `resource` module on Windows
+- improve SSE tool-end normalization/parsing so tool errors are reliably detected and logged
+- expose tool error state in UI (ERROR status, code/message) and auto-expand failed tool traces
+- improve tool trace rendering for long outputs with proper horizontal/vertical scrolling
+- improve execute_python ergonomics:
+  - merge required_imports into allowed_imports policy (except RestrictedPython)
+  - return clearer import-policy error guidance
+  - inject input_data keys as top-level variables for simpler snippets (e.g., `x`)
+- fix LLM summary crash on non-numeric impact_score by using safe numeric parsing before abs()
+- add/keep KaTeX markdown formula rendering and collapsible tool trace UX from prior changes

@@ -432,7 +432,18 @@ def execute_python(code: str, input_data_json: str = "{}") -> str:
         memory_limit_mb=int(cfg.get("memory_limit_mb", 256)),
         cpu_time_seconds=int(cfg.get("cpu_time_seconds", 5)),
         max_output_kb=int(cfg.get("max_output_kb", 128)),
-        allowed_imports=list(cfg.get("allowed_imports", [])),
+        allowed_imports=list(
+            dict.fromkeys(
+                [
+                    *list(cfg.get("allowed_imports", [])),
+                    *[
+                        name
+                        for name in list(cfg.get("required_imports", []))
+                        if str(name).strip() and str(name).strip() != "RestrictedPython"
+                    ],
+                ]
+            )
+        ),
         allowed_builtins=list(cfg.get("allowed_builtins", [])),
         extra_globals={},
     )
@@ -449,8 +460,14 @@ def execute_python(code: str, input_data_json: str = "{}") -> str:
     )
 
     if not result.ok:
+        error_text = result.error or "Python execution failed"
+        if "is not allowed" in error_text and "Import '" in error_text:
+            error_text = (
+                f"{error_text}. Add this module to "
+                "agent_v2.safe_py_runner.allowed_imports in config.yaml."
+            )
         return _error(
-            result.error or "Python execution failed",
+            error_text,
             code="PYTHON_EXEC_ERROR",
             timed_out=result.timed_out,
             resource_exceeded=result.resource_exceeded,

@@ -20,6 +20,36 @@ from RestrictedPython.Guards import (
 )
 
 
+def _inject_input_keys(exec_globals: dict[str, Any], input_data: Any) -> None:
+    """
+    Convenience: expose input_data keys as top-level variables when safe.
+
+    Example: input_data={"x": 9} enables user code `result = x ** 0.5`.
+    """
+    if not isinstance(input_data, dict):
+        return
+    reserved = {
+        "__builtins__",
+        "input_data",
+        "result",
+        "_print_",
+        "_getattr_",
+        "_write_",
+        "_getiter_",
+        "_getitem_",
+        "_iter_unpack_sequence_",
+        "_unpack_sequence_",
+    }
+    for key, value in input_data.items():
+        key_str = str(key)
+        if not key_str.isidentifier():
+            continue
+        if key_str in reserved or key_str.startswith("_"):
+            continue
+        if key_str not in exec_globals:
+            exec_globals[key_str] = value
+
+
 def _set_limits(memory_limit_mb: int, cpu_time_seconds: int) -> list[str]:
     errors: list[str] = []
     if resource is None:
@@ -116,6 +146,7 @@ def main() -> int:
             "_unpack_sequence_": guarded_unpack_sequence,
         }
         exec_globals.update(extra_globals)
+        _inject_input_keys(exec_globals, input_data)
 
         stdout_buffer = io.StringIO()
         stderr_buffer = io.StringIO()

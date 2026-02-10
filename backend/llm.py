@@ -168,7 +168,7 @@ def generate_cluster_summary(
     filtered_articles = []
     for a in articles:
         mat = a.get("materiality", "")
-        impact = a.get("impact_score") or 0.0
+        impact = _safe_abs_impact(a.get("impact_score"))
 
         # Logic: High Materiality Component OR High Z-Score (> 2.0)
         if "H" in mat or abs(impact) >= 2.0:
@@ -301,3 +301,8 @@ def generate_article_analysis(
     except Exception as e:
         print(f"LLM Analysis Error: {e}")
         return {"theme": "Error", "summary": None, "analysis": str(e)}
+    def _safe_abs_impact(value) -> float:
+        try:
+            return abs(float(value))
+        except (TypeError, ValueError):
+            return 0.0
