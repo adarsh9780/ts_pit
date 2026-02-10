@@ -38,11 +38,11 @@ For production use with hostile inputs, pair this with container/namespace isola
 
 ## Project Integration (ts_pit)
 
-Use the project setup script to provision the isolated runner venv:
+Create and manage the runner environment externally (venv/uv/poetry/conda), then
+point `agent_v2.safe_py_runner.venv_path` in `config.yaml` to the runner Python executable.
+
+Use this diagnostic command to validate runtime path and required imports:
 
 ```bash
-uv run python scripts/setup_safe_py_runner_env.py
+uv run python scripts/check_safe_py_runner_env.py
 ```
-
-It reads `agent_v2.python_exec` from `config.yaml` and installs packages listed in
-`agent_v2.python_exec.packages` into the runner venv.

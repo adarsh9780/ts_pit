@@ -74,7 +74,7 @@ async def lifespan(app: FastAPI):
     app.state.llm = get_llm_model()
 
     if config.get_agent_mode() == "v2":
-        py_exec_cfg = config.get_agent_v2_python_exec_config()
+        py_exec_cfg = config.get_agent_v2_safe_py_runner_config()
         if py_exec_cfg.get("enabled", False):
             py_exec_path = ensure_python_runtime(py_exec_cfg)
             logprint(

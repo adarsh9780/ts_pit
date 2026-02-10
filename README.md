@@ -82,39 +82,28 @@ uv run python -m unittest discover -s tests -p 'test_*.py'
 
 `execute_python` in `agent_v2` uses a separate interpreter so data-science packages stay out of the main app environment.
 
-1. Configure packages in `config.yaml`:
+1. Configure runner executable path in `config.yaml`:
 
 ```yaml
 agent_v2:
-  python_exec:
+  safe_py_runner:
     enabled: true
-    venv_path: "~/.ts_pit/safe_py_runner/.venv"
-    auto_create_venv: false
-    packages:
-      - numpy
-      - pandas
-      - polars
-      - duckdb
-      - scikit-learn
-      - statsmodels
-      - plotly
+    # Windows/VDI example:
+    # venv_path: "C:/Users/<you>/ds/.virtualenvs/safe_py_runner/.venv/Scripts/python.exe"
+    # Linux/macOS example:
+    # venv_path: "~/.ts_pit/safe_py_runner/.venv/bin/python"
+    venv_path: "~/.ts_pit/safe_py_runner/.venv/bin/python"
+    required_imports:
+      - RestrictedPython
 ```
 
-2. One-liner setup:
-
-```bash
-uv run python scripts/setup_safe_py_runner_env.py
-```
-
-This creates/updates the isolated runner venv and installs the configured `packages` there.
-
-3. Health check:
+2. Health check:
 
 ```bash
 uv run python scripts/check_safe_py_runner_env.py
 ```
 
-This prints runtime diagnostics (manager, discovered interpreter, runner path, import validation)
+This prints runtime diagnostics (runner path + import validation)
 and exits non-zero if the runner environment is not ready.
 
 ## Configuration

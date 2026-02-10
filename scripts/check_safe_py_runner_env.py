@@ -14,7 +14,7 @@ from backend.config import get_config
 
 
 def main() -> int:
-    cfg = get_config().get_agent_v2_python_exec_config()
+    cfg = get_config().get_agent_v2_safe_py_runner_config()
     diagnostics = get_runtime_diagnostics(cfg)
     print(json.dumps(diagnostics, indent=2))
 

@@ -413,10 +413,10 @@ def execute_python(code: str, input_data_json: str = "{}") -> str:
     - Assign final output to variable `result`.
     - Optional prints are captured in stdout.
     """
-    cfg = get_config().get_agent_v2_python_exec_config()
+    cfg = get_config().get_agent_v2_safe_py_runner_config()
     if not cfg.get("enabled", False):
         return _error(
-            "execute_python is disabled. Enable agent_v2.python_exec.enabled in config.yaml.",
+            "execute_python is disabled. Enable agent_v2.safe_py_runner.enabled in config.yaml.",
             code="PYTHON_EXEC_DISABLED",
         )
 

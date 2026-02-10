@@ -1,15 +1,10 @@
-feat(agent_v2): add planner-router agent, generic filesystem tools, and robust python runtime manager
+refactor(agent_v2): simplify safe_py_runner runtime config to manual venv path model
 
-- implement planner -> context-loader -> direct/agent routing flow in agent_v2 graph
-- add dynamic per-turn tool gating via TOOL_REGISTRY + active_tool_names
-- replace KB-specific tools with generic file tools: list_files/read_file/write_file
-- enforce config-driven filesystem policy (allowed_dirs, depth, read/write extensions, max bytes)
-- keep report generation tool available in v2 (`generate_current_alert_report`)
-- add web search tooling split (`search_web`, `search_web_news`, optional `scrape_websites`)
-- integrate `execute_python` using local `safe-py-runner` package
-- scaffold reusable `libs/safe_py_runner` package (policy/runner/worker + docs + tests)
-- add cross-platform runtime resolver for python exec (Windows/Linux/macOS interpreter paths)
-- add structured runtime config: venv_manager, base_python_executable, interpreter discovery candidates
-- add startup/runtime import validation (`required_imports`) and package bootstrap/repair flow
-- add setup utility `scripts/setup_safe_py_runner_env.py` and health check `scripts/check_safe_py_runner_env.py`
-- update config and README for isolated agent runtime and diagnostics workflow
+- replace `agent_v2.python_exec` with `agent_v2.safe_py_runner`
+- remove auto-creation/install manager options (`venv_manager`, `base_python_executable`, `packages`, etc.)
+- require `safe_py_runner.venv_path` to point to runner Python executable
+- simplify runtime validation to path + required import checks only
+- update agent v2 runtime consumers (`main.py`, `tools.py`, diagnostics script)
+- delete `scripts/setup_safe_py_runner_env.py`
+- update docs (`README.md`, `libs/safe_py_runner/README.md`)
+- remove backward-compat config alias, enforcing single config path

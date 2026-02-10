@@ -212,17 +212,12 @@ class Config:
             raise ValueError("Invalid agent.mode in config.yaml. Expected one of: v1, v2")
         return mode
 
-    def get_agent_v2_python_exec_config(self) -> Dict[str, Any]:
-        """Get execute_python policy config for agent v2."""
-        default_interpreter_candidates = (
-            ["py", "python", "python3"]
-            if os.name == "nt"
-            else ["python3", "python", "py"]
-        )
+    def get_agent_v2_safe_py_runner_config(self) -> Dict[str, Any]:
+        """Get safe_py_runner policy config for agent v2."""
         default_venv_path = (
-            "~/ds/.virtualenvs/safe_py_runner/.venv"
+            "~/ds/.virtualenvs/safe_py_runner/.venv/Scripts/python.exe"
             if os.name == "nt"
-            else "~/.ts_pit/safe_py_runner/.venv"
+            else "~/.ts_pit/safe_py_runner/.venv/bin/python"
         )
         defaults: Dict[str, Any] = {
             "enabled": False,
@@ -231,12 +226,6 @@ class Config:
             "cpu_time_seconds": 5,
             "max_output_kb": 128,
             "venv_path": default_venv_path,
-            "venv_manager": "python_venv",
-            "python_executable": "",
-            "base_python_executable": "",
-            "interpreter_candidates": default_interpreter_candidates,
-            "auto_create_venv": False,
-            "packages": [],
             "required_imports": ["RestrictedPython"],
             "allowed_imports": ["math", "statistics", "json"],
             "allowed_builtins": [
@@ -263,7 +252,7 @@ class Config:
                 "zip",
             ],
         }
-        cfg = self._config.get("agent_v2", {}).get("python_exec", {})
+        cfg = self._config.get("agent_v2", {}).get("safe_py_runner", {})
         if not isinstance(cfg, dict):
             return defaults
         merged = dict(defaults)

@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -18,178 +16,24 @@ def _venv_python_path(venv_dir: Path) -> Path:
     return venv_dir / "bin" / "python"
 
 
-def _resolve_executable_path(value: str) -> Path | None:
-    raw = str(value or "").strip()
-    if not raw:
-        return None
-    expanded = os.path.expandvars(os.path.expanduser(raw))
-    candidate = Path(expanded)
-    if candidate.is_absolute() and candidate.exists():
-        return candidate.resolve()
-    found = shutil.which(expanded)
-    if found:
-        return Path(found).resolve()
-    return None
-
-
-def _canonicalize_interpreter(path_value: Path) -> Path:
-    try:
-        proc = subprocess.run(
-            [str(path_value), "-c", "import sys;print(sys.executable)"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        out = (proc.stdout or "").strip()
-        if out:
-            return Path(out).resolve()
-    except Exception:
-        pass
-    return path_value.resolve()
-
-
-def _discover_windows_launcher_interpreter() -> Path | None:
-    """
-    Resolve interpreter via the Windows `py` launcher when available.
-
-    This avoids accidentally using the currently activated project venv
-    interpreter as the base runtime for creating another venv.
-    """
-    if os.name != "nt":
-        return None
-    py_launcher = shutil.which("py")
-    if not py_launcher:
-        return None
-    for flag in ("-3", ""):
-        cmd = [py_launcher]
-        if flag:
-            cmd.append(flag)
-        cmd.extend(["-c", "import sys;print(sys.executable)"])
-        try:
-            proc = subprocess.run(
-                cmd,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            out = (proc.stdout or "").strip()
-            if out:
-                path = Path(out).resolve()
-                if path.exists():
-                    return path
-        except Exception:
-            continue
-    return None
-
-
-def _discover_base_interpreter(exec_cfg: dict[str, Any]) -> Path:
-    explicit_base = _resolve_executable_path(str(exec_cfg.get("base_python_executable", "")))
-    if explicit_base:
-        return _canonicalize_interpreter(explicit_base)
-
-    explicit_runtime = _resolve_executable_path(str(exec_cfg.get("python_executable", "")))
-    if explicit_runtime:
-        return _canonicalize_interpreter(explicit_runtime)
-
-    windows_launcher = _discover_windows_launcher_interpreter()
-    if windows_launcher is not None:
-        return windows_launcher
-
-    candidates = exec_cfg.get("interpreter_candidates", ["python3", "python", "py"])
-    for name in candidates:
-        found = _resolve_executable_path(str(name))
-        if found:
-            return _canonicalize_interpreter(found)
-
-    return _canonicalize_interpreter(Path(sys.executable))
-
-
 def resolve_python_executable(exec_cfg: dict[str, Any]) -> Path:
-    explicit = str(exec_cfg.get("python_executable", "")).strip()
-    if explicit:
-        resolved = _resolve_executable_path(explicit)
-        if resolved is None:
-            raise RuntimeError(f"Configured python_executable not found: {explicit}")
-        return _canonicalize_interpreter(resolved)
+    """
+    Resolve runner python executable from config.
 
+    `venv_path` is expected to point directly to the python executable.
+    For convenience, if a directory is provided we map it to venv python path.
+    """
     venv_path = str(exec_cfg.get("venv_path", "")).strip()
     if not venv_path:
         raise RuntimeError(
-            "agent_v2.python_exec requires either python_executable or venv_path in config.yaml"
+            "agent_v2.safe_py_runner.venv_path is required and must point to "
+            "the runner python executable."
         )
-    venv_dir = _expand_path(venv_path)
-    return _venv_python_path(venv_dir)
 
-
-def _create_venv(venv_dir: Path, base_interpreter: Path, manager: str) -> None:
-    venv_dir.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        manager_value = str(manager or "python_venv").strip().lower()
-        if manager_value == "uv_venv":
-            subprocess.run(
-                ["uv", "venv", str(venv_dir), "--python", str(base_interpreter)],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-        else:
-            subprocess.run(
-                [str(base_interpreter), "-m", "venv", str(venv_dir)],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-    except subprocess.CalledProcessError as e:
-        stderr_text = (e.stderr or "").strip()
-        stdout_text = (e.stdout or "").strip()
-        details = stderr_text or stdout_text or str(e)
-        hint = ""
-        if os.name == "nt":
-            hint = (
-                " On Windows VDI, set `agent_v2.python_exec.venv_path` to a permitted "
-                "location such as `~/ds/.virtualenvs/safe_py_runner/.venv` and set "
-                "`agent_v2.python_exec.base_python_executable` to an approved system "
-                "Python executable."
-            )
-        raise RuntimeError(
-            f"Failed to create venv at {venv_dir} using manager='{manager}': {details}.{hint}"
-        ) from e
-
-
-def _install_packages(python_executable: Path, packages: list[str]) -> None:
-    if not packages:
-        return
-    try:
-        subprocess.run(
-            [str(python_executable), "-m", "pip", "install", *packages],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except subprocess.CalledProcessError as e:
-        stderr_text = (e.stderr or "").strip()
-        stdout_text = (e.stdout or "").strip()
-        details = stderr_text or stdout_text or str(e)
-        raise RuntimeError(
-            f"Failed to install packages into {python_executable}: {details}"
-        ) from e
-
-
-def _build_install_package_list(exec_cfg: dict[str, Any]) -> list[str]:
-    # Runner worker depends on RestrictedPython at minimum.
-    base_packages = ["RestrictedPython"]
-    configured = [str(p).strip() for p in (exec_cfg.get("packages") or []) if str(p).strip()]
-    merged = base_packages + configured
-    # preserve order, drop duplicates
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for pkg in merged:
-        key = pkg.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(pkg)
-    return deduped
+    candidate = _expand_path(venv_path)
+    if candidate.is_dir():
+        candidate = _venv_python_path(candidate)
+    return candidate
 
 
 def _validate_required_imports(python_executable: Path, required_imports: list[str]) -> None:
@@ -219,9 +63,7 @@ def _validate_required_imports(python_executable: Path, required_imports: list[s
         if os.name == "nt" and getattr(e, "winerror", None) == 1260:
             hint = (
                 " Group policy blocked launching this interpreter. "
-                "Use a permitted venv location (for example "
-                "`~/ds/.virtualenvs/safe_py_runner/.venv`) and an approved "
-                "`base_python_executable`."
+                "Use a permitted path under your allowed VDI folder."
             )
         raise RuntimeError(
             f"Failed import validation in runtime {python_executable}: {e}.{hint}"
@@ -230,7 +72,8 @@ def _validate_required_imports(python_executable: Path, required_imports: list[s
     if proc.returncode != 0:
         stderr_text = (proc.stderr or "").strip()
         raise RuntimeError(
-            f"Failed import validation in runtime {python_executable}: {stderr_text or proc.returncode}"
+            f"Failed import validation in runtime {python_executable}: "
+            f"{stderr_text or proc.returncode}"
         )
     if missing_raw:
         raise RuntimeError(
@@ -242,19 +85,8 @@ def _validate_required_imports(python_executable: Path, required_imports: list[s
 def get_runtime_diagnostics(exec_cfg: dict[str, Any]) -> dict[str, Any]:
     """Return runtime diagnostics for troubleshooting setup issues."""
     diagnostics: dict[str, Any] = {}
-    diagnostics["venv_manager"] = str(exec_cfg.get("venv_manager", "python_venv"))
-    diagnostics["venv_path"] = str(exec_cfg.get("venv_path", ""))
-    diagnostics["python_executable_config"] = str(exec_cfg.get("python_executable", ""))
-    diagnostics["base_python_executable_config"] = str(exec_cfg.get("base_python_executable", ""))
-    diagnostics["interpreter_candidates"] = list(exec_cfg.get("interpreter_candidates", []))
-    diagnostics["auto_create_venv"] = bool(exec_cfg.get("auto_create_venv", False))
+    diagnostics["venv_path_config"] = str(exec_cfg.get("venv_path", ""))
     diagnostics["required_imports"] = list(exec_cfg.get("required_imports", []))
-
-    try:
-        base = _discover_base_interpreter(exec_cfg)
-        diagnostics["base_interpreter"] = str(base)
-    except Exception as e:
-        diagnostics["base_interpreter_error"] = str(e)
 
     try:
         runtime = resolve_python_executable(exec_cfg)
@@ -274,44 +106,15 @@ def get_runtime_diagnostics(exec_cfg: dict[str, Any]) -> dict[str, Any]:
 
 
 def ensure_python_runtime(exec_cfg: dict[str, Any]) -> Path:
-    """
-    Validate python runtime for execute_python.
-
-    Behavior:
-    - If python_executable exists -> use it.
-    - Else if auto_create_venv=true and venv_path is set -> create venv (+ optional packages).
-    - Else fail fast with clear setup instructions.
-    """
+    """Validate configured runtime path and required imports."""
     py_exec = resolve_python_executable(exec_cfg)
-    if py_exec.exists():
-        try:
-            _validate_required_imports(py_exec, list(exec_cfg.get("required_imports", [])))
-        except RuntimeError:
-            if not bool(exec_cfg.get("auto_create_venv", False)):
-                raise
-            _install_packages(py_exec, _build_install_package_list(exec_cfg))
-            _validate_required_imports(py_exec, list(exec_cfg.get("required_imports", [])))
-        return py_exec
-
-    auto_create = bool(exec_cfg.get("auto_create_venv", False))
-    venv_path_raw = str(exec_cfg.get("venv_path", "")).strip()
-    if auto_create and venv_path_raw:
-        venv_dir = _expand_path(venv_path_raw)
-        manager = str(exec_cfg.get("venv_manager", "python_venv"))
-        base_interpreter = _discover_base_interpreter(exec_cfg)
-        _create_venv(venv_dir, base_interpreter=base_interpreter, manager=manager)
-        py_exec = _venv_python_path(venv_dir)
-        _install_packages(py_exec, _build_install_package_list(exec_cfg))
-        _validate_required_imports(py_exec, list(exec_cfg.get("required_imports", [])))
-        return py_exec
-
-    base_hint = _discover_base_interpreter(exec_cfg)
-    raise RuntimeError(
-        "agent_v2 python runtime not found.\n"
-        f"Expected interpreter: {py_exec}\n"
-        "Set agent_v2.python_exec.python_executable OR agent_v2.python_exec.venv_path.\n"
-        "Recommended setup:\n"
-        f"  {base_hint} -m venv {py_exec.parent.parent}\n"
-        f"  {py_exec} -m pip install -U pip RestrictedPython\n"
-        "Then set agent_v2.python_exec.enabled=true and restart backend."
-    )
+    if not py_exec.exists() or not py_exec.is_file():
+        raise RuntimeError(
+            "agent_v2.safe_py_runner runtime not found.\n"
+            f"Configured executable: {py_exec}\n"
+            "Create/setup your runner environment externally and set "
+            "`agent_v2.safe_py_runner.venv_path` to its python executable path.\n"
+            "Then restart backend."
+        )
+    _validate_required_imports(py_exec, list(exec_cfg.get("required_imports", [])))
+    return py_exec
