@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from .database import get_db_connection
 from .logger import logprint
 from .services.market_provider import (
     fetch_industry,
@@ -32,8 +31,7 @@ def fetch_and_cache_prices(
     """
     start_str, end_str = resolve_period_window(period, custom_start, custom_end)
 
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    cursor = None
     validate_price_schema(cursor)
 
     should_fetch = needs_fetch(cursor, ticker, start_str)
@@ -44,7 +42,6 @@ def fetch_and_cache_prices(
             ticker=ticker,
         )
         clear_ticker_prices(cursor, ticker)
-        conn.commit()
         should_fetch = True
 
     if should_fetch:
@@ -66,8 +63,6 @@ def fetch_and_cache_prices(
                             isin=isin,
                         )
                         update_alert_ticker(cursor, ticker, new_ticker, isin)
-                        conn.commit()
-                        conn.close()
                         return fetch_and_cache_prices(
                             new_ticker, period, custom_start, custom_end, is_etf
                         )
@@ -75,9 +70,7 @@ def fetch_and_cache_prices(
             if not hist.empty:
                 industry = fetch_industry(ticker, is_etf)
                 upsert_price_rows(cursor, ticker, hist, industry)
-                conn.commit()
         except Exception as e:
             logprint("Price fetch/cache failed", level="ERROR", ticker=ticker, error=str(e))
 
-    conn.close()
     return start_str, ticker

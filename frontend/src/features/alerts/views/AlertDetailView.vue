@@ -575,22 +575,22 @@ const prepareChartData = () => {
     const labels = tickerPrices.map(p => p.date);
     
     // Prepare ticker data - actual close prices (not rebased)
-    const tickerData = tickerPrices.map(p => p.close);
+    const tickerData = tickerPrices.map(p => Number(p.close));
     
     // Prepare volume data (for tooltip, not bars)
-    const volumeData = tickerPrices.map(p => p.volume || 0);
+    const volumeData = tickerPrices.map(p => Number(p.volume || 0));
     
     // Prepare candlestick OHLC data - format: [open, close, low, high]
     const candlestickData = tickerPrices.map(p => [
-        p.open ?? p.close,
-        p.close,
-        p.low ?? Math.min(p.open || p.close, p.close),
-        p.high ?? Math.max(p.open || p.close, p.close)
+        Number(p.open ?? p.close),
+        Number(p.close),
+        Number(p.low ?? Math.min(p.open || p.close, p.close)),
+        Number(p.high ?? Math.max(p.open || p.close, p.close))
     ]);
     
     // Map for quick lookups
     const tickerMap = new Map();
-    tickerPrices.forEach(p => tickerMap.set(p.date, p.close));
+    tickerPrices.forEach(p => tickerMap.set(p.date, Number(p.close)));
 
     // Prepare rebased ticker data (rebased to 100 for comparison with industry)
     const tickerStart = tickerPrices[0].close;
@@ -605,12 +605,12 @@ const prepareChartData = () => {
 
         industryData = labels.map(date => {
             const val = indMap.get(date);
-            return val ?? null;  // Actual price
+            return val != null ? Number(val) : null;  // Actual price
         });
         
         industryRebasedData = labels.map(date => {
             const val = indMap.get(date);
-            return val ? (val / industryStart) * 100 : null;  // Rebased to 100
+            return val ? (Number(val) / Number(industryStart)) * 100 : null;  // Rebased to 100
         });
     }
 
@@ -827,12 +827,16 @@ const tableData = computed(() => {
 
 const loadData = async () => {
     if (!props.alertId) return;
-    const bundle = await detailApi.loadAlertBundle(props.alertId, selectedPeriod.value);
-    if (!bundle) return;
-    alertData.value = bundle.alert;
-    prices.value = bundle.prices;
-    news.value = bundle.news;
-    prepareChartData();
+    try {
+        const bundle = await detailApi.loadAlertBundle(props.alertId, selectedPeriod.value);
+        if (!bundle) return;
+        alertData.value = bundle.alert;
+        prices.value = bundle.prices;
+        news.value = bundle.news;
+        prepareChartData();
+    } catch (error) {
+        console.error('Error loading alert bundle:', error);
+    }
 };
 
 const captureCurrentChartImage = () => {

@@ -14,11 +14,11 @@ from .services.alert_analysis_policy import (
 
 
 def analyze_alert_non_persisting(conn, config, alert_id: str | int, llm):
-    cursor = conn.cursor()
+    _ = conn
     alerts_table = config.get_table_name("alerts")
     alert, matched_id_col, matched_id_value = resolve_alert_row(
         config,
-        cursor,
+        None,
         alerts_table,
         alert_id,
     )
@@ -32,8 +32,8 @@ def analyze_alert_non_persisting(conn, config, alert_id: str | int, llm):
     end_date = alert[end_col]
     trade_type = alert[trade_type_col] if trade_type_col in alert.keys() else None
 
-    price_history = build_price_history(config, cursor, alert)
-    articles = build_alert_articles(config, cursor, alert, start_date, end_date)
+    price_history = build_price_history(config, None, alert)
+    articles = build_alert_articles(config, None, alert, start_date, end_date)
     deterministic_result, llm_articles = run_deterministic_summary_gates(
         config=config,
         alert=alert,
@@ -100,9 +100,9 @@ def get_current_alert_news_non_persisting(
     alert_id: str | int,
     limit: int = 50,
 ):
-    cursor = conn.cursor()
+    _ = conn
     alerts_table = config.get_table_name("alerts")
-    alert, _, _ = resolve_alert_row(config, cursor, alerts_table, alert_id)
+    alert, _, _ = resolve_alert_row(config, None, alerts_table, alert_id)
     if not alert:
         return {"ok": False, "error": "Alert not found"}
 
@@ -110,7 +110,7 @@ def get_current_alert_news_non_persisting(
     end_col = config.get_column("alerts", "end_date")
     start_date = alert[start_col]
     end_date = alert[end_col]
-    articles = build_alert_articles(config, cursor, alert, start_date, end_date)
+    articles = build_alert_articles(config, None, alert, start_date, end_date)
     return {
         "ok": True,
         "articles": articles[: max(1, min(int(limit), 200))],

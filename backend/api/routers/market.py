@@ -2,17 +2,21 @@ from __future__ import annotations
 
 import yfinance as yf
 from fastapi import APIRouter, Query
+from sqlalchemy import Text, and_, cast, desc, select
 
 from ...config import get_config
-from ...database import get_db_connection, remap_row
+from ...database import remap_row
+from ...db import get_engine
 from ...logger import logprint
 from ...prices import fetch_and_cache_prices
 from ...scoring import calculate_p2, calculate_p3
 from ...services.alert_normalizer import normalize_impact_label
+from ...services.db_helpers import get_table
 
 
 router = APIRouter(tags=["market"])
 config = get_config()
+engine = get_engine()
 
 
 @router.get("/prices/{ticker}")
@@ -29,26 +33,31 @@ def get_prices(
     else:
         start_date_str, actual_ticker = fetch_and_cache_prices(ticker, period or "1y")
 
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
     table_name = config.get_table_name("prices")
+    prices_table = get_table(table_name)
     ticker_col = config.get_column("prices", "ticker")
     date_col = config.get_column("prices", "date")
-
-    query = (
-        f'SELECT * FROM "{table_name}" WHERE "{ticker_col}" = ? AND "{date_col}" >= ? '
+    price_select_cols = [
+        cast(prices_table.c[col.name], Text).label(col.name)
+        if col.name == date_col
+        else prices_table.c[col.name]
+        for col in prices_table.columns
+    ]
+    stmt = (
+        select(*price_select_cols)
+        .where(
+            and_(
+                prices_table.c[ticker_col] == str(actual_ticker),
+                prices_table.c[date_col] >= str(start_date_str),
+            )
+        )
+        .order_by(prices_table.c[date_col].asc())
     )
-    params = [actual_ticker, start_date_str]
-
     if end_date:
-        query += f'AND "{date_col}" <= ? '
-        params.append(end_date)
+        stmt = stmt.where(prices_table.c[date_col] <= str(end_date))
 
-    query += f'ORDER BY "{date_col}" ASC'
-    cursor.execute(query, tuple(params))
-    rows = cursor.fetchall()
-    conn.close()
+    with engine.connect() as conn:
+        rows = conn.execute(stmt).mappings().all()
 
     ticker_data = [remap_row(dict(row), "prices") for row in rows]
 
@@ -82,20 +91,21 @@ def get_prices(
             else:
                 fetch_and_cache_prices(etf_ticker, period, is_etf=True)
 
-            conn = get_db_connection()
-            cursor = conn.cursor()
-
-            query_etf = f'SELECT * FROM "{table_name}" WHERE "{ticker_col}" = ? AND "{date_col}" >= ? '
-            params_etf = [etf_ticker, start_date_str]
-
+            stmt_etf = (
+                select(*price_select_cols)
+                .where(
+                    and_(
+                        prices_table.c[ticker_col] == str(etf_ticker),
+                        prices_table.c[date_col] >= str(start_date_str),
+                    )
+                )
+                .order_by(prices_table.c[date_col].asc())
+            )
             if end_date:
-                query_etf += f'AND "{date_col}" <= ? '
-                params_etf.append(end_date)
+                stmt_etf = stmt_etf.where(prices_table.c[date_col] <= str(end_date))
 
-            query_etf += f'ORDER BY "{date_col}" ASC'
-            cursor.execute(query_etf, tuple(params_etf))
-            etf_rows = cursor.fetchall()
-            conn.close()
+            with engine.connect() as conn:
+                etf_rows = conn.execute(stmt_etf).mappings().all()
 
             industry_data = [remap_row(dict(row), "prices") for row in etf_rows]
 
@@ -112,14 +122,13 @@ def get_news(
     start_date: str | None = None,
     end_date: str | None = None,
 ):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
     table_name = config.get_table_name("articles")
+    articles = get_table(table_name)
     isin_col = config.get_column("articles", "isin")
     date_col = config.get_column("articles", "created_date")
 
     themes_table = config.get_table_name("article_themes")
+    themes = get_table(themes_table)
     art_id_col = config.get_column("articles", "id")
     theme_art_id_col = config.get_column("article_themes", "art_id")
     ai_theme_col = config.get_column("article_themes", "theme")
@@ -129,32 +138,30 @@ def get_news(
 
     original_theme_col = config.get_column("articles", "theme")
     original_summary_col = config.get_column("articles", "summary")
-    query = f'''
-        SELECT 
-            a.*,
-            a."{original_theme_col}" as original_theme,
-            a."{original_summary_col}" as original_summary,
-            t."{ai_theme_col}" as ai_theme,
-            t."{ai_summary_col}" as ai_summary,
-            t."{ai_analysis_col}" as ai_analysis,
-            t."{ai_p1_col}" as ai_p1
-        FROM "{table_name}" a
-        LEFT JOIN "{themes_table}" t ON a."{art_id_col}" = t."{theme_art_id_col}"
-        WHERE a."{isin_col}" = ?
-    '''
-    params = [isin]
-
+    article_cols = [cast(articles.c[col.name], Text).label(col.name) for col in articles.columns]
+    stmt = (
+        select(
+            *article_cols,
+            cast(articles.c[original_theme_col], Text).label("original_theme"),
+            cast(articles.c[original_summary_col], Text).label("original_summary"),
+            cast(themes.c[ai_theme_col], Text).label("ai_theme"),
+            cast(themes.c[ai_summary_col], Text).label("ai_summary"),
+            cast(themes.c[ai_analysis_col], Text).label("ai_analysis"),
+            cast(themes.c[ai_p1_col], Text).label("ai_p1"),
+        )
+        .select_from(
+            articles.outerjoin(themes, articles.c[art_id_col] == themes.c[theme_art_id_col])
+        )
+        .where(articles.c[isin_col] == str(isin))
+        .order_by(desc(articles.c[date_col]))
+    )
     if start_date:
-        query += f' AND "{date_col}" >= ?'
-        params.append(start_date)
-
+        stmt = stmt.where(articles.c[date_col] >= str(start_date))
     if end_date:
-        query += f' AND "{date_col}" <= ?'
-        params.append(end_date)
+        stmt = stmt.where(articles.c[date_col] <= str(end_date))
 
-    query += f' ORDER BY "{date_col}" DESC'
-    cursor.execute(query, params)
-    rows = cursor.fetchall()
+    with engine.connect() as conn:
+        rows = conn.execute(stmt).mappings().all()
 
     mat_score_map = {"H": 3, "M": 2, "L": 1}
     results = []
@@ -191,11 +198,8 @@ def get_news(
         remapped["_sort_score"] = sort_score
         results.append(remapped)
 
-    conn.close()
-
     results.sort(key=lambda x: (x["_sort_score"], x["created_date"]), reverse=True)
     for res in results:
         del res["_sort_score"]
 
     return results
-

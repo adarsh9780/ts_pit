@@ -4,10 +4,12 @@ from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
+from sqlalchemy import MetaData, Table, Text, cast, select, update
 
 from ...alert_analysis import analyze_alert_non_persisting
 from ...config import get_config
 from ...database import get_db_connection, remap_row
+from ...db import get_engine
 from ...llm import generate_article_analysis
 from ...logger import logprint
 from ...services.alert_analysis_store import (
@@ -21,6 +23,18 @@ from ...services.db_helpers import resolve_alert_row
 
 router = APIRouter(tags=["alerts"])
 config = get_config()
+engine = get_engine()
+metadata = MetaData()
+_table_cache: dict[str, Table] = {}
+
+
+def _table(table_name: str) -> Table:
+    cached = _table_cache.get(table_name)
+    if cached is not None:
+        return cached
+    reflected = Table(table_name, metadata, autoload_with=engine)
+    _table_cache[table_name] = reflected
+    return reflected
 
 
 class StatusUpdate(BaseModel):
@@ -29,19 +43,15 @@ class StatusUpdate(BaseModel):
 
 @router.post("/articles/{id}/analyze")
 def analyze_article(id: str, request: Request):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
     articles_table = config.get_table_name("articles")
     article_id_col = config.get_column("articles", "id")
-
-    cursor.execute(
-        f'SELECT * FROM "{articles_table}" WHERE "{article_id_col}" = ?', (id,)
-    )
-    row = cursor.fetchone()
+    articles = _table(articles_table)
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(articles).where(articles.c[article_id_col] == id).limit(1)
+        ).mappings().first()
 
     if not row:
-        conn.close()
         raise HTTPException(status_code=404, detail="Article not found")
 
     article = dict(row)
@@ -56,7 +66,6 @@ def analyze_article(id: str, request: Request):
     )
 
     if analysis_result.get("theme") == "Error":
-        conn.close()
         raise HTTPException(status_code=500, detail=analysis_result.get("analysis"))
 
     themes_table = config.get_table_name("article_themes")
@@ -64,61 +73,63 @@ def analyze_article(id: str, request: Request):
     theme_col = config.get_column("article_themes", "theme")
     summary_col = config.get_column("article_themes", "summary")
     analysis_col = config.get_column("article_themes", "analysis")
+    themes = _table(themes_table)
 
     try:
-        cursor.execute(
-            f'''
-            INSERT OR REPLACE INTO "{themes_table}"
-            ("{art_id_col}", "{theme_col}", "{summary_col}", "{analysis_col}")
-            VALUES (?, ?, ?, ?)
-        ''',
-            (
-                id,
-                analysis_result["theme"],
-                analysis_result["summary"] or "",
-                analysis_result["analysis"],
-            ),
-        )
-        conn.commit()
+        with engine.begin() as conn:
+            updated = conn.execute(
+                update(themes)
+                .where(themes.c[art_id_col] == id)
+                .values(
+                    {
+                        theme_col: analysis_result["theme"],
+                        summary_col: analysis_result["summary"] or "",
+                        analysis_col: analysis_result["analysis"],
+                    }
+                )
+            )
+            if updated.rowcount == 0:
+                conn.execute(
+                    themes.insert().values(
+                        {
+                            art_id_col: id,
+                            theme_col: analysis_result["theme"],
+                            summary_col: analysis_result["summary"] or "",
+                            analysis_col: analysis_result["analysis"],
+                        }
+                    )
+                )
     except Exception as e:
         logprint("Failed to persist article analysis", level="ERROR", article_id=id, error=str(e))
 
-    conn.close()
     return analysis_result
 
 
 @router.get("/alerts")
 def get_alerts(date: str | None = None):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
     table_name = config.get_table_name("alerts")
     alert_date_col = config.get_column("alerts", "alert_date")
+    alerts = _table(table_name)
 
+    select_columns = [cast(col, Text).label(col.name) for col in alerts.columns]
+    stmt = select(*select_columns)
     if date:
-        # Support both raw datetime strings and canonical YYYY-MM-DD filters.
-        cursor.execute(
-            f'''
-            SELECT * FROM "{table_name}"
-            WHERE "{alert_date_col}" = ?
-               OR date("{alert_date_col}") = date(?)
-               OR substr("{alert_date_col}", 1, 10) = ?
-            ''',
-            (date, date, date),
+        # Match both exact date and datetime-prefix variants (portable across dialects).
+        stmt = stmt.where(
+            (alerts.c[alert_date_col] == date) | alerts.c[alert_date_col].like(f"{date}%")
         )
-    else:
-        cursor.execute(f'SELECT * FROM "{table_name}"')
-
-    rows = cursor.fetchall()
+    with engine.connect() as conn:
+        rows = conn.execute(stmt).mappings().all()
     results = []
     for row in rows:
         remapped = remap_row(dict(row), "alerts")
         results.append(normalize_alert_response(remapped))
 
+    sqlite_conn = get_db_connection()
     latest_map = fetch_latest_analysis_map(
-        conn, [str(item.get("id")) for item in results if item.get("id") is not None]
+        sqlite_conn, [str(item.get("id")) for item in results if item.get("id") is not None]
     )
-    conn.close()
+    sqlite_conn.close()
     return [apply_latest_analysis_to_alert(item, latest_map) for item in results]
 
 
@@ -131,48 +142,41 @@ def update_alert_status(alert_id: str | int, update: StatusUpdate):
             status_code=400, detail=f"Invalid status. Must be one of: {valid_statuses}"
         )
 
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
     table_name = config.get_table_name("alerts")
+    alerts = _table(table_name)
     status_col = config.get_column("alerts", "status")
-    _, matched_id_col, matched_id_value = resolve_alert_row(cursor, table_name, alert_id)
+    _, matched_id_col, matched_id_value = resolve_alert_row(table_name, alert_id)
     if not matched_id_col:
-        conn.close()
         raise HTTPException(status_code=404, detail="Alert not found")
 
-    cursor.execute(
-        f'UPDATE "{table_name}" SET "{status_col}" = ? WHERE "{matched_id_col}" = ?',
-        (normalized_status, matched_id_value),
-    )
-    conn.commit()
+    with engine.begin() as conn:
+        result = conn.execute(
+            update(alerts)
+            .where(alerts.c[matched_id_col] == matched_id_value)
+            .values({status_col: normalized_status})
+        )
 
-    if cursor.rowcount == 0:
-        conn.close()
+    if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="Alert not found")
 
-    conn.close()
     return {"message": "Status updated", "alert_id": alert_id, "status": normalized_status}
 
 
 @router.get("/alerts/{alert_id}")
 def get_alert_detail(alert_id: str | int):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
     table_name = config.get_table_name("alerts")
-    row, _, _ = resolve_alert_row(cursor, table_name, alert_id)
+    row, _, _ = resolve_alert_row(table_name, alert_id)
     if row is None:
-        conn.close()
         raise HTTPException(status_code=404, detail="Alert not found")
 
     result = remap_row(dict(row), "alerts")
     normalized = normalize_alert_response(result)
+    sqlite_conn = get_db_connection()
     latest_map = fetch_latest_analysis_map(
-        conn,
+        sqlite_conn,
         [str(normalized.get("id"))] if normalized.get("id") is not None else [],
     )
-    conn.close()
+    sqlite_conn.close()
     return apply_latest_analysis_to_alert(normalized, latest_map)
 
 

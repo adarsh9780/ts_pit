@@ -3,8 +3,14 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from sqlalchemy import Text, bindparam, cast, desc, select
+
+from ..db import get_engine
+from .db_helpers import get_table
+
 
 ANALYSIS_TABLE = "alert_analysis"
+engine = get_engine()
 
 
 def _to_json(value: Any) -> str:
@@ -33,7 +39,7 @@ def _from_json_list(value: Any) -> list[Any]:
 
 
 def insert_alert_analysis(
-    conn,
+    conn=None,
     *,
     alert_id: str,
     generated_at: str,
@@ -46,38 +52,27 @@ def insert_alert_analysis(
     recommendation: str,
     recommendation_reason: str,
 ) -> None:
-    cursor = conn.cursor()
-    cursor.execute(
-        f'''
-        INSERT INTO "{ANALYSIS_TABLE}" (
-            "alert_id",
-            "generated_at",
-            "source",
-            "narrative_theme",
-            "narrative_summary",
-            "bullish_events",
-            "bearish_events",
-            "neutral_events",
-            "recommendation",
-            "recommendation_reason"
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''',
-        (
-            str(alert_id),
-            generated_at,
-            source,
-            narrative_theme,
-            narrative_summary,
-            _to_json(bullish_events),
-            _to_json(bearish_events),
-            _to_json(neutral_events),
-            recommendation,
-            recommendation_reason,
-        ),
-    )
+    analysis = get_table(ANALYSIS_TABLE)
+    payload = {
+        "alert_id": str(alert_id),
+        "generated_at": generated_at,
+        "source": source,
+        "narrative_theme": narrative_theme,
+        "narrative_summary": narrative_summary,
+        "bullish_events": _to_json(bullish_events),
+        "bearish_events": _to_json(bearish_events),
+        "neutral_events": _to_json(neutral_events),
+        "recommendation": recommendation,
+        "recommendation_reason": recommendation_reason,
+    }
+    with engine.begin() as sa_conn:
+        sa_conn.execute(
+            analysis.insert().values(payload)
+        )
 
 
-def fetch_latest_analysis_map(conn, alert_ids: list[str]) -> dict[str, dict[str, Any]]:
+def fetch_latest_analysis_map(conn=None, alert_ids: list[str] | None = None) -> dict[str, dict[str, Any]]:
+    alert_ids = alert_ids or []
     if not alert_ids:
         return {}
 
@@ -85,31 +80,29 @@ def fetch_latest_analysis_map(conn, alert_ids: list[str]) -> dict[str, dict[str,
     if not norm_ids:
         return {}
 
-    cursor = conn.cursor()
-    placeholders = ",".join(["?"] * len(norm_ids))
-    cursor.execute(
-        f'''
-        SELECT
-            "id",
-            "alert_id",
-            "generated_at",
-            "source",
-            "narrative_theme",
-            "narrative_summary",
-            "bullish_events",
-            "bearish_events",
-            "neutral_events",
-            "recommendation",
-            "recommendation_reason"
-        FROM "{ANALYSIS_TABLE}"
-        WHERE "alert_id" IN ({placeholders})
-        ORDER BY "alert_id" ASC, "generated_at" DESC, "id" DESC
-        ''',
-        tuple(norm_ids),
+    analysis = get_table(ANALYSIS_TABLE)
+    stmt = (
+        select(
+            cast(analysis.c.id, Text).label("id"),
+            cast(analysis.c.alert_id, Text).label("alert_id"),
+            cast(analysis.c.generated_at, Text).label("generated_at"),
+            cast(analysis.c.source, Text).label("source"),
+            cast(analysis.c.narrative_theme, Text).label("narrative_theme"),
+            cast(analysis.c.narrative_summary, Text).label("narrative_summary"),
+            cast(analysis.c.bullish_events, Text).label("bullish_events"),
+            cast(analysis.c.bearish_events, Text).label("bearish_events"),
+            cast(analysis.c.neutral_events, Text).label("neutral_events"),
+            cast(analysis.c.recommendation, Text).label("recommendation"),
+            cast(analysis.c.recommendation_reason, Text).label("recommendation_reason"),
+        )
+        .where(cast(analysis.c.alert_id, Text).in_(bindparam("alert_ids", expanding=True)))
+        .order_by(cast(analysis.c.alert_id, Text).asc(), desc(analysis.c.generated_at), desc(analysis.c.id))
     )
+    with engine.connect() as sa_conn:
+        rows = sa_conn.execute(stmt, {"alert_ids": norm_ids}).mappings().all()
 
     latest: dict[str, dict[str, Any]] = {}
-    for row in cursor.fetchall():
+    for row in rows:
         aid = str(row["alert_id"])
         if aid in latest:
             continue

@@ -1,39 +1,38 @@
 from __future__ import annotations
 
+from sqlalchemy import MetaData, Table, Text, and_, cast, desc, select
+
+from ..db import get_engine
 from ..scoring import calculate_p2, calculate_p3
+from .db_helpers import (
+    get_alert_id_candidates as _get_alert_id_candidates,
+    resolve_alert_row as _resolve_alert_row,
+)
+
+
+metadata = MetaData()
+_table_cache: dict[str, Table] = {}
+
+
+def _table(table_name: str) -> Table:
+    cached = _table_cache.get(table_name)
+    if cached is not None:
+        return cached
+    reflected = Table(table_name, metadata, autoload_with=get_engine())
+    _table_cache[table_name] = reflected
+    return reflected
 
 
 def get_alert_id_candidates(config, cursor, table_name: str) -> list[str]:
-    cursor.execute(f'PRAGMA table_info("{table_name}")')
-    available_cols = {row["name"] for row in cursor.fetchall()}
-    preferred = [
-        config.get_column("alerts", "id"),
-        "alert_id",
-        "Alert ID",
-        "id",
-    ]
-    return [column for column in dict.fromkeys(preferred) if column in available_cols]
+    _ = config
+    _ = cursor
+    return _get_alert_id_candidates(table_name)
 
 
 def resolve_alert_row(config, cursor, table_name: str, alert_id: str | int):
-    id_cols = get_alert_id_candidates(config, cursor, table_name)
-    probe_values = [alert_id]
-    if not isinstance(alert_id, str):
-        probe_values.append(str(alert_id))
-    elif alert_id.isdigit():
-        probe_values.append(int(alert_id))
-
-    for value in probe_values:
-        for id_col in id_cols:
-            cursor.execute(
-                f'SELECT * FROM "{table_name}" WHERE "{id_col}" = ? LIMIT 1',
-                (value,),
-            )
-            row = cursor.fetchone()
-            if row:
-                return row, id_col, value
-
-    return None, None, None
+    _ = config
+    _ = cursor
+    return _resolve_alert_row(table_name, alert_id)
 
 
 def build_alert_articles(
@@ -43,8 +42,12 @@ def build_alert_articles(
     start_date: str | None,
     end_date: str | None,
 ):
+    _ = cursor
+
     articles_table = config.get_table_name("articles")
     themes_table = config.get_table_name("article_themes")
+    articles = _table(articles_table)
+    themes = _table(themes_table)
 
     art_id_col = config.get_column("articles", "id")
     art_isin_col = config.get_column("articles", "isin")
@@ -63,34 +66,34 @@ def build_alert_articles(
     isin_col = config.get_column("alerts", "isin")
     isin = alert[isin_col]
 
-    query = f'''
-        SELECT
-            a."{art_id_col}" as article_id,
-            a."{title_col}" as title,
-            a."{summary_col}" as original_summary,
-            a."{date_col}" as created_date,
-            a."{impact_score_col}" as impact_score,
-            a."{original_theme_col}" as original_theme,
-            t."{ai_theme_col}" as ai_theme,
-            t."{ai_summary_col}" as ai_summary,
-            t."{ai_analysis_col}" as ai_analysis,
-            t."{ai_p1_col}" as ai_p1
-        FROM "{articles_table}" a
-        LEFT JOIN "{themes_table}" t ON a."{art_id_col}" = t."{theme_art_id_col}"
-        WHERE a."{art_isin_col}" = ?
-    '''
-    params = [isin]
+    stmt = (
+        select(
+            cast(articles.c[art_id_col], Text).label("article_id"),
+            cast(articles.c[title_col], Text).label("title"),
+            cast(articles.c[summary_col], Text).label("original_summary"),
+            cast(articles.c[date_col], Text).label("created_date"),
+            cast(articles.c[impact_score_col], Text).label("impact_score"),
+            cast(articles.c[original_theme_col], Text).label("original_theme"),
+            cast(themes.c[ai_theme_col], Text).label("ai_theme"),
+            cast(themes.c[ai_summary_col], Text).label("ai_summary"),
+            cast(themes.c[ai_analysis_col], Text).label("ai_analysis"),
+            cast(themes.c[ai_p1_col], Text).label("ai_p1"),
+        )
+        .select_from(
+            articles.outerjoin(themes, articles.c[art_id_col] == themes.c[theme_art_id_col])
+        )
+        .where(articles.c[art_isin_col] == str(isin))
+    )
     if start_date:
-        query += f' AND a."{date_col}" >= ?'
-        params.append(start_date)
+        stmt = stmt.where(articles.c[date_col] >= str(start_date))
     if end_date:
-        query += f' AND a."{date_col}" <= ?'
-        params.append(end_date)
-    query += f' ORDER BY a."{date_col}" DESC'
+        stmt = stmt.where(articles.c[date_col] <= str(end_date))
+    stmt = stmt.order_by(desc(articles.c[date_col]))
 
-    cursor.execute(query, params)
+    with get_engine().connect() as conn:
+        rows = conn.execute(stmt).mappings().all()
     articles = []
-    for row in cursor.fetchall():
+    for row in rows:
         row_data = dict(row)
         theme = row_data.get("ai_theme")
         if not theme or str(theme).lower() == "string":
@@ -120,6 +123,7 @@ def build_alert_articles(
 
 
 def build_price_history(config, cursor, alert):
+    _ = cursor
     price_history = []
     ticker_col = config.get_column("alerts", "ticker")
     start_col = config.get_column("alerts", "start_date")
@@ -131,11 +135,23 @@ def build_price_history(config, cursor, alert):
         return price_history
 
     prices_table = config.get_table_name("prices")
+    prices = _table(prices_table)
     price_ticker_col = config.get_column("prices", "ticker")
     price_date_col = config.get_column("prices", "date")
     price_close_col = config.get_column("prices", "close")
-    cursor.execute(
-        f'SELECT "{price_date_col}" as date, "{price_close_col}" as close FROM "{prices_table}" WHERE "{price_ticker_col}" = ? AND "{price_date_col}" BETWEEN ? AND ? ORDER BY "{price_date_col}" ASC',
-        (ticker, start_date, end_date),
+    stmt = (
+        select(
+            cast(prices.c[price_date_col], Text).label("date"),
+            cast(prices.c[price_close_col], Text).label("close"),
+        )
+        .where(
+            and_(
+                prices.c[price_ticker_col] == str(ticker),
+                prices.c[price_date_col] >= str(start_date),
+                prices.c[price_date_col] <= str(end_date),
+            )
+        )
+        .order_by(prices.c[price_date_col].asc())
     )
-    return [dict(row) for row in cursor.fetchall()]
+    with get_engine().connect() as conn:
+        return [dict(row) for row in conn.execute(stmt).mappings().all()]

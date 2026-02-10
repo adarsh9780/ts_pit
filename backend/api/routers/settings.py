@@ -1,24 +1,20 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
+from sqlalchemy import inspect
 
 from ...config import get_config
-from ...database import get_db_connection
+from ...db import get_engine
 
 
 router = APIRouter(tags=["settings"])
 config = get_config()
+engine = get_engine()
 
 
 def _db_column_exists(table_name: str, column_name: str) -> bool:
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute(f'PRAGMA table_info("{table_name}")')
-        columns = {row["name"] for row in cursor.fetchall()}
-        return column_name in columns
-    finally:
-        conn.close()
+    columns = {row["name"] for row in inspect(engine).get_columns(table_name)}
+    return column_name in columns
 
 
 def _has_materiality_support() -> bool:

@@ -6,18 +6,20 @@ the database and retrieving alert context.
 """
 
 import json
-import sqlite3
 import yaml
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from langchain_core.tools import tool
+from sqlalchemy import Text, cast, func, inspect, select, text, update
 from backend.database import get_db_connection, remap_row
+from backend.db import get_engine
 from backend.config import get_config
 from backend.alert_analysis import (
     analyze_alert_non_persisting,
     get_current_alert_news_non_persisting,
 )
 from backend.reporting import generate_alert_report_html, sanitize_session_id
+from backend.services.db_helpers import get_alert_id_candidates, get_table, probe_alert_id_values
 
 # Load the database schema for the SQL tool docstring
 SCHEMA_PATH = Path(__file__).parent / "db_schema.yaml"
@@ -29,6 +31,8 @@ if SCHEMA_PATH.exists():
         # but YAML structure is better for LLM.
         schema_data = yaml.safe_load(f)
         DB_SCHEMA = yaml.dump(schema_data, sort_keys=False)
+
+engine = get_engine()
 
 
 def _normalize_impact_label(label: str) -> str:
@@ -74,18 +78,12 @@ def execute_sql(query: str) -> str:
         )
 
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(query)
-        rows = cursor.fetchall()
-
-        # Get column names
-        column_names = [description[0] for description in cursor.description]
-
-        # Convert to list of dicts
-        results = [dict(zip(column_names, row)) for row in rows]
-        conn.close()
-
+        stmt = text(query)
+        with engine.connect() as conn:
+            result = conn.execute(stmt)
+            rows = result.fetchall()
+            columns = list(result.keys())
+        results = [dict(zip(columns, row)) for row in rows]
         return _ok(results, row_count=len(results))
     except Exception as e:
         return _error(f"Database error: {str(e)}", code="DB_ERROR")
@@ -190,24 +188,29 @@ def get_alert_details(alert_id: str) -> str:
     Only use this tool to look up *other* alerts referenced in the conversation.
     """
     config = get_config()
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
     table_name = config.get_table_name("alerts")
-    alert_id_col = config.get_column("alerts", "id")
+    alerts = get_table(table_name)
 
     try:
-        cursor.execute(
-            f'SELECT * FROM "{table_name}" WHERE "{alert_id_col}" = ?', (alert_id,)
-        )
-        row = cursor.fetchone()
-        conn.close()
+        row = None
+        for value in probe_alert_id_values(alert_id):
+            for id_col in get_alert_id_candidates(table_name):
+                stmt = select(*[cast(c, Text).label(c.name) for c in alerts.columns]).where(
+                    cast(alerts.c[id_col], Text) == str(value)
+                ).limit(1)
+                with engine.connect() as conn:
+                    found = conn.execute(stmt).mappings().first()
+                if found:
+                    row = dict(found)
+                    break
+            if row:
+                break
 
         if not row:
             return _error(f"Alert {alert_id} not found.", code="ALERT_NOT_FOUND")
 
         # Use the same remapping logic as the API for consistency
-        result = remap_row(dict(row), "alerts")
+        result = remap_row(row, "alerts")
         return _ok(result)
     except Exception as e:
         return _error(f"Error fetching alert details: {str(e)}", code="DB_ERROR")
@@ -220,18 +223,16 @@ def get_alerts_by_ticker(ticker: str) -> str:
     Useful for checking history of alerts for a company.
     """
     config = get_config()
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
     table_name = config.get_table_name("alerts")
+    alerts = get_table(table_name)
     ticker_col = config.get_column("alerts", "ticker")
 
     try:
-        cursor.execute(
-            f'SELECT * FROM "{table_name}" WHERE "{ticker_col}" = ?', (ticker,)
+        stmt = select(*[cast(c, Text).label(c.name) for c in alerts.columns]).where(
+            cast(alerts.c[ticker_col], Text) == str(ticker)
         )
-        rows = cursor.fetchall()
-        conn.close()
+        with engine.connect() as conn:
+            rows = conn.execute(stmt).mappings().all()
 
         results = [remap_row(dict(row), "alerts") for row in rows]
 
@@ -254,23 +255,23 @@ def count_material_news(ticker: str) -> str:
     Returns a breakdown of impact labels (High, Medium, Low).
     """
     config = get_config()
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
     # 1. Resolve Ticker -> ISIN using alerts table (reference mapping)
     alerts_table = config.get_table_name("alerts")
+    alerts = get_table(alerts_table)
     alert_ticker_col = config.get_column("alerts", "ticker")
     alert_isin_col = config.get_column("alerts", "isin")
 
     try:
-        cursor.execute(
-            f'SELECT DISTINCT "{alert_isin_col}" FROM "{alerts_table}" WHERE "{alert_ticker_col}" = ?',
-            (ticker,),
+        stmt_isin = (
+            select(cast(alerts.c[alert_isin_col], Text).label("isin"))
+            .where(cast(alerts.c[alert_ticker_col], Text) == str(ticker))
+            .distinct()
+            .limit(1)
         )
-        row = cursor.fetchone()
+        with engine.connect() as conn:
+            row = conn.execute(stmt_isin).mappings().first()
 
         if not row:
-            conn.close()
             # If we truly can't find it in alerts, we can't search articles by ISIN.
             # But maybe the user meant a ticker that isn't in alerts?
             # For now, we assume if it's not in alerts, we can't link it.
@@ -280,31 +281,30 @@ def count_material_news(ticker: str) -> str:
                 ticker=ticker,
             )
 
-        isin = row[0]
+        isin = row["isin"]
 
         # 2. Query Articles by ISIN
         articles_table = config.get_table_name("articles")
+        articles = get_table(articles_table)
         article_isin_col = config.get_column("articles", "isin")
         impact_col = config.get_column("articles", "impact_label")
 
         if not article_isin_col or not impact_col:
-            conn.close()
             return _error(
                 "Tool configuration error: missing ISIN or impact_label mapping for articles.",
                 code="CONFIG_ERROR",
             )
 
-        cursor.execute(
-            f'''
-            SELECT "{impact_col}", COUNT(*) as count 
-            FROM "{articles_table}" 
-            WHERE "{article_isin_col}" = ? 
-            GROUP BY "{impact_col}"
-            ''',
-            (isin,),
+        stmt_counts = (
+            select(
+                cast(articles.c[impact_col], Text).label("impact_label"),
+                func.count().label("count"),
+            )
+            .where(cast(articles.c[article_isin_col], Text) == str(isin))
+            .group_by(cast(articles.c[impact_col], Text))
         )
-        rows = cursor.fetchall()
-        conn.close()
+        with engine.connect() as conn:
+            rows = conn.execute(stmt_counts).mappings().all()
 
         if not rows:
             return _ok(
@@ -314,13 +314,14 @@ def count_material_news(ticker: str) -> str:
             )
 
         results = {}
-        for raw_label, count in rows:
+        for row in rows:
+            raw_label = row["impact_label"]
+            count = row["count"]
             normalized_label = _normalize_impact_label(raw_label)
-            results[normalized_label] = results.get(normalized_label, 0) + count
+            results[normalized_label] = results.get(normalized_label, 0) + int(count)
         return _ok({"impact_breakdown": results, "isin": isin}, ticker=ticker)
 
     except Exception as e:
-        conn.close()
         return _error(
             f"Error counting material news: {str(e)}",
             code="DB_ERROR",
@@ -346,21 +347,24 @@ def get_price_history(ticker: str, period: str = "1mo") -> str:
 
         # Query results from DB
         config = get_config()
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
         table_name = config.get_table_name("prices")
+        prices = get_table(table_name)
         ticker_col = config.get_column("prices", "ticker")
         date_col = config.get_column("prices", "date")
         close_col = config.get_column("prices", "close")
 
         # Get start date based on period (approximate)
-        cursor.execute(
-            f'SELECT "{date_col}", "{close_col}" FROM "{table_name}" WHERE "{ticker_col}" = ? ORDER BY "{date_col}" DESC LIMIT 30',
-            (ticker,),
+        stmt = (
+            select(
+                cast(prices.c[date_col], Text).label(date_col),
+                cast(prices.c[close_col], Text).label(close_col),
+            )
+            .where(cast(prices.c[ticker_col], Text) == str(ticker))
+            .order_by(prices.c[date_col].desc())
+            .limit(30)
         )
-        rows = cursor.fetchall()
-        conn.close()
+        with engine.connect() as conn:
+            rows = conn.execute(stmt).mappings().all()
 
         if not rows:
             return _ok([], message=f"No price data found for {ticker}.", ticker=ticker)
@@ -388,54 +392,57 @@ def search_news(
         end_date: Optional end date (YYYY-MM-DD) to filter articles
     """
     config = get_config()
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
     # Resolve Ticker -> ISIN
     alerts_table = config.get_table_name("alerts")
+    alerts = get_table(alerts_table)
     alert_ticker_col = config.get_column("alerts", "ticker")
     alert_isin_col = config.get_column("alerts", "isin")
 
     try:
-        cursor.execute(
-            f'SELECT DISTINCT "{alert_isin_col}" FROM "{alerts_table}" WHERE "{alert_ticker_col}" = ?',
-            (ticker,),
+        stmt_isin = (
+            select(cast(alerts.c[alert_isin_col], Text).label("isin"))
+            .where(cast(alerts.c[alert_ticker_col], Text) == str(ticker))
+            .distinct()
+            .limit(1)
         )
-        row = cursor.fetchone()
+        with engine.connect() as conn:
+            row = conn.execute(stmt_isin).mappings().first()
         if not row:
-            conn.close()
             return _error(
                 f"Ticker {ticker} not found in alerts, cannot link to news.",
                 code="TICKER_NOT_FOUND",
                 ticker=ticker,
             )
-        isin = row[0]
+        isin = row["isin"]
 
         # Query Articles
         articles_table = config.get_table_name("articles")
+        articles = get_table(articles_table)
         article_isin_col = config.get_column("articles", "isin")
         title_col = config.get_column("articles", "title")
         summary_col = config.get_column("articles", "summary")
         date_col = config.get_column("articles", "created_date")
 
-        query = f'SELECT "{date_col}", "{title_col}", "{summary_col}" FROM "{articles_table}" WHERE "{article_isin_col}" = ?'
-        params = [isin]
+        stmt = (
+            select(
+                cast(articles.c[date_col], Text).label(date_col),
+                cast(articles.c[title_col], Text).label(title_col),
+                cast(articles.c[summary_col], Text).label(summary_col),
+            )
+            .where(cast(articles.c[article_isin_col], Text) == str(isin))
+            .order_by(articles.c[date_col].desc())
+            .limit(int(limit))
+        )
 
         # Add date filtering if provided
         if start_date:
-            query += f' AND "{date_col}" >= ?'
-            params.append(start_date)
+            stmt = stmt.where(cast(articles.c[date_col], Text) >= str(start_date))
 
         if end_date:
-            query += f' AND "{date_col}" <= ?'
-            params.append(end_date)
+            stmt = stmt.where(cast(articles.c[date_col], Text) <= str(end_date))
 
-        query += f' ORDER BY "{date_col}" DESC LIMIT ?'
-        params.append(limit)
-
-        cursor.execute(query, tuple(params))
-        rows = cursor.fetchall()
-        conn.close()
+        with engine.connect() as conn:
+            rows = conn.execute(stmt).mappings().all()
 
         if not rows:
             return _ok([], message=f"No news found for {ticker}.", ticker=ticker)
@@ -444,7 +451,6 @@ def search_news(
         return _ok(results, ticker=ticker, row_count=len(results))
 
     except Exception as e:
-        conn.close()
         return _error(f"Error searching news: {str(e)}", code="DB_ERROR", ticker=ticker)
 
 
@@ -466,32 +472,27 @@ def update_alert_status(alert_id: str, status: str, reason: str = None) -> str:
             code="INVALID_STATUS",
         )
 
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
     table_name = config.get_table_name("alerts")
+    alerts = get_table(table_name)
     alert_id_col = config.get_column("alerts", "id")
     status_col = config.get_column("alerts", "status")
 
     try:
-        cursor.execute(
-            f'UPDATE "{table_name}" SET "{status_col}" = ? WHERE "{alert_id_col}" = ?',
-            (normalized_status, alert_id),
-        )
-        conn.commit()
-
-        if cursor.rowcount == 0:
-            conn.close()
+        with engine.begin() as conn:
+            result = conn.execute(
+                update(alerts)
+                .where(cast(alerts.c[alert_id_col], Text) == str(alert_id))
+                .values({status_col: normalized_status})
+            )
+        if result.rowcount == 0:
             return _error(f"Alert {alert_id} not found.", code="ALERT_NOT_FOUND")
 
-        conn.close()
         return _ok(
             {"alert_id": alert_id, "status": normalized_status},
             message="Alert status updated.",
         )
 
     except Exception as e:
-        conn.close()
         return _error(f"Error updating alert status: {str(e)}", code="DB_ERROR")
 
 
@@ -528,16 +529,12 @@ def get_article_by_id(article_id: str) -> str:
 
     Use this tool when the user asks to dissect a specific news item from the UI list.
     """
-    conn = get_db_connection()
-    cursor = conn.cursor()
     config = get_config()
     try:
         table_name = config.get_table_name("articles")
+        articles = get_table(table_name)
         id_col = config.get_column("articles", "id") or "id"
-
-        cursor.execute(f'PRAGMA table_info("{table_name}")')
-        available_cols = [row["name"] for row in cursor.fetchall()]
-        available_set = set(available_cols)
+        available_set = {col["name"] for col in inspect(engine).get_columns(table_name)}
 
         id_candidates = [id_col, "id", "article_id", "art_id"]
         id_candidates = [c for c in dict.fromkeys(id_candidates) if c in available_set]
@@ -555,13 +552,13 @@ def get_article_by_id(article_id: str) -> str:
         matched_value = None
         for value in probe_values:
             for candidate_col in id_candidates:
-                cursor.execute(
-                    f'SELECT * FROM "{table_name}" WHERE "{candidate_col}" = ? LIMIT 1',
-                    (value,),
-                )
-                found = cursor.fetchone()
+                stmt = select(*[cast(c, Text).label(c.name) for c in articles.columns]).where(
+                    cast(articles.c[candidate_col], Text) == str(value)
+                ).limit(1)
+                with engine.connect() as conn:
+                    found = conn.execute(stmt).mappings().first()
                 if found:
-                    row = found
+                    row = dict(found)
                     matched_col = candidate_col
                     matched_value = value
                     break
@@ -571,7 +568,7 @@ def get_article_by_id(article_id: str) -> str:
         if not row:
             return _error(f"Article {article_id} not found.", code="ARTICLE_NOT_FOUND")
 
-        remapped = remap_row(dict(row), "articles")
+        remapped = remap_row(row, "articles")
         body_value = remapped.get("body")
         body_present = isinstance(body_value, str) and body_value.strip() != ""
 
@@ -598,8 +595,6 @@ def get_article_by_id(article_id: str) -> str:
         )
     except Exception as e:
         return _error(f"Error fetching article by id: {str(e)}", code="ARTICLE_FETCH_ERROR")
-    finally:
-        conn.close()
 
 
 @tool

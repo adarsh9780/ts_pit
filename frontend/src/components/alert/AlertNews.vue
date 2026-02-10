@@ -22,6 +22,16 @@ const getMaterialityColor = (code) => {
 };
 
 const resolveArticleId = (article) => article?.id ?? article?.article_id ?? article?.art_id ?? '-';
+const resolveTheme = (article) => String(article?.theme ?? 'UNCATEGORIZED');
+const resolveSentiment = (article) => String(article?.sentiment ?? 'NEUTRAL');
+const resolveSentimentClass = (article) =>
+    resolveSentiment(article).split(':')[0].toLowerCase();
+const resolveSentimentLabel = (article) =>
+    resolveSentiment(article).split(':')[0];
+const formatImpactScore = (value) => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric.toFixed(1) : '-';
+};
 </script>
 
 <template>
@@ -42,7 +52,7 @@ const resolveArticleId = (article) => article?.id ?? article?.article_id ?? arti
                 <div v-for="article in news" :key="resolveArticleId(article)" class="news-item" :class="{ 'analyzed': article.analysis }">
                     <div class="news-meta">
                         <span class="news-date">#{{ resolveArticleId(article) }} • {{ article.created_date }}</span>
-                        <span class="news-theme">{{ article.theme.replace(/_/g, ' ') }}</span>
+                        <span class="news-theme">{{ resolveTheme(article).replace(/_/g, ' ') }}</span>
                     </div>
                     <h4 class="news-title">{{ article.title }}</h4>
                     
@@ -55,7 +65,7 @@ const resolveArticleId = (article) => article?.id ?? article?.article_id ?? arti
                     <div v-if="article.summary" class="news-summary">{{ article.summary }}</div>
                     
                     <div class="news-footer">
-                        <span class="sentiment-indicator" :class="article.sentiment.split(':')[0].toLowerCase()">{{ article.sentiment.split(':')[0] }}</span>
+                        <span class="sentiment-indicator" :class="resolveSentimentClass(article)">{{ resolveSentimentLabel(article) }}</span>
                         <template v-if="config && config.has_materiality && article.materiality">
                             <span class="separator">•</span>
                             <span class="materiality-indicator" 
@@ -71,7 +81,7 @@ const resolveArticleId = (article) => article?.id ?? article?.article_id ?? arti
                             <span class="separator">•</span>
                             <span class="impact-badge" :class="article.impact_label.toLowerCase()">
                                 <span class="impact-label">{{ article.impact_label }}</span>
-                                <span class="impact-score" v-if="article.impact_score">({{ article.impact_score.toFixed(1) }}σ)</span>
+                                <span class="impact-score" v-if="article.impact_score != null">({{ formatImpactScore(article.impact_score) }}σ)</span>
                             </span>
                         </template>
                     </div>

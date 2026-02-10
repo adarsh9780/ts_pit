@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from ddgs import DDGS
+from sqlalchemy import Text, cast, inspect, select
 
 from .alert_analysis import (
     analyze_alert_non_persisting,
@@ -16,6 +17,8 @@ from .alert_analysis import (
     get_current_alert_news_non_persisting,
     resolve_alert_row,
 )
+from .db import get_engine
+from .services.db_helpers import get_table
 
 
 REPORTS_ROOT = Path(__file__).parent.parent / "artifacts" / "reports"
@@ -192,14 +195,15 @@ def _get_chart_snapshot_data_url(session_id: str, alert_id: str | int) -> str | 
 
 
 def _article_urls_by_id(conn, config, article_ids: list[Any]) -> dict[Any, str]:
+    _ = conn
     if not article_ids:
         return {}
-    cursor = conn.cursor()
+    engine = get_engine()
     table_name = config.get_table_name("articles")
     id_col = config.get_column("articles", "id")
+    articles = get_table(table_name)
 
-    cursor.execute(f'PRAGMA table_info("{table_name}")')
-    cols = [row["name"] for row in cursor.fetchall()]
+    cols = {col["name"] for col in inspect(engine).get_columns(table_name)}
     url_col = next(
         (c for c in ("url", "article_url", "art_url", "link", "news_url") if c in cols),
         None,
@@ -207,13 +211,17 @@ def _article_urls_by_id(conn, config, article_ids: list[Any]) -> dict[Any, str]:
     if not url_col:
         return {}
 
-    placeholders = ",".join(["?"] * len(article_ids))
-    query = (
-        f'SELECT "{id_col}" as article_id, "{url_col}" as article_url '
-        f'FROM "{table_name}" WHERE "{id_col}" IN ({placeholders})'
+    normalized_ids = [str(i) for i in article_ids]
+    stmt = (
+        select(
+            cast(articles.c[id_col], Text).label("article_id"),
+            cast(articles.c[url_col], Text).label("article_url"),
+        )
+        .where(cast(articles.c[id_col], Text).in_(normalized_ids))
     )
-    cursor.execute(query, tuple(article_ids))
-    return {row["article_id"]: row["article_url"] for row in cursor.fetchall()}
+    with engine.connect() as db_conn:
+        rows = db_conn.execute(stmt).mappings().all()
+    return {row["article_id"]: row["article_url"] for row in rows}
 
 
 def _fetch_web_news(query: str, config, max_results: int = 5) -> list[dict[str, str]]:
@@ -598,9 +606,8 @@ def generate_alert_report_html(
 ) -> dict[str, Any]:
     session_id = sanitize_session_id(session_id)
 
-    cursor = conn.cursor()
     alerts_table = config.get_table_name("alerts")
-    alert_row, _, _ = resolve_alert_row(config, cursor, alerts_table, alert_id)
+    alert_row, _, _ = resolve_alert_row(config, None, alerts_table, alert_id)
     if not alert_row:
         return {"ok": False, "error": "Alert not found"}
     alert = dict(alert_row)
@@ -624,7 +631,7 @@ def generate_alert_report_html(
         if a.get("article_id") in url_map:
             a["url"] = url_map[a["article_id"]]
 
-    price_history = build_price_history(config, cursor, alert_row)
+    price_history = build_price_history(config, None, alert_row)
     price_svg = _build_price_svg(price_history)
     chart_snapshot_data_url = _get_chart_snapshot_data_url(session_id=session_id, alert_id=alert_id)
 

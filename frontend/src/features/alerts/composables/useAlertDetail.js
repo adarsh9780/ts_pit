@@ -59,10 +59,16 @@ export function useAlertDetail() {
 
   const loadAlertBundle = async (alertId, period) => {
     const alert = await fetchAlertDetail(alertId);
-    const [prices, news] = await Promise.all([
+    const [pricesResult, newsResult] = await Promise.allSettled([
       fetchPrices(alert, period),
       fetchNews(alert),
     ]);
+
+    const prices =
+      pricesResult.status === 'fulfilled'
+        ? pricesResult.value
+        : { ticker: [], industry: [], industry_name: '' };
+    const news = newsResult.status === 'fulfilled' ? newsResult.value : [];
 
     return { alert, prices, news };
   };
