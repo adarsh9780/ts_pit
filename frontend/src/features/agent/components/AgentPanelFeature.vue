@@ -21,6 +21,7 @@ const {
   messages,
   inputMessage,
   isLoading,
+  sessionId,
   messagesContainer,
   inputRef,
   panelWidth,

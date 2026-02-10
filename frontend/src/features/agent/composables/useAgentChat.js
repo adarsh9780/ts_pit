@@ -8,6 +8,7 @@ import {
   listArtifacts,
   uploadChartSnapshot,
 } from '../../../api/service.js';
+import { API_BASE_URL } from '../../../api/index.js';
 
 export function useAgentChat(alertIdRef) {
   const messages = ref([]);
@@ -41,6 +42,13 @@ export function useAgentChat(alertIdRef) {
       `- **Type:** ${info.trade_type}\n` +
       `- **Period:** ${info.start_date} to ${info.end_date}\n\n` +
       `How can I help you analyze this alert?`;
+  };
+
+  const absolutizeBackendLinks = (content) => {
+    if (!content || typeof content !== 'string') return content;
+    return content
+      .replace(/\]\(\/reports\/([^)]+)\)/g, `](${API_BASE_URL}/reports/$1)`)
+      .replace(/\]\(\/artifacts\/([^)]+)\)/g, `](${API_BASE_URL}/artifacts/$1)`);
   };
 
   const scrollToBottom = async () => {
@@ -183,7 +191,14 @@ export function useAgentChat(alertIdRef) {
   const downloadArtifact = (artifact) => {
     if (!artifact?.relative_path || !sessionId.value) return;
     const url = buildArtifactDownloadUrl(sessionId.value, artifact.relative_path);
-    window.open(url, '_blank', 'noopener,noreferrer');
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = artifact.name || 'artifact';
+    link.rel = 'noopener noreferrer';
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const handleComposerKeydown = (e) => {
@@ -299,8 +314,16 @@ export function useAgentChat(alertIdRef) {
               );
               if (tool) tool.status = 'done';
             } else if (data.type === 'artifact_created') {
-              messages.value[agentMsgIndex].content += '\n\nReport generated. Download it from the Artifact icon next to the chat box.';
-              fetchArtifacts();
+              const relativePath = data.relative_path || data.artifact_name;
+              const reportUrl = relativePath && sessionId.value
+                ? buildArtifactDownloadUrl(sessionId.value, relativePath)
+                : null;
+              const reportLine = reportUrl
+                ? `\n\nReport generated. [Download report](${reportUrl}) or use the Artifact button below the chat box.`
+                : '\n\nReport generated. Use the Artifact button below the chat box to download it.';
+              messages.value[agentMsgIndex].content += reportLine;
+              showArtifactsMenu.value = true;
+              await fetchArtifacts();
             }
 
             await scrollToBottom();
@@ -316,6 +339,9 @@ export function useAgentChat(alertIdRef) {
         messages.value[agentMsgIndex].content += `\n[Error: ${e.message}]`;
       }
     } finally {
+      messages.value[agentMsgIndex].content = absolutizeBackendLinks(
+        messages.value[agentMsgIndex].content
+      );
       isLoading.value = false;
       abortController = null;
       await scrollToBottom();
