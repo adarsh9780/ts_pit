@@ -78,6 +78,14 @@ def _normalize_recommendation(value: str | None) -> str:
     return mapped if mapped in _CANONICAL_RECOMMENDATIONS else "NEEDS_REVIEW"
 
 
+def _safe_abs_impact(value) -> float:
+    """Parse impact score defensively; return 0.0 for non-numeric values."""
+    try:
+        return abs(float(value))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def get_llm_model():
     """
     Singleton Factory to return the configured LLM model instance.
@@ -171,7 +179,7 @@ def generate_cluster_summary(
         impact = _safe_abs_impact(a.get("impact_score"))
 
         # Logic: High Materiality Component OR High Z-Score (> 2.0)
-        if "H" in mat or abs(impact) >= 2.0:
+        if "H" in mat or impact >= 2.0:
             filtered_articles.append(a)
 
     # Fallback: If filter is too aggressive (empty/low), use top 15 by default sort
@@ -301,8 +309,3 @@ def generate_article_analysis(
     except Exception as e:
         print(f"LLM Analysis Error: {e}")
         return {"theme": "Error", "summary": None, "analysis": str(e)}
-    def _safe_abs_impact(value) -> float:
-        try:
-            return abs(float(value))
-        except (TypeError, ValueError):
-            return 0.0

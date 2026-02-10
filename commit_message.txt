@@ -1,12 +1,7 @@
-fix(agent-v2): harden python runner + tool diagnostics and stabilize analysis typing
+chore(agent_v2): disable dynamic tool gating and bind full toolset for non-smalltalk turns
 
-- make safe_py_runner worker cross-platform by handling missing POSIX `resource` module on Windows
-- improve SSE tool-end normalization/parsing so tool errors are reliably detected and logged
-- expose tool error state in UI (ERROR status, code/message) and auto-expand failed tool traces
-- improve tool trace rendering for long outputs with proper horizontal/vertical scrolling
-- improve execute_python ergonomics:
-  - merge required_imports into allowed_imports policy (except RestrictedPython)
-  - return clearer import-policy error guidance
-  - inject input_data keys as top-level variables for simpler snippets (e.g., `x`)
-- fix LLM summary crash on non-numeric impact_score by using safe numeric parsing before abs()
-- add/keep KaTeX markdown formula rendering and collapsible tool trace UX from prior changes
+- simplify planner behavior by exposing all registered agent_v2 tools on normal requests
+- keep direct smalltalk path tool-free
+- reduce missed-tool failures caused by intent/gating misclassification
+- update planner reason metadata to include current tool mode (`all_tools` vs `direct`)
+- preserve existing graph flow while removing gating as a runtime blocker

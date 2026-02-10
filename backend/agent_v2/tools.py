@@ -81,7 +81,19 @@ def execute_sql(query: str) -> str:
         results = [dict(zip(columns, row)) for row in rows]
         return _ok(results, row_count=len(results))
     except Exception as e:
-        return _error(f"Database error: {str(e)}", code="DB_ERROR")
+        msg = str(e)
+        hint = ""
+        if "no such column" in msg.lower():
+            try:
+                cfg = get_config()
+                hint = (
+                    " Hint: this DB uses mapped physical column names from config.yaml. "
+                    f"For alerts table logical 'id', use '{cfg.get_column('alerts', 'id')}'. "
+                    "Use get_schema() before writing SQL."
+                )
+            except Exception:
+                hint = " Hint: use get_schema() first and query physical column names."
+        return _error(f"Database error: {msg}{hint}", code="DB_ERROR")
 
 
 execute_sql.__doc__ = execute_sql.__doc__.format(db_schema=DB_SCHEMA)

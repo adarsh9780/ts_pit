@@ -77,30 +77,19 @@ def plan_request(state: AgentV2State, config: RunnableConfig) -> dict:
         ("hello", "hi", "thanks", "thank you", "who are you"),
     ) and not (needs_db or needs_kb or needs_web or needs_report or needs_compute)
 
-    active_tool_names: list[str] = []
-    if needs_db:
-        active_tool_names.extend(
-            ["execute_sql", "get_schema", "get_article_by_id", "analyze_current_alert"]
-        )
-    if needs_kb:
-        active_tool_names.extend(["list_files", "read_file"])
-    if needs_web:
-        active_tool_names.extend(["search_web", "search_web_news", "scrape_websites"])
-    if needs_report:
-        active_tool_names.append("generate_current_alert_report")
-    if needs_compute:
-        active_tool_names.append("execute_python")
-    if _contains_any(text_value, ("write", "save", "note", "memo", "create file", "document")):
-        active_tool_names.append("write_file")
-    if not active_tool_names and not direct_smalltalk:
-        active_tool_names.extend(["analyze_current_alert", "get_article_by_id"])
+    # Temporary simplification: for non-smalltalk requests, expose full toolset.
+    # This disables dynamic tool gating and makes planner failures less likely.
+    active_tool_names: list[str] = [] if direct_smalltalk else list(TOOL_REGISTRY.keys())
 
-    active_tool_names = [name for name in dict.fromkeys(active_tool_names) if name in TOOL_REGISTRY]
+    active_tool_names = [
+        name for name in dict.fromkeys(active_tool_names) if name in TOOL_REGISTRY
+    ]
 
     route = "direct" if direct_smalltalk else "agent"
     reason = (
         f"needs_db={needs_db}, needs_kb={needs_kb}, needs_web={needs_web}, "
-        f"needs_compute={needs_compute}, needs_report={needs_report}, route={route}"
+        f"needs_compute={needs_compute}, needs_report={needs_report}, "
+        f"route={route}, tool_mode={'all_tools' if not direct_smalltalk else 'direct'}"
     )
     return {
         "route": route,
