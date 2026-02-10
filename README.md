@@ -108,6 +108,15 @@ uv run python scripts/setup_safe_py_runner_env.py
 
 This creates/updates the isolated runner venv and installs the configured `packages` there.
 
+3. Health check:
+
+```bash
+uv run python scripts/check_safe_py_runner_env.py
+```
+
+This prints runtime diagnostics (manager, discovered interpreter, runner path, import validation)
+and exits non-zero if the runner environment is not ready.
+
 ## Configuration
 
 Edit `config.yaml` to map your database tables/columns.

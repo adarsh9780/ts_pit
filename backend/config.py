@@ -221,9 +221,13 @@ class Config:
             "cpu_time_seconds": 5,
             "max_output_kb": 128,
             "venv_path": "~/.ts_pit/safe_py_runner/.venv",
+            "venv_manager": "python_venv",
             "python_executable": "",
+            "base_python_executable": "",
+            "interpreter_candidates": ["python3", "python", "py"],
             "auto_create_venv": False,
             "packages": [],
+            "required_imports": ["RestrictedPython"],
             "allowed_imports": ["math", "statistics", "json"],
             "allowed_builtins": [
                 "abs",

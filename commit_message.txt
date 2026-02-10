@@ -1,14 +1,15 @@
-feat(agent_v2): add planner-router flow with dynamic tool gating and isolated python runtime
+feat(agent_v2): add planner-router agent, generic filesystem tools, and robust python runtime manager
 
-- replace v2 pass-through with real LangGraph planner flow (plan -> context load -> direct/agent route -> tools)
-- add dynamic per-turn tool binding via TOOL_REGISTRY and active_tool_names
-- add generic filesystem tools (list_files/read_file/write_file) with config-driven allowed dirs and depth limits
-- remove KB-specific list/read tools in favor of generic file access model
-- keep report generation path accessible (`generate_current_alert_report`) in v2 tool registry
-- add `search_web` alongside `search_web_news` and `scrape_websites`
-- integrate `execute_python` in v2 using local `safe-py-runner` package
-- add safe runner package scaffold under `libs/safe_py_runner` (policy/runner/worker + docs)
-- add python runtime validation + optional venv auto-create for v2 executor
-- add setup utility script for runner environment: `scripts/setup_safe_py_runner_env.py`
-- extend config with `agent_v2.filesystem` and `agent_v2.python_exec` policies
-- document isolated agent runtime setup and DS package installation workflow in README
+- implement planner -> context-loader -> direct/agent routing flow in agent_v2 graph
+- add dynamic per-turn tool gating via TOOL_REGISTRY + active_tool_names
+- replace KB-specific tools with generic file tools: list_files/read_file/write_file
+- enforce config-driven filesystem policy (allowed_dirs, depth, read/write extensions, max bytes)
+- keep report generation tool available in v2 (`generate_current_alert_report`)
+- add web search tooling split (`search_web`, `search_web_news`, optional `scrape_websites`)
+- integrate `execute_python` using local `safe-py-runner` package
+- scaffold reusable `libs/safe_py_runner` package (policy/runner/worker + docs + tests)
+- add cross-platform runtime resolver for python exec (Windows/Linux/macOS interpreter paths)
+- add structured runtime config: venv_manager, base_python_executable, interpreter discovery candidates
+- add startup/runtime import validation (`required_imports`) and package bootstrap/repair flow
+- add setup utility `scripts/setup_safe_py_runner_env.py` and health check `scripts/check_safe_py_runner_env.py`
+- update config and README for isolated agent runtime and diagnostics workflow

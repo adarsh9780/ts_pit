@@ -286,13 +286,25 @@ agent_v2:
     memory_limit_mb: 256
     cpu_time_seconds: 5
     max_output_kb: 128
+    # venv creation strategy: python_venv | uv_venv
+    venv_manager: "python_venv"
     venv_path: "~/.ts_pit/safe_py_runner/.venv"
-    # Optional explicit interpreter path; if empty, resolved as <venv_path>/bin/python
+    # Optional explicit runtime interpreter path (usually inside venv_path).
     python_executable: ""
+    # Optional explicit base interpreter used to create venv.
+    base_python_executable: ""
+    # Fallback order to discover base interpreter from PATH.
+    interpreter_candidates:
+      - python3
+      - python
+      - py
     # Production default should remain false (fail fast if venv is missing).
     auto_create_venv: false
     # Optional packages to install when auto_create_venv=true (keep DS deps out of main app env).
     packages: []
+    # Optional imports to validate at startup/runtime (fail fast if missing from runner env).
+    required_imports:
+      - RestrictedPython
     allowed_imports:
       - math
       - statistics
