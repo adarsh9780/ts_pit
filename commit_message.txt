@@ -1,8 +1,14 @@
-refactor(db+frontend): complete SQLAlchemy migration and fix alert detail render crashes
+feat(agent_v2): add planner-router flow with dynamic tool gating and isolated python runtime
 
-- migrate remaining backend data paths to SQLAlchemy Core (settings, price cache, alert analysis store, agent SQL tool)
-- remove cursor/raw-SQL compatibility flow in alert_analysis_data and make tests SQLAlchemy-only
-- refactor alert analysis data tests to run against temp SQLite via SQLAlchemy engine
-- harden alert detail bundle loading with partial-failure tolerance (allSettled for prices/news)
-- fix AlertNews null/typing render crashes (safe sentiment/theme handling and impact score formatting)
-- keep alert detail UI visible even when dependent requests partially fail
+- replace v2 pass-through with real LangGraph planner flow (plan -> context load -> direct/agent route -> tools)
+- add dynamic per-turn tool binding via TOOL_REGISTRY and active_tool_names
+- add generic filesystem tools (list_files/read_file/write_file) with config-driven allowed dirs and depth limits
+- remove KB-specific list/read tools in favor of generic file access model
+- keep report generation path accessible (`generate_current_alert_report`) in v2 tool registry
+- add `search_web` alongside `search_web_news` and `scrape_websites`
+- integrate `execute_python` in v2 using local `safe-py-runner` package
+- add safe runner package scaffold under `libs/safe_py_runner` (policy/runner/worker + docs)
+- add python runtime validation + optional venv auto-create for v2 executor
+- add setup utility script for runner environment: `scripts/setup_safe_py_runner_env.py`
+- extend config with `agent_v2.filesystem` and `agent_v2.python_exec` policies
+- document isolated agent runtime setup and DS package installation workflow in README

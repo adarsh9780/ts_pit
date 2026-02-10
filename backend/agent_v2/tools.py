@@ -1,0 +1,702 @@
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+from typing import Any, Optional
+
+import yaml
+from langchain_core.tools import tool
+from sqlalchemy import Text, cast, inspect, select, text
+
+from ..alert_analysis import analyze_alert_non_persisting
+from ..config import get_config
+from ..database import get_db_connection, remap_row
+from ..db import get_engine
+from ..reporting import generate_alert_report_html, sanitize_session_id
+from ..services.db_helpers import get_table
+from .python_env import ensure_python_runtime
+from safe_py_runner import RunnerPolicy, run_code
+
+
+engine = get_engine()
+
+
+def _ok(data: Any = None, message: str = "ok", **meta) -> str:
+    return json.dumps(
+        {"ok": True, "message": message, "data": data, "meta": meta}, default=str
+    )
+
+
+def _error(message: str, code: str = "TOOL_ERROR", **meta) -> str:
+    return json.dumps(
+        {"ok": False, "error": {"code": code, "message": message}, "meta": meta},
+        default=str,
+    )
+
+
+def _load_schema_text() -> str:
+    schema_candidates = [
+        Path(__file__).parent / "db_schema.yaml",
+        Path(__file__).parent.parent / "agent" / "db_schema.yaml",
+    ]
+    for path in schema_candidates:
+        if path.exists():
+            with open(path, "r", encoding="utf-8") as f:
+                schema_data = yaml.safe_load(f)
+                return yaml.dump(schema_data, sort_keys=False)
+    return ""
+
+
+DB_SCHEMA = _load_schema_text()
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+TEXT_FALLBACK_EXTENSIONS = {".md", ".txt", ".csv", ".json", ".yaml", ".yml", ".log", ".sql", ".py"}
+
+
+@tool
+def execute_sql(query: str) -> str:
+    """
+    Execute a read-only SQL query against the alerts database.
+
+    The database schema is as follows:
+
+    {db_schema}
+
+    IMPORTANT:
+    - Only SELECT statements are allowed.
+    - Do not use PRAGMA or administrative commands.
+    """
+    if not query.strip().upper().startswith("SELECT"):
+        return _error(
+            "Only SELECT statements are allowed for security reasons.",
+            code="READ_ONLY_ENFORCED",
+        )
+
+    try:
+        stmt = text(query)
+        with engine.connect() as conn:
+            result = conn.execute(stmt)
+            rows = result.fetchall()
+            columns = list(result.keys())
+        results = [dict(zip(columns, row)) for row in rows]
+        return _ok(results, row_count=len(results))
+    except Exception as e:
+        return _error(f"Database error: {str(e)}", code="DB_ERROR")
+
+
+execute_sql.__doc__ = execute_sql.__doc__.format(db_schema=DB_SCHEMA)
+
+
+@tool
+def get_schema(table_name: Optional[str] = None) -> str:
+    """
+    Return database schema docs in YAML.
+
+    Args:
+        table_name: Optional table name to return only one table schema.
+    """
+    if not DB_SCHEMA:
+        return _error("Schema file not found.", code="SCHEMA_NOT_FOUND")
+
+    if table_name:
+        schema_data = yaml.safe_load(DB_SCHEMA)
+        if "tables" in schema_data and table_name in schema_data["tables"]:
+            filtered = yaml.dump({table_name: schema_data["tables"][table_name]}, sort_keys=False)
+            return _ok({"schema_yaml": filtered, "table_name": table_name})
+        return _error(f"Table '{table_name}' not found.", code="TABLE_NOT_FOUND")
+
+    return _ok({"schema_yaml": DB_SCHEMA})
+
+
+def _fs_cfg() -> dict[str, Any]:
+    return get_config().get_agent_v2_filesystem_config()
+
+
+def _allowed_roots() -> list[Path]:
+    roots: list[Path] = []
+    for item in _fs_cfg().get("allowed_dirs", []):
+        raw = str(item or "").strip()
+        if not raw:
+            continue
+        p = Path(os.path.expanduser(os.path.expandvars(raw)))
+        if not p.is_absolute():
+            p = (PROJECT_ROOT / p).resolve()
+        else:
+            p = p.resolve()
+        roots.append(p)
+    return roots
+
+
+def _path_depth_from_root(path: Path, root: Path) -> int:
+    rel = path.relative_to(root)
+    return len(rel.parts) - 1
+
+
+def _resolve_allowed_path(path_value: str, *, must_exist: bool) -> Path | None:
+    value = str(path_value or "").strip()
+    if not value:
+        return None
+
+    candidate = Path(os.path.expanduser(os.path.expandvars(value)))
+    if not candidate.is_absolute():
+        candidate = (PROJECT_ROOT / candidate).resolve()
+    else:
+        candidate = candidate.resolve()
+
+    max_depth = int(_fs_cfg().get("max_depth", 1))
+    for root in _allowed_roots():
+        if not root.exists():
+            continue
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            continue
+        if _path_depth_from_root(candidate, root) > max_depth:
+            return None
+        if must_exist and not candidate.exists():
+            return None
+        return candidate
+    return None
+
+
+def _allowed_read_extensions() -> set[str]:
+    configured = _fs_cfg().get("read_extensions", [])
+    values = {str(ext).lower() for ext in configured if str(ext).strip()}
+    return values or set(TEXT_FALLBACK_EXTENSIONS)
+
+
+def _allowed_write_extensions() -> set[str]:
+    configured = _fs_cfg().get("write_extensions", [".md"])
+    return {str(ext).lower() for ext in configured if str(ext).strip()} or {".md"}
+
+
+@tool
+def list_files(path: str = "artifacts") -> str:
+    """
+    List files available under configured allowed directories.
+
+    `path` must be inside allowed dirs and within configured depth.
+    """
+    base = _resolve_allowed_path(path, must_exist=True)
+    if base is None or not base.exists():
+        return _error(f"Path not found or not allowed: {path}", code="FS_PATH_NOT_ALLOWED")
+    if not base.is_dir():
+        return _error(f"Path is not a directory: {path}", code="FS_NOT_DIRECTORY")
+
+    max_depth = int(_fs_cfg().get("max_depth", 1))
+    rows: list[dict[str, Any]] = []
+    try:
+        for item in sorted(base.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+            depth = None
+            root_label = None
+            for root in _allowed_roots():
+                try:
+                    depth = _path_depth_from_root(item.resolve(), root)
+                    root_label = str(root.relative_to(PROJECT_ROOT)) if str(root).startswith(str(PROJECT_ROOT)) else str(root)
+                    break
+                except Exception:
+                    continue
+            if depth is None or depth > max_depth:
+                continue
+            rows.append(
+                {
+                    "name": item.name,
+                    "path": str(item.resolve().relative_to(PROJECT_ROOT)),
+                    "type": "dir" if item.is_dir() else "file",
+                    "size": item.stat().st_size if item.is_file() else None,
+                    "root": root_label,
+                }
+            )
+    except Exception as e:
+        return _error(f"Failed to list files: {e}", code="FS_LIST_ERROR")
+
+    return _ok({"items": rows}, item_count=len(rows))
+
+
+@tool
+def read_file(path: str) -> str:
+    """
+    Read a text file from allowed directories.
+    """
+    target = _resolve_allowed_path(path, must_exist=True)
+    if target is None or not target.is_file():
+        return _error(f"File not found or not allowed: {path}", code="FS_READ_NOT_ALLOWED")
+
+    ext = target.suffix.lower()
+    if ext not in _allowed_read_extensions():
+        return _error(f"File extension not allowed for read: {ext}", code="FS_READ_EXTENSION_BLOCKED")
+
+    max_bytes = int(_fs_cfg().get("max_read_bytes", 1024 * 1024))
+    try:
+        raw = target.read_bytes()
+        if len(raw) > max_bytes:
+            raw = raw[:max_bytes]
+        content = raw.decode("utf-8", errors="replace")
+        return _ok(
+            {
+                "path": str(target.relative_to(PROJECT_ROOT)),
+                "content": content,
+                "truncated": target.stat().st_size > max_bytes,
+                "size_bytes": target.stat().st_size,
+            }
+        )
+    except Exception as e:
+        return _error(f"Failed to read file: {e}", code="FS_READ_ERROR")
+
+
+@tool
+def write_file(path: str, content: str) -> str:
+    """
+    Write markdown content to an allowed file path.
+    """
+    target = _resolve_allowed_path(path, must_exist=False)
+    if target is None:
+        return _error(f"Path not allowed: {path}", code="FS_WRITE_NOT_ALLOWED")
+
+    ext = target.suffix.lower()
+    if ext not in _allowed_write_extensions():
+        return _error(f"File extension not allowed for write: {ext}", code="FS_WRITE_EXTENSION_BLOCKED")
+
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(str(content), encoding="utf-8")
+        return _ok({"path": str(target.relative_to(PROJECT_ROOT)), "bytes_written": len(str(content).encode("utf-8"))})
+    except Exception as e:
+        return _error(f"Failed to write file: {e}", code="FS_WRITE_ERROR")
+
+
+@tool
+def get_article_by_id(article_id: str) -> str:
+    """
+    Fetch a single internal article by article_id, including body when available.
+    """
+    config = get_config()
+    try:
+        table_name = config.get_table_name("articles")
+        articles = get_table(table_name)
+        id_col = config.get_column("articles", "id") or "id"
+        available_set = {col["name"] for col in inspect(engine).get_columns(table_name)}
+
+        id_candidates = [id_col, "id", "article_id", "art_id"]
+        id_candidates = [c for c in dict.fromkeys(id_candidates) if c in available_set]
+        if not id_candidates:
+            return _error(
+                "No article id column found in configured articles table.",
+                code="CONFIG_ERROR",
+            )
+
+        probe_values: list[Any] = [article_id]
+        if isinstance(article_id, str) and article_id.isdigit():
+            probe_values.append(int(article_id))
+        elif not isinstance(article_id, str):
+            probe_values.append(str(article_id))
+
+        row = None
+        matched_col = None
+        matched_value = None
+        for value in probe_values:
+            for candidate_col in id_candidates:
+                stmt = select(*[cast(c, Text).label(c.name) for c in articles.columns]).where(
+                    cast(articles.c[candidate_col], Text) == str(value)
+                ).limit(1)
+                with engine.connect() as conn:
+                    found = conn.execute(stmt).mappings().first()
+                if found:
+                    row = dict(found)
+                    matched_col = candidate_col
+                    matched_value = value
+                    break
+            if row:
+                break
+
+        if not row:
+            return _error(f"Article {article_id} not found.", code="ARTICLE_NOT_FOUND")
+
+        remapped = remap_row(row, "articles")
+        body_value = remapped.get("body")
+        body_present = isinstance(body_value, str) and body_value.strip() != ""
+
+        data = {
+            "id": remapped.get("id") or remapped.get("article_id") or remapped.get("art_id"),
+            "title": remapped.get("title"),
+            "created_date": remapped.get("created_date"),
+            "theme": remapped.get("theme"),
+            "sentiment": remapped.get("sentiment"),
+            "summary": remapped.get("summary"),
+            "url": remapped.get("url") or remapped.get("article_url") or remapped.get("link"),
+            "isin": remapped.get("isin"),
+            "impact_score": remapped.get("impact_score"),
+            "impact_label": remapped.get("impact_label"),
+            "body": remapped.get("body"),
+            "body_available": body_present,
+        }
+
+        return _ok(
+            data,
+            article_id=article_id,
+            matched_id_col=matched_col,
+            matched_id_value=matched_value,
+        )
+    except Exception as e:
+        return _error(f"Error fetching article by id: {str(e)}", code="ARTICLE_FETCH_ERROR")
+
+
+@tool
+def analyze_current_alert(alert_id: str) -> str:
+    """
+    Run deterministic-first analysis for the current alert without persisting.
+    """
+    conn = get_db_connection()
+    try:
+        from ..llm import get_llm_model
+
+        llm = get_llm_model()
+        analysis = analyze_alert_non_persisting(
+            conn=conn, config=get_config(), alert_id=alert_id, llm=llm
+        )
+        if not analysis.get("ok"):
+            return _error(analysis.get("error", "Analysis failed"), code="ANALYSIS_ERROR")
+
+        return _ok(
+            {
+                "analysis": analysis["result"],
+                "citations": analysis["citations"],
+                "articles_considered_count": analysis["articles_considered_count"],
+                "source": analysis["source"],
+            },
+            alert_id=alert_id,
+            start_date=analysis["start_date"],
+            end_date=analysis["end_date"],
+        )
+    except Exception as e:
+        return _error(f"Error analyzing current alert: {str(e)}", code="ANALYSIS_ERROR")
+    finally:
+        conn.close()
+
+
+@tool
+def generate_current_alert_report(
+    alert_id: str, session_id: str, include_web_news: bool = True
+) -> str:
+    """
+    Generate a downloadable investigation report for the current alert.
+    """
+    conn = get_db_connection()
+    try:
+        from ..llm import get_llm_model
+
+        safe_session = sanitize_session_id(session_id)
+        result = generate_alert_report_html(
+            conn=conn,
+            config=get_config(),
+            llm=get_llm_model(),
+            alert_id=alert_id,
+            session_id=safe_session,
+            include_web_news=include_web_news,
+        )
+        if not result.get("ok"):
+            return _error(result.get("error", "Report generation failed"), code="REPORT_ERROR")
+        return _ok(result, message="Report generated")
+    except Exception as e:
+        return _error(f"Error generating report: {str(e)}", code="REPORT_ERROR")
+    finally:
+        conn.close()
+
+
+@tool
+def execute_python(code: str, input_data_json: str = "{}") -> str:
+    """
+    Execute restricted Python code in an isolated subprocess.
+
+    Contract:
+    - Read inputs from `input_data` (dict).
+    - Assign final output to variable `result`.
+    - Optional prints are captured in stdout.
+    """
+    cfg = get_config().get_agent_v2_python_exec_config()
+    if not cfg.get("enabled", False):
+        return _error(
+            "execute_python is disabled. Enable agent_v2.python_exec.enabled in config.yaml.",
+            code="PYTHON_EXEC_DISABLED",
+        )
+
+    try:
+        input_data = json.loads(input_data_json or "{}")
+        if not isinstance(input_data, dict):
+            return _error("input_data_json must decode to an object/dict.", code="INVALID_INPUT")
+    except Exception as e:
+        return _error(f"Invalid input_data_json: {e}", code="INVALID_INPUT")
+
+    policy = RunnerPolicy(
+        timeout_seconds=int(cfg.get("timeout_seconds", 5)),
+        memory_limit_mb=int(cfg.get("memory_limit_mb", 256)),
+        cpu_time_seconds=int(cfg.get("cpu_time_seconds", 5)),
+        max_output_kb=int(cfg.get("max_output_kb", 128)),
+        allowed_imports=list(cfg.get("allowed_imports", [])),
+        allowed_builtins=list(cfg.get("allowed_builtins", [])),
+        extra_globals={},
+    )
+    try:
+        python_executable = str(ensure_python_runtime(cfg))
+    except Exception as e:
+        return _error(str(e), code="PYTHON_RUNTIME_ERROR")
+
+    result = run_code(
+        code=code,
+        input_data=input_data,
+        policy=policy,
+        python_executable=python_executable,
+    )
+
+    if not result.ok:
+        return _error(
+            result.error or "Python execution failed",
+            code="PYTHON_EXEC_ERROR",
+            timed_out=result.timed_out,
+            resource_exceeded=result.resource_exceeded,
+            stderr=result.stderr,
+            exit_code=result.exit_code,
+        )
+
+    return _ok(
+        {
+            "result": result.result,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "timed_out": result.timed_out,
+            "resource_exceeded": result.resource_exceeded,
+            "exit_code": result.exit_code,
+        },
+        message="Python executed successfully",
+    )
+
+
+@tool
+async def search_web_news(
+    query: str, max_results: int = 5, start_date: str = None, end_date: str = None
+) -> str:
+    """
+    Search the internet for recent news and summarize top results.
+    """
+    import asyncio
+    from datetime import datetime
+
+    import aiohttp
+    from bs4 import BeautifulSoup
+    from ddgs import DDGS
+
+    from ..llm import get_llm_model
+
+    max_results = min(max_results, 10)
+    max_content_chars = 3000
+    timeout_seconds = 8
+
+    search_query = query
+    if start_date:
+        try:
+            dt = datetime.strptime(start_date, "%Y-%m-%d")
+            month_year = dt.strftime("%B %Y")
+            if month_year not in query:
+                search_query = f"{query} {month_year}"
+        except Exception:
+            pass
+
+    def _search():
+        proxy_config = get_config().get_proxy_config()
+        kwargs: dict[str, Any] = {"verify": proxy_config.get("ssl_verify", True)}
+        proxy_url = proxy_config.get("https") or proxy_config.get("http")
+        if proxy_url:
+            kwargs["proxy"] = proxy_url
+        with DDGS(**kwargs) as ddgs:
+            results = list(ddgs.news(search_query, max_results=max_results * 2))
+            return results[:max_results]
+
+    async def _fetch_content(session: aiohttp.ClientSession, url: str) -> str:
+        try:
+            headers = {"User-Agent": "Mozilla/5.0"}
+            async with session.get(
+                url,
+                timeout=aiohttp.ClientTimeout(total=timeout_seconds),
+                headers=headers,
+            ) as response:
+                if response.status != 200:
+                    return ""
+                html = await response.text()
+                soup = BeautifulSoup(html, "html.parser")
+                for elem in soup(["script", "style", "nav", "header", "footer", "aside", "form"]):
+                    elem.extract()
+                text_blob = " ".join(line.strip() for line in soup.get_text().splitlines() if line.strip())
+                return text_blob[:max_content_chars]
+        except Exception:
+            return ""
+
+    def _batch_summarize(articles: list[dict], contents: list[str]) -> list[str]:
+        llm = get_llm_model()
+        parts = [
+            "Summarize each article in 2-3 sentences. Return numbered summaries only.\n"
+        ]
+        for i, (article, content) in enumerate(zip(articles, contents), 1):
+            title = article.get("title", "Unknown")
+            body = content or article.get("body", "No content available")
+            parts.append(f"\n---\nArticle {i}: {title}\n{body[:1500]}\n")
+        try:
+            response = llm.invoke("".join(parts))
+            raw = response.content.strip()
+            summaries: list[str] = []
+            current = ""
+            for line in raw.split("\n"):
+                clean = line.strip()
+                if clean and clean[0].isdigit() and "." in clean[:3]:
+                    if current:
+                        summaries.append(current.strip())
+                    current = clean.split(".", 1)[1].strip()
+                elif current:
+                    current += " " + clean
+            if current:
+                summaries.append(current.strip())
+            while len(summaries) < len(articles):
+                summaries.append("Summary not available.")
+            return summaries[: len(articles)]
+        except Exception:
+            return ["Summary generation failed." for _ in articles]
+
+    try:
+        results = await asyncio.to_thread(_search)
+        if not results:
+            return _ok([], message=f"No web news found for: {query}", query=query)
+
+        async with aiohttp.ClientSession(trust_env=True) as session:
+            urls = [r.get("url", "") for r in results]
+            tasks = [_fetch_content(session, url) for url in urls]
+            contents = await asyncio.gather(*tasks)
+
+        summaries = await asyncio.to_thread(_batch_summarize, results, contents)
+        final_results = []
+        for r, summary in zip(results, summaries):
+            final_results.append(
+                {
+                    "title": r.get("title", "No Title"),
+                    "source": r.get("source", "Unknown"),
+                    "date": r.get("date", "Unknown"),
+                    "url": r.get("url", ""),
+                    "summary": summary,
+                }
+            )
+        return _ok(final_results, query=query, row_count=len(final_results))
+    except Exception as e:
+        return _error(f"Error searching web news: {str(e)}", code="WEB_NEWS_ERROR", query=query)
+
+
+@tool
+async def search_web(query: str, max_results: int = 5) -> str:
+    """
+    Search the web for general (non-news-specific) information.
+
+    Returns lightweight search results with title, url, and snippet.
+    """
+    import asyncio
+
+    from ddgs import DDGS
+
+    max_results = min(max_results, 10)
+
+    def _search():
+        proxy_config = get_config().get_proxy_config()
+        kwargs: dict[str, Any] = {"verify": proxy_config.get("ssl_verify", True)}
+        proxy_url = proxy_config.get("https") or proxy_config.get("http")
+        if proxy_url:
+            kwargs["proxy"] = proxy_url
+        with DDGS(**kwargs) as ddgs:
+            return list(ddgs.text(query, max_results=max_results))
+
+    try:
+        results = await asyncio.to_thread(_search)
+        if not results:
+            return _ok([], message=f"No web results found for: {query}", query=query)
+
+        final_results = []
+        for item in results:
+            final_results.append(
+                {
+                    "title": item.get("title", "No title"),
+                    "url": item.get("href", ""),
+                    "snippet": item.get("body", ""),
+                    "source": item.get("source", "web"),
+                }
+            )
+        return _ok(final_results, query=query, row_count=len(final_results))
+    except Exception as e:
+        return _error(f"Error searching web: {str(e)}", code="WEB_SEARCH_ERROR", query=query)
+
+
+@tool
+async def scrape_websites(urls: list[str]) -> str:
+    """
+    Fetch and extract readable text from multiple URLs concurrently.
+    """
+    import asyncio
+
+    import aiohttp
+    from bs4 import BeautifulSoup
+
+    if not urls:
+        return _error("No URLs provided.", code="INVALID_INPUT")
+
+    max_chars_per_url = 2000
+    timeout_seconds = 10
+    url_list = urls[:10]
+
+    async def fetch_one(session: aiohttp.ClientSession, url: str) -> tuple[str, str]:
+        try:
+            headers = {"User-Agent": "Mozilla/5.0"}
+            async with session.get(
+                url,
+                timeout=aiohttp.ClientTimeout(total=timeout_seconds),
+                headers=headers,
+            ) as response:
+                if response.status != 200:
+                    return url, f"[Error: HTTP {response.status}]"
+                html = await response.text()
+                soup = BeautifulSoup(html, "html.parser")
+                for element in soup(["script", "style", "nav", "header", "footer", "aside"]):
+                    element.extract()
+                text_blob = "\n".join(
+                    chunk.strip()
+                    for line in soup.get_text().splitlines()
+                    for chunk in line.split("  ")
+                    if chunk.strip()
+                )
+                if len(text_blob) > max_chars_per_url:
+                    text_blob = text_blob[:max_chars_per_url] + "... (truncated)"
+                return url, text_blob
+        except asyncio.TimeoutError:
+            return url, "[Error: Request timed out]"
+        except Exception as e:
+            return url, f"[Error: {str(e)}]"
+
+    ssl_verify = get_config().get_proxy_config().get("ssl_verify", True)
+    connector = aiohttp.TCPConnector(ssl=ssl_verify)
+    async with aiohttp.ClientSession(trust_env=True, connector=connector) as session:
+        tasks = [fetch_one(session, url) for url in url_list]
+        results = await asyncio.gather(*tasks)
+
+    formatted = []
+    for i, (url, content) in enumerate(results, 1):
+        formatted.append({"index": i, "url": url, "content": content})
+    return _ok(formatted, url_count=len(results))
+
+
+TOOL_REGISTRY = {
+    "execute_sql": execute_sql,
+    "execute_python": execute_python,
+    "get_schema": get_schema,
+    "list_files": list_files,
+    "read_file": read_file,
+    "write_file": write_file,
+    "get_article_by_id": get_article_by_id,
+    "analyze_current_alert": analyze_current_alert,
+    "search_web": search_web,
+    "search_web_news": search_web_news,
+    "generate_current_alert_report": generate_current_alert_report,
+    "scrape_websites": scrape_websites,
+}

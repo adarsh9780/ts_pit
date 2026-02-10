@@ -78,6 +78,36 @@ Run backend non-LLM unit tests:
 uv run python -m unittest discover -s tests -p 'test_*.py'
 ```
 
+## Agent V2 Python Runtime (Isolated DS Env)
+
+`execute_python` in `agent_v2` uses a separate interpreter so data-science packages stay out of the main app environment.
+
+1. Configure packages in `config.yaml`:
+
+```yaml
+agent_v2:
+  python_exec:
+    enabled: true
+    venv_path: "~/.ts_pit/safe_py_runner/.venv"
+    auto_create_venv: false
+    packages:
+      - numpy
+      - pandas
+      - polars
+      - duckdb
+      - scikit-learn
+      - statsmodels
+      - plotly
+```
+
+2. One-liner setup:
+
+```bash
+uv run python scripts/setup_safe_py_runner_env.py
+```
+
+This creates/updates the isolated runner venv and installs the configured `packages` there.
+
 ## Configuration
 
 Edit `config.yaml` to map your database tables/columns.

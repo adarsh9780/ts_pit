@@ -24,6 +24,7 @@ from .config import get_config
 from .db import validate_required_schema
 from .llm import get_llm_model
 from .logger import init_logger, logprint
+from .agent_v2.python_env import ensure_python_runtime
 
 
 config = get_config()
@@ -71,6 +72,15 @@ async def lifespan(app: FastAPI):
 
     logprint("Initializing LLM model...")
     app.state.llm = get_llm_model()
+
+    if config.get_agent_mode() == "v2":
+        py_exec_cfg = config.get_agent_v2_python_exec_config()
+        if py_exec_cfg.get("enabled", False):
+            py_exec_path = ensure_python_runtime(py_exec_cfg)
+            logprint(
+                "Validated agent_v2 python runtime",
+                python_executable=str(py_exec_path),
+            )
 
     db_path = Path.home() / ".ts_pit" / "agent_memory.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)

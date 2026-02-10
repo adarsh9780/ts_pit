@@ -212,6 +212,76 @@ class Config:
             raise ValueError("Invalid agent.mode in config.yaml. Expected one of: v1, v2")
         return mode
 
+    def get_agent_v2_python_exec_config(self) -> Dict[str, Any]:
+        """Get execute_python policy config for agent v2."""
+        defaults: Dict[str, Any] = {
+            "enabled": False,
+            "timeout_seconds": 5,
+            "memory_limit_mb": 256,
+            "cpu_time_seconds": 5,
+            "max_output_kb": 128,
+            "venv_path": "~/.ts_pit/safe_py_runner/.venv",
+            "python_executable": "",
+            "auto_create_venv": False,
+            "packages": [],
+            "allowed_imports": ["math", "statistics", "json"],
+            "allowed_builtins": [
+                "abs",
+                "all",
+                "any",
+                "bool",
+                "dict",
+                "enumerate",
+                "float",
+                "int",
+                "len",
+                "list",
+                "max",
+                "min",
+                "print",
+                "range",
+                "round",
+                "set",
+                "sorted",
+                "str",
+                "sum",
+                "tuple",
+                "zip",
+            ],
+        }
+        cfg = self._config.get("agent_v2", {}).get("python_exec", {})
+        if not isinstance(cfg, dict):
+            return defaults
+        merged = dict(defaults)
+        merged.update(cfg)
+        return merged
+
+    def get_agent_v2_filesystem_config(self) -> Dict[str, Any]:
+        """Get filesystem access policy for agent v2 generic file tools."""
+        defaults: Dict[str, Any] = {
+            "allowed_dirs": ["artifacts"],
+            "max_depth": 1,
+            "read_extensions": [
+                ".md",
+                ".txt",
+                ".csv",
+                ".json",
+                ".yaml",
+                ".yml",
+                ".log",
+                ".sql",
+                ".py",
+            ],
+            "write_extensions": [".md"],
+            "max_read_bytes": 1024 * 1024,
+        }
+        cfg = self._config.get("agent_v2", {}).get("filesystem", {})
+        if not isinstance(cfg, dict):
+            return defaults
+        merged = dict(defaults)
+        merged.update(cfg)
+        return merged
+
     def get_impact_label_aliases(self) -> Dict[str, str]:
         """
         Get optional impact-label aliases.

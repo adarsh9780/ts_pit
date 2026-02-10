@@ -25,4 +25,8 @@ dependencies = [
     "faker>=40.1.2",
     "loguru>=0.7.3",
     "sqlalchemy>=2.0.43",
+    "safe-py-runner",
 ]
+
+[tool.uv.sources]
+safe-py-runner = { path = "libs/safe_py_runner", editable = true }

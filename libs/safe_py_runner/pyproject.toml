@@ -1,0 +1,21 @@
+[project]
+name = "safe-py-runner"
+version = "0.1.0"
+description = "Restricted Python execution runner with subprocess isolation, timeout, memory caps, and import/global controls"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "RestrictedPython>=7.4",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+]
+
+[build-system]
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/safe_py_runner"]

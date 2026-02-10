@@ -34,7 +34,6 @@ __pycache__/
 *.suo
 *.sln
 *.bak_*
-backend/agent_v2
 artifacts/reports/*
 *.db-shm
 *.db-wal

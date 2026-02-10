@@ -256,6 +256,70 @@ proxy:
 agent:
   mode: "v1"
 
+agent_v2:
+  filesystem:
+    # Directories are resolved relative to project root unless absolute.
+    # Keep this scoped and minimal.
+    allowed_dirs:
+      - artifacts
+    # Max nesting depth from each allowed root:
+    # 0 => only files directly in root
+    # 1 => allow one level below root (default)
+    max_depth: 1
+    read_extensions:
+      - .md
+      - .txt
+      - .csv
+      - .json
+      - .yaml
+      - .yml
+      - .log
+      - .sql
+      - .py
+    write_extensions:
+      - .md
+    max_read_bytes: 1048576
+
+  python_exec:
+    enabled: false
+    timeout_seconds: 5
+    memory_limit_mb: 256
+    cpu_time_seconds: 5
+    max_output_kb: 128
+    venv_path: "~/.ts_pit/safe_py_runner/.venv"
+    # Optional explicit interpreter path; if empty, resolved as <venv_path>/bin/python
+    python_executable: ""
+    # Production default should remain false (fail fast if venv is missing).
+    auto_create_venv: false
+    # Optional packages to install when auto_create_venv=true (keep DS deps out of main app env).
+    packages: []
+    allowed_imports:
+      - math
+      - statistics
+      - json
+    allowed_builtins:
+      - abs
+      - all
+      - any
+      - bool
+      - dict
+      - enumerate
+      - float
+      - int
+      - len
+      - list
+      - max
+      - min
+      - print
+      - range
+      - round
+      - set
+      - sorted
+      - str
+      - sum
+      - tuple
+      - zip
+
 # Logging Configuration
 # =====================
 logging:
