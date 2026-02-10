@@ -150,7 +150,7 @@ const onFilterStatus = (val) => { currentFilters.value.status = val; applyFilter
 const onFilterType = (val) => { currentFilters.value.type = val; applyFilters(); };
 const onFilterDate = (val) => { 
     currentFilters.value.date = val; 
-    fetchAlerts(val || null); // Re-fetch from backend as original implementation did
+    applyFilters();
 };
 
 </script>

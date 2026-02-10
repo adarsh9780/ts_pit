@@ -92,8 +92,15 @@ def get_alerts(date: str | None = None):
     alert_date_col = config.get_column("alerts", "alert_date")
 
     if date:
+        # Support both raw datetime strings and canonical YYYY-MM-DD filters.
         cursor.execute(
-            f'SELECT * FROM "{table_name}" WHERE "{alert_date_col}" = ?', (date,)
+            f'''
+            SELECT * FROM "{table_name}"
+            WHERE "{alert_date_col}" = ?
+               OR date("{alert_date_col}") = date(?)
+               OR substr("{alert_date_col}", 1, 10) = ?
+            ''',
+            (date, date, date),
         )
     else:
         cursor.execute(f'SELECT * FROM "{table_name}"')
@@ -213,4 +220,3 @@ def generate_summary(alert_id: str, request: Request):
         }
     finally:
         conn.close()
-
