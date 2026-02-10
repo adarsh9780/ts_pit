@@ -361,6 +361,7 @@ const {
   border-radius: 6px;
   background: rgba(0, 0, 0, 0.02);
   overflow: hidden;
+  min-width: 0;
 }
 
 .tool-summary {
@@ -407,6 +408,7 @@ const {
   padding: 8px;
   display: grid;
   gap: 8px;
+  min-width: 0;
 }
 
 .tool-section-title {
@@ -418,8 +420,11 @@ const {
 
 .tool-pre {
   margin: 0;
+  max-width: 100%;
   max-height: 180px;
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: auto;
+  white-space: pre;
   padding: 8px;
   border-radius: 4px;
   border: 1px solid var(--color-border);

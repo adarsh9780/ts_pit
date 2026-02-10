@@ -143,6 +143,47 @@ Status: {ctx.status or "N/A"}
             return text_value[:max_len] + "...(truncated)"
         return text_value
 
+    def _extract_tool_output_payload(raw_output):
+        """
+        Normalize tool output event payload.
+
+        LangGraph may emit plain strings or ToolMessage-like objects with
+        `.content`. We normalize to the actual content string/object so error
+        parsing works consistently.
+        """
+        if raw_output is None:
+            return None
+        if isinstance(raw_output, (dict, list)):
+            return raw_output
+        content = getattr(raw_output, "content", None)
+        if content is not None:
+            return content
+        return raw_output
+
+    def _parse_tool_json_payload(normalized_output):
+        """
+        Parse JSON payload when tool returned stringified JSON.
+        Supports wrappers like: content='{"ok": false, ...}'.
+        """
+        if isinstance(normalized_output, dict):
+            return normalized_output
+        if not isinstance(normalized_output, str):
+            return None
+        txt = normalized_output.strip()
+        try:
+            return json.loads(txt)
+        except Exception:
+            pass
+        marker = "content='"
+        if marker in txt and txt.endswith("'"):
+            start = txt.find(marker) + len(marker)
+            candidate = txt[start:-1]
+            try:
+                return json.loads(candidate)
+            except Exception:
+                return None
+        return None
+
     async def event_generator():
         tool_started_at: dict[str, float] = {}
         try:
@@ -176,7 +217,8 @@ Status: {ctx.status or "N/A"}
 
                 elif kind == "on_tool_end":
                     tool_name = event["name"]
-                    tool_output = event.get("data", {}).get("output")
+                    raw_tool_output = event.get("data", {}).get("output")
+                    tool_output = _extract_tool_output_payload(raw_tool_output)
                     duration_ms = None
                     started = tool_started_at.pop(tool_name, None)
                     if started is not None:
@@ -184,27 +226,23 @@ Status: {ctx.status or "N/A"}
                     ok = True
                     error_code = None
                     error_message = None
-                    if isinstance(tool_output, str):
-                        try:
-                            parsed_output = json.loads(tool_output)
-                            if isinstance(parsed_output, dict) and parsed_output.get("ok") is False:
-                                ok = False
-                                err = parsed_output.get("error") or {}
-                                if isinstance(err, dict):
-                                    error_code = err.get("code")
-                                    error_message = err.get("message")
-                                else:
-                                    error_message = str(err)
-                                logprint(
-                                    "Tool execution returned error payload",
-                                    level="ERROR",
-                                    session_id=body.session_id,
-                                    tool=tool_name,
-                                    error_code=error_code,
-                                    error_message=error_message,
-                                )
-                        except Exception:
-                            pass
+                    parsed_output = _parse_tool_json_payload(tool_output)
+                    if isinstance(parsed_output, dict) and parsed_output.get("ok") is False:
+                        ok = False
+                        err = parsed_output.get("error") or {}
+                        if isinstance(err, dict):
+                            error_code = err.get("code")
+                            error_message = err.get("message")
+                        else:
+                            error_message = str(err)
+                        logprint(
+                            "Tool execution returned error payload",
+                            level="ERROR",
+                            session_id=body.session_id,
+                            tool=tool_name,
+                            error_code=error_code,
+                            error_message=error_message,
+                        )
                     if (
                         tool_name == "generate_current_alert_report"
                         and isinstance(tool_output, str)

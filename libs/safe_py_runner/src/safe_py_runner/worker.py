@@ -3,9 +3,13 @@ from __future__ import annotations
 import contextlib
 import io
 import json
-import resource
 import sys
 from typing import Any
+
+try:
+    import resource  # POSIX only
+except Exception:  # pragma: no cover - platform specific
+    resource = None
 
 from RestrictedPython import PrintCollector, compile_restricted
 from RestrictedPython.Guards import (
@@ -18,6 +22,10 @@ from RestrictedPython.Guards import (
 
 def _set_limits(memory_limit_mb: int, cpu_time_seconds: int) -> list[str]:
     errors: list[str] = []
+    if resource is None:
+        errors.append("RLIMIT limits unavailable on this platform")
+        return errors
+
     mem_bytes = int(memory_limit_mb) * 1024 * 1024
 
     try:
