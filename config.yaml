@@ -288,7 +288,9 @@ agent_v2:
     max_output_kb: 128
     # venv creation strategy: python_venv | uv_venv
     venv_manager: "python_venv"
-    venv_path: "~/.ts_pit/safe_py_runner/.venv"
+    # On Windows/VDI, prefer a writable allowed location, e.g.:
+    #   C:/Users/<you>/ds/.virtualenvs/safe_py_runner/.venv
+    venv_path: "~/ds/.virtualenvs/safe_py_runner/.venv"
     # Optional explicit runtime interpreter path (usually inside venv_path).
     python_executable: ""
     # Optional explicit base interpreter used to create venv.

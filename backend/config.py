@@ -214,17 +214,27 @@ class Config:
 
     def get_agent_v2_python_exec_config(self) -> Dict[str, Any]:
         """Get execute_python policy config for agent v2."""
+        default_interpreter_candidates = (
+            ["py", "python", "python3"]
+            if os.name == "nt"
+            else ["python3", "python", "py"]
+        )
+        default_venv_path = (
+            "~/ds/.virtualenvs/safe_py_runner/.venv"
+            if os.name == "nt"
+            else "~/.ts_pit/safe_py_runner/.venv"
+        )
         defaults: Dict[str, Any] = {
             "enabled": False,
             "timeout_seconds": 5,
             "memory_limit_mb": 256,
             "cpu_time_seconds": 5,
             "max_output_kb": 128,
-            "venv_path": "~/.ts_pit/safe_py_runner/.venv",
+            "venv_path": default_venv_path,
             "venv_manager": "python_venv",
             "python_executable": "",
             "base_python_executable": "",
-            "interpreter_candidates": ["python3", "python", "py"],
+            "interpreter_candidates": default_interpreter_candidates,
             "auto_create_venv": False,
             "packages": [],
             "required_imports": ["RestrictedPython"],

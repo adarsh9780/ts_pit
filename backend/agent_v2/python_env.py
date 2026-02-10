@@ -48,6 +48,40 @@ def _canonicalize_interpreter(path_value: Path) -> Path:
     return path_value.resolve()
 
 
+def _discover_windows_launcher_interpreter() -> Path | None:
+    """
+    Resolve interpreter via the Windows `py` launcher when available.
+
+    This avoids accidentally using the currently activated project venv
+    interpreter as the base runtime for creating another venv.
+    """
+    if os.name != "nt":
+        return None
+    py_launcher = shutil.which("py")
+    if not py_launcher:
+        return None
+    for flag in ("-3", ""):
+        cmd = [py_launcher]
+        if flag:
+            cmd.append(flag)
+        cmd.extend(["-c", "import sys;print(sys.executable)"])
+        try:
+            proc = subprocess.run(
+                cmd,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            out = (proc.stdout or "").strip()
+            if out:
+                path = Path(out).resolve()
+                if path.exists():
+                    return path
+        except Exception:
+            continue
+    return None
+
+
 def _discover_base_interpreter(exec_cfg: dict[str, Any]) -> Path:
     explicit_base = _resolve_executable_path(str(exec_cfg.get("base_python_executable", "")))
     if explicit_base:
@@ -56,6 +90,10 @@ def _discover_base_interpreter(exec_cfg: dict[str, Any]) -> Path:
     explicit_runtime = _resolve_executable_path(str(exec_cfg.get("python_executable", "")))
     if explicit_runtime:
         return _canonicalize_interpreter(explicit_runtime)
+
+    windows_launcher = _discover_windows_launcher_interpreter()
+    if windows_launcher is not None:
+        return windows_launcher
 
     candidates = exec_cfg.get("interpreter_candidates", ["python3", "python", "py"])
     for name in candidates:
@@ -105,8 +143,16 @@ def _create_venv(venv_dir: Path, base_interpreter: Path, manager: str) -> None:
         stderr_text = (e.stderr or "").strip()
         stdout_text = (e.stdout or "").strip()
         details = stderr_text or stdout_text or str(e)
+        hint = ""
+        if os.name == "nt":
+            hint = (
+                " On Windows VDI, set `agent_v2.python_exec.venv_path` to a permitted "
+                "location such as `~/ds/.virtualenvs/safe_py_runner/.venv` and set "
+                "`agent_v2.python_exec.base_python_executable` to an approved system "
+                "Python executable."
+            )
         raise RuntimeError(
-            f"Failed to create venv at {venv_dir} using manager='{manager}': {details}"
+            f"Failed to create venv at {venv_dir} using manager='{manager}': {details}.{hint}"
         ) from e
 
 
@@ -161,12 +207,25 @@ def _validate_required_imports(python_executable: Path, required_imports: list[s
         "        missing.append(name)",
         "print(','.join(missing))",
     ]
-    proc = subprocess.run(
-        [str(python_executable), "-c", "\n".join(script_lines)],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        proc = subprocess.run(
+            [str(python_executable), "-c", "\n".join(script_lines)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as e:
+        hint = ""
+        if os.name == "nt" and getattr(e, "winerror", None) == 1260:
+            hint = (
+                " Group policy blocked launching this interpreter. "
+                "Use a permitted venv location (for example "
+                "`~/ds/.virtualenvs/safe_py_runner/.venv`) and an approved "
+                "`base_python_executable`."
+            )
+        raise RuntimeError(
+            f"Failed import validation in runtime {python_executable}: {e}.{hint}"
+        ) from e
     missing_raw = (proc.stdout or "").strip()
     if proc.returncode != 0:
         stderr_text = (proc.stderr or "").strip()
