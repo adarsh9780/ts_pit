@@ -1,0 +1,299 @@
+_meta:
+  generated_by: scripts/generate_schema.py
+  database: alerts.db
+  instructions: Column names are from config.yaml (not raw DB names) for portability.
+    Add descriptions to help the AI agent understand column semantics.
+tables:
+  alerts:
+    description: Trade surveillance alerts requiring investigation. Each alert represents
+      a potentially suspicious trade that needs human review.
+    row_count: 50
+    columns:
+      id:
+        type: INTEGER
+        description: Unique identifier for each alert (e.g., 1000)
+        db_column: Alert ID
+        example: 1000
+      ticker:
+        type: TEXT
+        description: Stock ticker symbol (e.g., NVDA, AAPL)
+        db_column: Ticker
+        example: NVDA
+      status:
+        type: TEXT
+        description: 'Current alert status (canonical): ''NEEDS_REVIEW'', ''ESCALATE_L2'', or ''DISMISS'''
+        db_column: status
+        example: NEEDS_REVIEW
+      isin:
+        type: TEXT
+        description: International Securities Identification Number - links to news
+          articles
+        db_column: ISIN
+        example: US67066G1040
+      instrument_name:
+        type: TEXT
+        description: Full company name
+        db_column: Instrument Name
+        example: NVIDIA Corporation
+      buy_quantity:
+        type: INTEGER
+        description: Total number of shares bought in this alert
+        db_column: Sum of buy quantity
+        example: 2739
+      sell_quantity:
+        type: INTEGER
+        description: Total number of shares sold in this alert
+        db_column: Sum of sell quantity
+        example: 0
+      execution_date:
+        type: TEXT
+        description: Date when the trade was executed (YYYY-MM-DD)
+        db_column: Trade execution date
+        example: '2025-12-31'
+      trade_type:
+        type: TEXT
+        description: 'Direction of the trade: ''Buy'' or ''Sell'''
+        db_column: trade type
+        example: Buy
+      alert_date:
+        type: TEXT
+        description: Date when the alert was generated
+        db_column: Alert date
+        example: '2026-01-01'
+      start_date:
+        type: TEXT
+        description: Start of the investigation window for news search
+        db_column: Start date
+        example: '2025-12-17'
+      end_date:
+        type: TEXT
+        description: End of the investigation window for news search
+        db_column: End date
+        example: '2026-01-01'
+      narrative_theme:
+        type: TEXT
+        description: AI-generated theme summarizing the main news catalyst
+        db_column: narrative_theme
+        example: Product Tech Launch and Analyst Opinion
+      narrative_summary:
+        type: TEXT
+        description: AI-generated executive summary explaining news-to-price correlation
+        db_column: narrative_summary
+        example: The price of V experienced fluctuations throughout January 2026.
+          A significant drop occurred on Janu...
+      summary_generated_at:
+        type: TEXT
+        description: Timestamp when AI summary was generated (ISO format)
+        db_column: summary_generated_at
+        example: '2026-02-05T16:40:30.848725'
+      bullish_events:
+        type: TEXT
+        description: JSON array of positive news events identified by AI
+        db_column: bullish_events
+        example: '["Earnings announcement on January 28th"]'
+      bearish_events:
+        type: TEXT
+        description: JSON array of negative news events identified by AI
+        db_column: bearish_events
+        example: '["Product Tech Launch on January 29th", "Analyst opinion on January
+          30th"]'
+      neutral_events:
+        type: TEXT
+        description: JSON array of neutral/informational events
+        db_column: neutral_events
+        example: '["Executive change on January 29th"]'
+      recommendation:
+        type: TEXT
+        description: 'AI recommendation (canonical enum): ''DISMISS'', ''ESCALATE_L2'', or ''NEEDS_REVIEW'''
+        db_column: recommendation
+        example: NEEDS_REVIEW
+      recommendation_reason:
+        type: TEXT
+        description: Detailed AI reasoning for the recommendation as markdown list
+        db_column: recommendation_reason
+        example: '- The alert type is BUY, however, bearish news events were detected.
+
+          - The price dropped on Jan 30th...'
+  articles:
+    description: News articles linked to securities. Used to correlate market-moving
+      events with trades.
+    row_count: 863
+    columns:
+      id:
+        type: TEXT
+        description: Unique article identifier (UUID)
+        db_column: art_id
+        example: a4ca5e42-c5f9-41ca-b8cb-6217fed530b4
+      isin:
+        type: TEXT
+        description: ISIN linking article to alerts/securities
+        db_column: isin
+        example: US67066G1040
+      created_date:
+        type: TEXT
+        description: Article publication date (YYYY-MM-DD)
+        db_column: art_created_date
+        example: '2025-12-17'
+      title:
+        type: TEXT
+        description: Article headline
+        db_column: art_title
+        example: NVDA - M_AND_A reported on 2025-12-17
+      body:
+        type: TEXT
+        description: Full article text content
+        db_column: art_body
+        example: The latest reports for NVIDIA Corporation indicate a major activity
+          in the M_AND_A sector. Mergers, ...
+      sentiment:
+        type: TEXT
+        description: Article sentiment analysis result
+        db_column: sentiment
+        example: 'Neutral: This M_AND_A event could significantly impact investor
+          sentiment.'
+      theme:
+        type: TEXT
+        description: Original article category/theme
+        db_column: theme
+        example: M_AND_A
+      summary:
+        type: TEXT
+        description: Brief article summary
+        db_column: art_summary
+        example: NVDA m and a event detected.
+      impact_score:
+        type: REAL
+        description: Z-score measuring price impact of this news (higher = more impact).
+          Values > 2.0 are significant.
+        db_column: impact_score
+        example: 1.67
+      impact_label:
+        type: TEXT
+        description: 'Impact classification (canonical): ''Low'', ''Medium'', or ''High'''
+        db_column: impact_label
+        example: Medium
+      crescendo_id:
+        type: TEXT
+        description: Legacy identifier (same as ISIN)
+        db_column: crescendo_id
+        example: US67066G1040
+  prices:
+    description: Daily OHLCV price data for tickers. Used for price charts and impact
+      scoring.
+    row_count: 2913
+    columns:
+      ticker:
+        type: TEXT
+        description: Stock ticker symbol
+        db_column: ticker
+        example: AAPL
+      date:
+        type: TEXT
+        description: Trading date (YYYY-MM-DD)
+        db_column: date
+        example: '2025-12-23'
+      open:
+        type: REAL
+        description: Market open price
+        db_column: opening price
+        example: 270.8399963378906
+      high:
+        type: REAL
+        description: Highest price during the day
+        db_column: high price
+        example: 350.04998779296875
+      low:
+        type: REAL
+        description: Lowest price during the day
+        db_column: low price
+        example: 343.4800109863281
+      close:
+        type: REAL
+        description: Market close price
+        db_column: closing price
+        example: 272.3599853515625
+      volume:
+        type: INTEGER
+        description: Trading volume (number of shares)
+        db_column: volume
+        example: 29642000
+      industry:
+        type: TEXT
+        description: Company's industry sector
+        db_column: industry
+        example: Consumer Electronics
+  prices_hourly:
+    description: Hourly OHLCV price data for impact score calculation. Higher granularity
+      than daily prices.
+    row_count: 50688
+    columns:
+      ticker:
+        type: TEXT
+        description: Stock ticker symbol
+        db_column: ticker
+        primary_key: true
+        example: AAPL
+      date:
+        type: TEXT
+        description: Timestamp with hour precision (YYYY-MM-DD HH:MM:SS)
+        db_column: date
+        primary_key: true
+        example: '2023-03-07 09:30:00'
+      open:
+        type: REAL
+        description: Hour open price
+        db_column: open
+        example: 23.600000381469727
+      high:
+        type: REAL
+        description: Highest price during the hour
+        db_column: high
+        example: 23.854000091552734
+      low:
+        type: REAL
+        description: Lowest price during the hour
+        db_column: low
+        example: 23.32938003540039
+      close:
+        type: REAL
+        description: Hour close price
+        db_column: close
+        example: 23.6597900390625
+      volume:
+        type: INTEGER
+        description: Trading volume during the hour
+        db_column: volume
+        example: 10790535
+  article_themes:
+    description: AI-generated analysis and themes for news articles. Linked to articles
+      table via art_id.
+    row_count: 863
+    columns:
+      art_id:
+        type: TEXT
+        description: Foreign key linking to articles.art_id
+        db_column: art_id
+        primary_key: true
+        example: 006cd5d0-0eb3-472b-93ec-c953c165a6bc
+      theme:
+        type: TEXT
+        description: 'AI-classified category: EARNINGS_ANNOUNCEMENT, M_AND_A, DIVIDEND_CORP_ACTION,
+          PRODUCT_TECH_LAUNCH, etc.'
+        db_column: narrative_theme
+        example: MACRO_SECTOR
+      summary:
+        type: TEXT
+        description: AI-generated summary of the article (usually empty, original
+          summary preferred)
+        db_column: narrative_summary
+        example: ''
+      analysis:
+        type: TEXT
+        description: Detailed AI analysis of the article's impact
+        db_column: narrative_analysis
+      p1_prominence:
+        type: TEXT
+        description: 'Entity prominence score: H (High - in title), M (Medium - in
+          lead), L (Low - in body)'
+        db_column: p1_prominence
+        example: H

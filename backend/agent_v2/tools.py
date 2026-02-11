@@ -4,7 +4,7 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 from langchain_core.tools import tool
@@ -160,6 +160,97 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TEXT_FALLBACK_EXTENSIONS = {".md", ".txt", ".csv", ".json", ".yaml", ".yml", ".log", ".sql", ".py"}
 
 
+def list_schema_tables() -> list[dict[str, Any]]:
+    """
+    Non-tool helper: list configured schema tables and high-level descriptions.
+    """
+    if not DB_SCHEMA:
+        return []
+    try:
+        parsed = yaml.safe_load(DB_SCHEMA) or {}
+    except Exception:
+        return []
+    table_docs = parsed.get("tables") if isinstance(parsed, dict) else {}
+    if not isinstance(table_docs, dict):
+        return []
+
+    cfg = get_config()
+    rows: list[dict[str, Any]] = []
+    for table_key, table_value in table_docs.items():
+        if not isinstance(table_value, dict):
+            continue
+        try:
+            physical_name = cfg.get_table_name(table_key)
+        except Exception:
+            physical_name = table_key
+        rows.append(
+            {
+                "table_key": table_key,
+                "table_name": physical_name,
+                "description": table_value.get("description"),
+            }
+        )
+    return rows
+
+
+def list_schema_columns(table_name: str | None = None) -> list[dict[str, Any]]:
+    """
+    Non-tool helper: list schema columns with db names and descriptions.
+    """
+    if not DB_SCHEMA:
+        return []
+    try:
+        parsed = yaml.safe_load(DB_SCHEMA) or {}
+    except Exception:
+        return []
+    table_docs = parsed.get("tables") if isinstance(parsed, dict) else {}
+    if not isinstance(table_docs, dict):
+        return []
+
+    cfg = get_config()
+    alias_to_key: dict[str, str] = {}
+    for key in table_docs.keys():
+        alias_to_key[str(key).lower()] = str(key)
+        try:
+            alias_to_key[str(cfg.get_table_name(key)).lower()] = str(key)
+        except Exception:
+            pass
+
+    selected_key = None
+    if table_name:
+        selected_key = alias_to_key.get(str(table_name).strip().lower())
+        if not selected_key:
+            return []
+
+    target_keys = [selected_key] if selected_key else list(table_docs.keys())
+    rows: list[dict[str, Any]] = []
+    for key in target_keys:
+        table_value = table_docs.get(key)
+        if not isinstance(table_value, dict):
+            continue
+        try:
+            physical_name = cfg.get_table_name(key)
+        except Exception:
+            physical_name = key
+        columns = table_value.get("columns", {})
+        if not isinstance(columns, dict):
+            continue
+        for logical_name, col_info in columns.items():
+            if not isinstance(col_info, dict):
+                continue
+            rows.append(
+                {
+                    "table_key": key,
+                    "table_name": physical_name,
+                    "logical_column": logical_name,
+                    "db_column": col_info.get("db_column"),
+                    "type": col_info.get("type"),
+                    "description": col_info.get("description"),
+                }
+            )
+    return rows
+
+
 @tool
 def execute_sql(query: str) -> str:
     """
@@ -202,35 +293,14 @@ def execute_sql(query: str) -> str:
                 hint = (
                     " Hint: this DB uses mapped physical column names from config.yaml. "
                     f"For alerts table logical 'id', use '{cfg.get_column('alerts', 'id')}'. "
-                    "Use get_schema() before writing SQL."
+                    "Read artifacts/DB_SCHEMA_REFERENCE.yaml for table and column mappings."
                 )
             except Exception:
-                hint = " Hint: use get_schema() first and query physical column names."
+                hint = " Hint: read artifacts/DB_SCHEMA_REFERENCE.yaml and query physical column names."
         return _error(f"Database error: {msg}{hint}", code="DB_ERROR")
 
 
 execute_sql.__doc__ = execute_sql.__doc__.format(db_schema=DB_SCHEMA)
-
-
-@tool
-def get_schema(table_name: Optional[str] = None) -> str:
-    """
-    Return database schema docs in YAML.
-
-    Args:
-        table_name: Optional table name to return only one table schema.
-    """
-    if not DB_SCHEMA:
-        return _error("Schema file not found.", code="SCHEMA_NOT_FOUND")
-
-    if table_name:
-        schema_data = yaml.safe_load(DB_SCHEMA)
-        if "tables" in schema_data and table_name in schema_data["tables"]:
-            filtered = yaml.dump({table_name: schema_data["tables"][table_name]}, sort_keys=False)
-            return _ok({"schema_yaml": filtered, "table_name": table_name})
-        return _error(f"Table '{table_name}' not found.", code="TABLE_NOT_FOUND")
-
-    return _ok({"schema_yaml": DB_SCHEMA})
 
 
 def _fs_cfg() -> dict[str, Any]:
@@ -875,7 +945,6 @@ TOOL_REGISTRY = {
     "execute_sql": execute_sql,
     "execute_python": execute_python,
     "get_python_capabilities": get_python_capabilities,
-    "get_schema": get_schema,
     "list_files": list_files,
     "read_file": read_file,
     "write_file": write_file,

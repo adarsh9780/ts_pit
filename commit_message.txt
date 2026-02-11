@@ -1,8 +1,10 @@
-feat(agent_v2): add internal methodology doc paths to system prompt for grounded scoring responses
+refactor(agent_v2): remove get_schema tool binding and shift schema grounding to artifacts reference
 
-- list canonical internal references and their purpose:
-  - artifacts/SCORING_METHODOLOGY.md
-  - artifacts/TECHNICAL_IMPLEMENTATION.md
-  - artifacts/BUSINESS_METHODOLOGY.md
-- instruct model to ground methodology/calculation answers in internal docs/data before hypothetical formulas
-- keep tool choice autonomous (no tool-order directives added)
+- remove `get_schema` from agent_v2 tools and TOOL_REGISTRY
+- add non-tool schema helpers:
+  - `list_schema_tables()`
+  - `list_schema_columns(table_name=None)`
+- add `artifacts/DB_SCHEMA_REFERENCE.yaml` as schema source-of-truth file for agent grounding
+- update system prompt to reference schema artifact path instead of schema tool
+- update SQL error hint text to point to `artifacts/DB_SCHEMA_REFERENCE.yaml`
+- update SQL tool test expectation accordingly

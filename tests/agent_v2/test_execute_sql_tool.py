@@ -239,7 +239,7 @@ class ExecuteSqlToolTests(unittest.TestCase):
         payload = self._invoke_execute_sql("SELECT definitely_missing_col FROM alerts")
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["error"]["code"], "DB_ERROR")
-        self.assertIn("get_schema", payload["error"]["message"])
+        self.assertIn("DB_SCHEMA_REFERENCE.yaml", payload["error"]["message"])
 
 
 if __name__ == "__main__":

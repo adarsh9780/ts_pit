@@ -432,7 +432,7 @@ def load_context(state: AgentV2State, config: RunnableConfig) -> dict:
     context_lines: list[str] = []
 
     if state.get("needs_db"):
-        loaded_context["db"] = "DB tools are available for schema inspection and read-only queries."
+        loaded_context["db"] = "DB querying is available and schema reference docs are available in artifacts."
         context_lines.append("- DB context is available.")
 
     if state.get("needs_kb"):
