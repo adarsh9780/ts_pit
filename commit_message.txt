@@ -1,8 +1,6 @@
-feat(agent-chat): paginate history and add load-older UX
+feat(agent_v2): require capability-based next steps in responses
 
-- add backend pagination to GET /agent/history/{session_id} with limit/offset
-- return pagination metadata (has_more, next_offset, total)
-- load latest 10 messages on panel open
-- add "Load older messages" button to fetch next 10 messages
-- avoid auto-scroll to bottom when prepending older history
-- update frontend API service to pass history query params
+- update agent_v2 system prompt output rules
+- require a short "Next steps" section (1-3 actions) for non-greeting responses
+- ensure suggestions are grounded in tools available in the current run
+- allow minimal/optional next steps when a precise user command is already fully completed
