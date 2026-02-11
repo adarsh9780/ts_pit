@@ -495,6 +495,12 @@ def execute_python(code: str, input_data_json: str = "{}") -> str:
         )
 
     try:
+        max_input_json_kb = int(cfg.get("max_input_json_kb", 256))
+        if len((input_data_json or "").encode("utf-8")) > (max_input_json_kb * 1024):
+            return _error(
+                f"input_data_json exceeds {max_input_json_kb} KB limit.",
+                code="INPUT_TOO_LARGE",
+            )
         input_data = json.loads(input_data_json or "{}")
         if not isinstance(input_data, dict):
             return _error("input_data_json must decode to an object/dict.", code="INVALID_INPUT")
@@ -504,21 +510,9 @@ def execute_python(code: str, input_data_json: str = "{}") -> str:
     policy = RunnerPolicy(
         timeout_seconds=int(cfg.get("timeout_seconds", 5)),
         memory_limit_mb=int(cfg.get("memory_limit_mb", 256)),
-        cpu_time_seconds=int(cfg.get("cpu_time_seconds", 5)),
         max_output_kb=int(cfg.get("max_output_kb", 128)),
-        allowed_imports=list(
-            dict.fromkeys(
-                [
-                    *list(cfg.get("allowed_imports", [])),
-                    *[
-                        name
-                        for name in list(cfg.get("required_imports", []))
-                        if str(name).strip() and str(name).strip() != "RestrictedPython"
-                    ],
-                ]
-            )
-        ),
-        allowed_builtins=list(cfg.get("allowed_builtins", [])),
+        blocked_imports=list(cfg.get("blocked_imports", [])),
+        blocked_builtins=list(cfg.get("blocked_builtins", [])),
         # Backward-compatible aliases for model-generated snippets that still
         # reference `input_data_json` or `input_data_dict`.
         extra_globals={
@@ -540,10 +534,10 @@ def execute_python(code: str, input_data_json: str = "{}") -> str:
 
     if not result.ok:
         error_text = result.error or "Python execution failed"
-        if "is not allowed" in error_text and "Import '" in error_text:
+        if ("is not allowed" in error_text or "blocked by policy" in error_text) and "Import '" in error_text:
             error_text = (
                 f"{error_text}. Add this module to "
-                "agent_v2.safe_py_runner.allowed_imports in config.yaml."
+                "agent_v2.safe_py_runner.blocked_imports (or remove it there) in config.yaml."
             )
         return _error(
             error_text,
@@ -579,33 +573,21 @@ def get_python_capabilities() -> str:
     """
     cfg = get_config().get_agent_v2_safe_py_runner_config()
     enabled = bool(cfg.get("enabled", False))
-    required_imports = [
-        str(x).strip()
-        for x in cfg.get("required_imports", [])
-        if str(x).strip() and str(x).strip() != "RestrictedPython"
-    ]
-    allowed_imports = [str(x).strip() for x in cfg.get("allowed_imports", []) if str(x).strip()]
-    # Merge to reflect effective import policy used by execute_python.
-    seen: set[str] = set()
-    effective_imports: list[str] = []
-    for item in [*required_imports, *allowed_imports]:
-        key = item.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        effective_imports.append(item)
+    required_imports = [str(x).strip() for x in cfg.get("required_imports", []) if str(x).strip()]
+    blocked_imports = [str(x).strip() for x in cfg.get("blocked_imports", []) if str(x).strip()]
+    blocked_builtins = [str(x).strip() for x in cfg.get("blocked_builtins", []) if str(x).strip()]
 
     data = {
         "enabled": enabled,
         "venv_path": str(cfg.get("venv_path", "")),
         "required_imports": required_imports,
-        "allowed_imports": allowed_imports,
-        "effective_allowed_imports": effective_imports,
+        "blocked_imports": blocked_imports,
+        "blocked_builtins": blocked_builtins,
         "limits": {
             "timeout_seconds": int(cfg.get("timeout_seconds", 5)),
             "memory_limit_mb": int(cfg.get("memory_limit_mb", 256)),
-            "cpu_time_seconds": int(cfg.get("cpu_time_seconds", 5)),
             "max_output_kb": int(cfg.get("max_output_kb", 128)),
+            "max_input_json_kb": int(cfg.get("max_input_json_kb", 256)),
         },
     }
     return _ok(data)

@@ -27,10 +27,9 @@ def run_code(
         "policy": {
             "timeout_seconds": policy.timeout_seconds,
             "memory_limit_mb": policy.memory_limit_mb,
-            "cpu_time_seconds": policy.cpu_time_seconds,
             "max_output_kb": policy.max_output_kb,
-            "allowed_imports": policy.allowed_imports,
-            "allowed_builtins": policy.allowed_builtins,
+            "blocked_imports": policy.blocked_imports,
+            "blocked_builtins": policy.blocked_builtins,
             "extra_globals": policy.extra_globals,
         },
     }

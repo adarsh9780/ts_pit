@@ -372,6 +372,7 @@ export function useAgentChat(alertIdRef) {
                 id: `${data.tool}-${toolSeq}`,
                 name: data.tool,
                 status: 'running',
+                commentary: data.commentary || null,
                 input: data.input || null,
                 output: null,
                 durationMs: null,

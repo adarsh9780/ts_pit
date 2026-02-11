@@ -17,9 +17,8 @@ from safe_py_runner import RunnerPolicy, run_code
 policy = RunnerPolicy(
     timeout_seconds=2,
     memory_limit_mb=128,
-    cpu_time_seconds=2,
-    allowed_imports=["math", "statistics"],
-    allowed_builtins=["len", "range", "sum", "min", "max", "print"],
+    blocked_imports=["os", "subprocess", "socket"],
+    blocked_builtins=["eval", "exec", "open", "__import__"],
 )
 
 result = run_code(

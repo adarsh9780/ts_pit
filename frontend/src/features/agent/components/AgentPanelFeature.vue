@@ -166,6 +166,10 @@ const {
                   </span>
                 </summary>
                 <div class="tool-body">
+                  <div v-if="segment.tool.commentary" class="tool-section">
+                    <div class="tool-section-title">Reasoning</div>
+                    <div class="tool-commentary">{{ segment.tool.commentary }}</div>
+                  </div>
                   <div v-if="segment.tool.input" class="tool-section">
                     <div class="tool-section-title">Input</div>
                     <pre class="tool-pre">{{ prettyToolData(segment.tool.input) }}</pre>
@@ -490,6 +494,12 @@ const {
   font-weight: 600;
   color: var(--color-text-subtle);
   margin-bottom: 4px;
+}
+
+.tool-commentary {
+  font-size: 12px;
+  color: var(--color-text-main);
+  line-height: 1.4;
 }
 
 .tool-pre {

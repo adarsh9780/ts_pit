@@ -376,31 +376,19 @@ def load_context(state: AgentV2State, config: RunnableConfig) -> dict:
     py_cfg = get_config().get_agent_v2_safe_py_runner_config()
     py_enabled = bool(py_cfg.get("enabled", False))
     if py_enabled:
-        required = [
-            str(x).strip()
-            for x in py_cfg.get("required_imports", [])
-            if str(x).strip() and str(x).strip() != "RestrictedPython"
-        ]
-        allowed = [str(x).strip() for x in py_cfg.get("allowed_imports", []) if str(x).strip()]
-        # Keep order, dedupe
-        seen: set[str] = set()
-        preferred_imports: list[str] = []
-        for item in [*required, *allowed]:
-            key = item.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            preferred_imports.append(item)
-
+        blocked_imports = [str(x).strip() for x in py_cfg.get("blocked_imports", []) if str(x).strip()]
+        blocked_builtins = [str(x).strip() for x in py_cfg.get("blocked_builtins", []) if str(x).strip()]
         loaded_context["python"] = (
-            "Use execute_python with imports from configured allowlist only: "
-            + ", ".join(preferred_imports)
+            "Use execute_python while avoiding blocked imports/builtins from policy."
         )
         context_lines.append(
             "- Python runtime is enabled. Prefer execute_python for computations."
         )
         context_lines.append(
-            "- Allowed python imports: " + (", ".join(preferred_imports) if preferred_imports else "(none)")
+            "- Blocked python imports: " + (", ".join(blocked_imports) if blocked_imports else "(none)")
+        )
+        context_lines.append(
+            "- Blocked python builtins: " + (", ".join(blocked_builtins) if blocked_builtins else "(none)")
         )
     else:
         context_lines.append("- Python runtime is disabled in config; do not rely on execute_python.")

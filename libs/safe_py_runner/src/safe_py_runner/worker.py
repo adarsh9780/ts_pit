@@ -11,15 +11,6 @@ try:
 except Exception:  # pragma: no cover - platform specific
     resource = None
 
-from RestrictedPython import PrintCollector, compile_restricted
-from RestrictedPython.Guards import (
-    full_write_guard,
-    guarded_iter_unpack_sequence,
-    guarded_unpack_sequence,
-    safer_getattr,
-)
-
-
 def _inject_input_keys(exec_globals: dict[str, Any], input_data: Any) -> None:
     """
     Convenience: expose input_data keys as top-level variables when safe.
@@ -50,7 +41,7 @@ def _inject_input_keys(exec_globals: dict[str, Any], input_data: Any) -> None:
             exec_globals[key_str] = value
 
 
-def _set_limits(memory_limit_mb: int, cpu_time_seconds: int) -> list[str]:
+def _set_limits(memory_limit_mb: int) -> list[str]:
     errors: list[str] = []
     if resource is None:
         errors.append("RLIMIT limits unavailable on this platform")
@@ -69,40 +60,34 @@ def _set_limits(memory_limit_mb: int, cpu_time_seconds: int) -> list[str]:
     except (ValueError, OSError) as exc:
         errors.append(f"RLIMIT_AS not applied: {exc}")
 
-    try:
-        _, cpu_hard = resource.getrlimit(resource.RLIMIT_CPU)
-        requested_cpu = int(cpu_time_seconds)
-        if cpu_hard in (-1, resource.RLIM_INFINITY):
-            target_cpu_hard = requested_cpu
-        else:
-            target_cpu_hard = min(requested_cpu, cpu_hard)
-        target_cpu_soft = min(requested_cpu, target_cpu_hard)
-        resource.setrlimit(resource.RLIMIT_CPU, (target_cpu_soft, target_cpu_hard))
-    except (ValueError, OSError) as exc:
-        errors.append(f"RLIMIT_CPU not applied: {exc}")
-
     return errors
 
 
-def _safe_import_factory(allowed_imports: set[str]):
+def _safe_import_factory_mode(
+    blocked_imports: set[str],
+):
     def _safe_import(name, globals=None, locals=None, fromlist=(), level=0):
         root = name.split(".")[0]
-        if root not in allowed_imports:
-            raise ImportError(f"Import '{name}' is not allowed")
+        if root in blocked_imports:
+            raise ImportError(f"Import '{name}' is blocked by policy")
         return __import__(name, globals, locals, fromlist, level)
 
     return _safe_import
 
 
-def _build_safe_builtins(allowed_builtins: set[str], safe_import) -> dict[str, Any]:
+def _build_safe_builtins(
+    blocked_builtins: set[str],
+    safe_import,
+) -> dict[str, Any]:
     builtins_obj = __builtins__
     if not isinstance(builtins_obj, dict):
         builtins_obj = builtins_obj.__dict__
 
     safe = {}
-    for name in allowed_builtins:
-        if name in builtins_obj:
-            safe[name] = builtins_obj[name]
+    for name, value in builtins_obj.items():
+        if name in blocked_builtins:
+            continue
+        safe[name] = value
 
     safe["__import__"] = safe_import
     return safe
@@ -116,34 +101,24 @@ def main() -> int:
 
     timeout_seconds = int(policy.get("timeout_seconds", 5))
     memory_limit_mb = int(policy.get("memory_limit_mb", 256))
-    cpu_time_seconds = int(policy.get("cpu_time_seconds", timeout_seconds))
     max_output_kb = int(policy.get("max_output_kb", 128))
-    allowed_imports = set(policy.get("allowed_imports", []))
-    allowed_builtins = set(policy.get("allowed_builtins", []))
+    blocked_imports = set(policy.get("blocked_imports", []))
+    blocked_builtins = set(policy.get("blocked_builtins", []))
     extra_globals = policy.get("extra_globals", {}) or {}
 
     try:
-        limit_warnings = _set_limits(
-            memory_limit_mb=memory_limit_mb, cpu_time_seconds=cpu_time_seconds
+        _set_limits(memory_limit_mb=memory_limit_mb)
+
+        safe_import = _safe_import_factory_mode(blocked_imports)
+        safe_builtins = _build_safe_builtins(
+            blocked_builtins, safe_import
         )
 
-        safe_import = _safe_import_factory(allowed_imports)
-        safe_builtins = _build_safe_builtins(allowed_builtins, safe_import)
-
-        # RestrictedPython compilation
-        byte_code = compile_restricted(code, "<user_code>", "exec")
-
-        exec_globals: dict[str, Any] = {
+        byte_code = compile(code, "<user_code>", "exec")
+        exec_globals = {
             "__builtins__": safe_builtins,
             "input_data": input_data,
             "result": None,
-            "_print_": PrintCollector,
-            "_getattr_": safer_getattr,
-            "_write_": full_write_guard,
-            "_getiter_": iter,
-            "_getitem_": lambda obj, key: obj[key],
-            "_iter_unpack_sequence_": guarded_iter_unpack_sequence,
-            "_unpack_sequence_": guarded_unpack_sequence,
         }
         exec_globals.update(extra_globals)
         _inject_input_keys(exec_globals, input_data)

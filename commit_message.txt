@@ -1,6 +1,8 @@
-fix(agent_v2): improve tool UX commentary and python input alias compatibility
+refactor(safe_py_runner): simplify policy to memory + timeout + blocked imports/builtins
 
-- emit concise commentary token before each tool start in `/agent/chat` stream
-- add backward-compatible python globals: `input_data_json` and `input_data_dict`
-- prevent execute_python failures for model-generated snippets referencing old input names
-- keep existing tool execution contract and safety limits unchanged
+- remove complex mode matrix (allowlist/denylist/restricted write-guard toggles)
+- keep wall-clock timeout and memory limit as first-class controls
+- switch to denylist model: allow by default, block configured imports and builtins
+- add `max_input_json_kb` input-size guard
+- update `get_python_capabilities` and runtime context to expose simple policy fields
+- refresh config defaults with sensible blocked imports/builtins

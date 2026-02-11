@@ -307,9 +307,8 @@ Status: {ctx.status or "N/A"}
                     tool_name = event["name"]
                     tool_started_at[tool_name] = time.time()
                     tool_input = event.get("data", {}).get("input")
-                    yield f"data: {json.dumps({'type': 'token', 'content': _tool_commentary(tool_name) + ' '})}\n\n"
                     yield (
-                        f"data: {json.dumps({'type': 'tool_start', 'tool': tool_name, 'input': _safe_preview(tool_input)})}\n\n"
+                        f"data: {json.dumps({'type': 'tool_start', 'tool': tool_name, 'input': _safe_preview(tool_input), 'commentary': _tool_commentary(tool_name)})}\n\n"
                     )
 
                 elif kind == "on_tool_end":
