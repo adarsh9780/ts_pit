@@ -1,8 +1,7 @@
-fix(scoring,scripts): correct P2 datetime parsing and stop ticker mutation in impact fallback
+docs(scoring): add canonical recomputation methodology for agent_v2
 
-- parse article datetimes with space-separated and timezone formats in `calculate_p2`
-- keep timezone-aware values comparable by normalizing to naive UTC
-- add regression tests for P2 using `YYYY-MM-DD HH:MM:SS(+TZ)` inputs
-- keep alert ticker immutable in hourly-price fallback flow
-- when fallback ticker is found via ISIN, fetch prices from fallback but cache under original ticker
-- preserve existing impact-score workflow while avoiding unintended updates to `alerts.ticker`
+- add `artifacts/SCORING_METHODOLOGY.md` with deterministic formulas for impact and materiality
+- document source-of-truth field precedence and edge-case handling
+- include P2 datetime parsing/timezone rules and a worked `LHM` example
+- include operational guidance for on-demand recompute and mismatch reporting
+- link the canonical scoring spec from `artifacts/TECHNICAL_IMPLEMENTATION.md`

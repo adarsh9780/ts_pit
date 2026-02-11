@@ -124,6 +124,10 @@ degrade recommendation quality.
 
 ## 5. Scoring and Materiality
 
+Canonical reconstruction spec:
+
+- `artifacts/SCORING_METHODOLOGY.md` (formulas, thresholds, edge-case handling, and worked examples)
+
 ## 5.1 Impact score model
 
 Implementation source:
