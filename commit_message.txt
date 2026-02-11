@@ -1,10 +1,7 @@
-refactor(agent_v2): remove get_schema tool binding and shift schema grounding to artifacts reference
+fix(agent_v2): retry failed tool calls directly instead of re-prompting model text
 
-- remove `get_schema` from agent_v2 tools and TOOL_REGISTRY
-- add non-tool schema helpers:
-  - `list_schema_tables()`
-  - `list_schema_columns(table_name=None)`
-- add `artifacts/DB_SCHEMA_REFERENCE.yaml` as schema source-of-truth file for agent grounding
-- update system prompt to reference schema artifact path instead of schema tool
-- update SQL error hint text to point to `artifacts/DB_SCHEMA_REFERENCE.yaml`
-- update SQL tool test expectation accordingly
+- replace retry route from `retry_after_tool_error -> agent` with deterministic tool replay
+- add failed-call reconstruction from latest tool error + original tool_call id
+- retry node now emits a new AI tool_call for the same tool/args and routes to `tools`
+- preserve config-driven retry cap via `agent_v2.retries.max_tool_error_retries`
+- add tests to validate retry route and tool-call re-dispatch behavior

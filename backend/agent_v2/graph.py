@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import json
+from uuid import uuid4
 from typing import Literal
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -111,6 +112,52 @@ def _latest_tool_error(messages: list) -> dict | None:
             msg = err.get("message") if isinstance(err, dict) else str(err)
             return {"code": code, "message": msg}
         return None
+    return None
+
+
+def _latest_failed_tool_call(messages: list) -> dict | None:
+    """
+    Return the most recent failed tool call details (name/args), if recoverable.
+    """
+    failed_tool_call_id = None
+    latest_error = None
+    for message in reversed(messages):
+        if getattr(message, "type", "") != "tool":
+            continue
+        payload = _parse_tool_payload(message)
+        if isinstance(payload, dict) and payload.get("ok") is False:
+            failed_tool_call_id = str(getattr(message, "tool_call_id", "") or "")
+            latest_error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
+            break
+        return None
+
+    if not failed_tool_call_id:
+        return None
+
+    for message in reversed(messages):
+        if getattr(message, "type", "") != "ai":
+            continue
+        for call in (getattr(message, "tool_calls", None) or []):
+            call_id = str(call.get("id") if isinstance(call, dict) else getattr(call, "id", "") or "")
+            if call_id != failed_tool_call_id:
+                continue
+            name = call.get("name") if isinstance(call, dict) else getattr(call, "name", None)
+            args = call.get("args") if isinstance(call, dict) else getattr(call, "args", None)
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except Exception:
+                    args = {}
+            if not isinstance(args, dict):
+                args = {}
+            if not name:
+                return None
+            return {
+                "name": name,
+                "args": args,
+                "error_code": (latest_error or {}).get("code"),
+                "error_message": (latest_error or {}).get("message"),
+            }
     return None
 
 
@@ -505,7 +552,7 @@ def agent_node(state: AgentV2State, config: RunnableConfig):
     return {"messages": [response]}
 
 
-def should_continue(state: AgentV2State) -> Literal["tools", "retry_after_tool_error", "__end__"]:
+def should_continue(state: AgentV2State) -> Literal["tools", "retry_failed_tool", "__end__"]:
     messages = state["messages"]
     if not messages:
         return "__end__"
@@ -516,28 +563,42 @@ def should_continue(state: AgentV2State) -> Literal["tools", "retry_after_tool_e
     if latest_error:
         attempts = _tool_error_retry_attempts(messages)
         if attempts < _max_tool_error_retries():
-            return "retry_after_tool_error"
+            return "retry_failed_tool"
     return "__end__"
 
 
-def retry_after_tool_error_node(state: AgentV2State, config: RunnableConfig):
+def retry_failed_tool_node(state: AgentV2State, config: RunnableConfig):
     _ = config
     messages = state.get("messages", [])
-    latest_error = _latest_tool_error(messages) or {}
+    retry_target = _latest_failed_tool_call(messages)
+    if not retry_target:
+        # If we cannot reconstruct the failed call, do not invent one.
+        return {}
+
     attempts = _tool_error_retry_attempts(messages)
     next_attempt = attempts + 1
-    error_code = latest_error.get("code") or "UNKNOWN_ERROR"
-    error_message = latest_error.get("message") or "Tool returned an error payload."
+    error_code = retry_target.get("error_code") or "UNKNOWN_ERROR"
+    error_message = retry_target.get("error_message") or "Tool returned an error payload."
     return {
         "messages": [
             SystemMessage(
                 content=(
-                    "The previous tool call failed. "
+                    "Auto-retrying the previous failed tool call. "
                     f"Error code: {error_code}. Error message: {error_message}. "
-                    "Reassess the failure and continue with corrected tool usage if needed."
+                    "If it fails again, adjust inputs or switch strategy."
                 ),
                 id=f"{TOOL_ERROR_RETRY_MSG_ID_PREFIX}{next_attempt}",
-            )
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "id": f"retry-{uuid4().hex}",
+                        "name": retry_target["name"],
+                        "args": retry_target["args"],
+                    }
+                ],
+            ),
         ]
     }
 
@@ -555,7 +616,7 @@ def build_graph():
     workflow.add_node("direct_answer", direct_answer_node)
     workflow.add_node("agent", agent_node)
     workflow.add_node("tools", tool_node)
-    workflow.add_node("retry_after_tool_error", retry_after_tool_error_node)
+    workflow.add_node("retry_failed_tool", retry_failed_tool_node)
 
     workflow.add_edge(START, "ensure_system_prompt")
     workflow.add_edge("ensure_system_prompt", "classify_intent")
@@ -567,7 +628,7 @@ def build_graph():
     workflow.add_edge("direct_answer", END)
     workflow.add_conditional_edges("agent", should_continue)
     workflow.add_edge("tools", "agent")
-    workflow.add_edge("retry_after_tool_error", "agent")
+    workflow.add_edge("retry_failed_tool", "tools")
 
     return workflow
 
