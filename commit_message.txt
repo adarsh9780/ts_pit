@@ -1,7 +1,5 @@
-perf(impact): add staged timings, bounded fetch, parallel compute, and skip-unchanged writes
+fix(impact): handle non-integer article ids in staged update path
 
-- add end-to-end stage timing logs (read/prepare/fetch/compute/write/total)
-- fetch hourly data only for required per-ticker date bounds (article min/max with buffer)
-- add `--workers` and parallelize per-ticker vectorized compute phase
-- keep DB in WAL mode and add `busy_timeout` to reduce lock contention
-- update only changed rows by comparing staged values before set-based update
+- change temp update table id type from INTEGER to TEXT to avoid sqlite datatype mismatch
+- compare target article ids using `CAST(... AS TEXT)` in set-based update and diff checks
+- preserve optimized write strategy while supporting mixed id representations across datasets

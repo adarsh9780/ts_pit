@@ -324,7 +324,7 @@ def main():
         cursor.execute(
             """
             CREATE TEMP TABLE _tmp_impact_updates (
-                id INTEGER PRIMARY KEY,
+                id TEXT PRIMARY KEY,
                 impact_score REAL,
                 impact_label TEXT
             )
@@ -348,21 +348,21 @@ def main():
             SET impact_score = (
                     SELECT u.impact_score
                     FROM _tmp_impact_updates u
-                    WHERE u.id = "{articles_table}"."{c_id}"
+                    WHERE u.id = CAST("{articles_table}"."{c_id}" AS TEXT)
                 ),
                 impact_label = (
                     SELECT u.impact_label
                     FROM _tmp_impact_updates u
-                    WHERE u.id = "{articles_table}"."{c_id}"
+                    WHERE u.id = CAST("{articles_table}"."{c_id}" AS TEXT)
                 )
-            WHERE "{c_id}" IN (SELECT id FROM _tmp_impact_updates)
+            WHERE CAST("{articles_table}"."{c_id}" AS TEXT) IN (SELECT id FROM _tmp_impact_updates)
               AND (
                     IFNULL(impact_score, -1e308) != IFNULL(
-                        (SELECT u.impact_score FROM _tmp_impact_updates u WHERE u.id = "{articles_table}"."{c_id}"),
+                        (SELECT u.impact_score FROM _tmp_impact_updates u WHERE u.id = CAST("{articles_table}"."{c_id}" AS TEXT)),
                         -1e308
                     )
                  OR IFNULL(impact_label, '') != IFNULL(
-                        (SELECT u.impact_label FROM _tmp_impact_updates u WHERE u.id = "{articles_table}"."{c_id}"),
+                        (SELECT u.impact_label FROM _tmp_impact_updates u WHERE u.id = CAST("{articles_table}"."{c_id}" AS TEXT)),
                         ''
                     )
               )
