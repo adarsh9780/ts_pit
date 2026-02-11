@@ -1,6 +1,6 @@
-refactor(agent_v2): remove prescriptive tool routing and define surveillance responsibilities
+fix(agent_v2): make SQL logical-column rewrite table-aware to prevent wrong price fields
 
-- remove prompt instructions that dictate specific tool selection/order
-- keep tool use autonomous based on request and bound capabilities
-- rewrite runtime context hints to capability-only language (no "use first" guidance)
-- add explicit agent responsibilities for alert/article analysis and materiality/impact cross-checks
+- replace global first-match logical->physical rewrite with query-scoped mapping
+- detect tables referenced in FROM/JOIN and resolve only unambiguous column mappings
+- prevent cross-table collisions (e.g., prices.close vs prices_hourly.close)
+- add regression test ensuring `SELECT date, close FROM prices_hourly` returns numeric close values

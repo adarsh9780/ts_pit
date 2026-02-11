@@ -220,6 +220,16 @@ class ExecuteSqlToolTests(unittest.TestCase):
         self.assertTrue(payload["meta"].get("query_rewritten"))
         self.assertEqual(len(payload["data"]), 1)
 
+    def test_execute_sql_rewrite_is_table_aware_for_close_column(self):
+        payload = self._invoke_execute_sql(
+            "SELECT date, close FROM prices_hourly WHERE ticker = 'HEMO.L' LIMIT 1"
+        )
+        self.assertTrue(payload["ok"])
+        self.assertEqual(len(payload["data"]), 1)
+        row = payload["data"][0]
+        self.assertIn("close", row)
+        self.assertEqual(row["close"], 130.0)
+
     def test_execute_sql_rejects_non_select(self):
         payload = self._invoke_execute_sql("UPDATE alerts SET status='DISMISS'")
         self.assertFalse(payload["ok"])

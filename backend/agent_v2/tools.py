@@ -41,22 +41,73 @@ def _quote_identifier(identifier: str) -> str:
     return f'"{escaped}"'
 
 
-def _logical_to_physical_column_map() -> dict[str, str]:
+def _table_logical_to_physical_column_map(table_key: str) -> dict[str, str]:
     cfg = get_config()
     mappings: dict[str, str] = {}
-    for table_key in ("alerts", "articles", "prices", "prices_hourly", "article_themes"):
-        try:
-            cols = cfg.get_columns(table_key)
-        except Exception:
+    try:
+        cols = cfg.get_columns(table_key)
+    except Exception:
+        return mappings
+    for logical_name, physical_name in cols.items():
+        logical = str(logical_name or "").strip()
+        physical = str(physical_name or "").strip()
+        if not logical or not physical:
             continue
-        for logical_name, physical_name in cols.items():
-            logical = str(logical_name or "").strip()
-            physical = str(physical_name or "").strip()
-            if not logical or not physical:
-                continue
-            # First write wins to avoid cross-table ambiguity.
-            mappings.setdefault(logical.lower(), physical)
+        mappings[logical.lower()] = physical
     return mappings
+
+
+def _configured_table_keys() -> list[str]:
+    return ["alerts", "articles", "prices", "prices_hourly", "article_themes"]
+
+
+def _table_aliases_to_keys() -> dict[str, str]:
+    cfg = get_config()
+    aliases: dict[str, str] = {}
+    for table_key in _configured_table_keys():
+        aliases[table_key.lower()] = table_key
+        try:
+            table_name = str(cfg.get_table_name(table_key) or "").strip()
+        except Exception:
+            table_name = ""
+        if table_name:
+            aliases[table_name.lower()] = table_key
+    return aliases
+
+
+def _extract_referenced_table_keys(query: str) -> list[str]:
+    aliases = _table_aliases_to_keys()
+    pattern = re.compile(
+        r"\b(?:from|join)\s+(?:\"([^\"]+)\"|`([^`]+)`|\[([^\]]+)\]|([A-Za-z_][\w$.]*))",
+        flags=re.IGNORECASE,
+    )
+    keys: list[str] = []
+    for match in pattern.finditer(query):
+        raw_token = next((g for g in match.groups() if g), "") or ""
+        token = raw_token.strip().split(".")[-1].strip().lower()
+        table_key = aliases.get(token)
+        if table_key:
+            keys.append(table_key)
+    return list(dict.fromkeys(keys))
+
+
+def _logical_to_physical_column_map_for_query(query: str) -> dict[str, str]:
+    """
+    Build a query-scoped logical->physical map.
+    Only rewrite columns that resolve unambiguously across referenced tables.
+    """
+    table_keys = _extract_referenced_table_keys(query) or _configured_table_keys()
+
+    candidates: dict[str, set[str]] = {}
+    for table_key in table_keys:
+        for logical, physical in _table_logical_to_physical_column_map(table_key).items():
+            candidates.setdefault(logical, set()).add(physical)
+
+    resolved: dict[str, str] = {}
+    for logical, physical_names in candidates.items():
+        if len(physical_names) == 1:
+            resolved[logical] = next(iter(physical_names))
+    return resolved
 
 
 def _rewrite_logical_sql(query: str) -> tuple[str, bool]:
@@ -66,7 +117,7 @@ def _rewrite_logical_sql(query: str) -> tuple[str, bool]:
     """
     rewritten = query
     changed = False
-    mappings = _logical_to_physical_column_map()
+    mappings = _logical_to_physical_column_map_for_query(query)
 
     # Replace only in unquoted segments so we don't corrupt
     # existing quoted identifiers like "Alert date".
