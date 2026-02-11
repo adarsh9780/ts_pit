@@ -1,7 +1,7 @@
-perf(impact): vectorize impact-score calculation and remove per-row SQL loop
+perf(impact): add staged timings, bounded fetch, parallel compute, and skip-unchanged writes
 
-- replace per-article `iterrows` + SQL queries with vectorized ticker-batch computation
-- load hourly prices once per ticker and compute baseline/event metrics with NumPy arrays
-- use prefix sums + `searchsorted` for fast 10-day window std-dev and event-candle lookup
-- keep existing scoring thresholds/labels and update semantics unchanged
-- increase pandas chaining usage with `.assign()/.dropna()/.query()` pipeline
+- add end-to-end stage timing logs (read/prepare/fetch/compute/write/total)
+- fetch hourly data only for required per-ticker date bounds (article min/max with buffer)
+- add `--workers` and parallelize per-ticker vectorized compute phase
+- keep DB in WAL mode and add `busy_timeout` to reduce lock contention
+- update only changed rows by comparing staged values before set-based update

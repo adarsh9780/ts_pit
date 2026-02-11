@@ -1,8 +1,13 @@
 import sys
 import sqlite3
+import os
 import pandas as pd
 import numpy as np
 from pathlib import Path
+import argparse
+import time
+from datetime import timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Add backend directory to path to import config
 current_dir = Path(__file__).resolve().parent
@@ -25,6 +30,7 @@ def get_db_connection():
     # OPTIMIZATION: Use WAL mode
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA synchronous=NORMAL;")
+    conn.execute("PRAGMA busy_timeout=5000;")
     return conn
 
 
@@ -131,7 +137,13 @@ def _vectorized_impacts_for_ticker(df_prices, df_articles, baseline_days=10, min
     return out
 
 
-import argparse
+def _compute_updates_for_ticker(ticker, df_ticker_articles):
+    conn = get_db_connection()
+    try:
+        df_prices = _load_hourly_prices(conn, ticker)
+    finally:
+        conn.close()
+    return _vectorized_impacts_for_ticker(df_prices, df_ticker_articles)
 
 
 def main():
@@ -148,9 +160,16 @@ def main():
         action="store_true",
         help="Recalculate impacts even for articles that already have scores",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=max(1, min(8, (os.cpu_count() or 4))),
+        help="Parallel workers for per-ticker compute stage",
+    )
     args = parser.parse_args()
 
     print("🚀 Starting Impact Score Calculation...")
+    t_total = time.time()
 
     # SAFETY: Create backup
     db_path = config.get_database_path()
@@ -194,6 +213,7 @@ def main():
     c_impact = "impact_score"
 
     print("Fetching articles...")
+    t_read = time.time()
     if args.calc_all:
         query_arts = f'SELECT "{c_id}" as id, "{c_isin}" as isin, "{c_date}" as date FROM "{articles_table}"'
     else:
@@ -205,34 +225,85 @@ def main():
         print(f"Error reading articles (maybe column missing?): {e}")
         return
 
-    print(f"Found {len(df_articles)} articles needing analysis.")
+    print(f"Found {len(df_articles)} articles needing analysis. (read in {time.time() - t_read:.2f}s)")
 
     # 3. Process in vectorized ticker batches
+    t_prepare = time.time()
     df_articles = (
-        df_articles.assign(ticker=df_articles["isin"].map(isin_map))
-        .dropna(subset=["ticker", "date", "id"])
+        df_articles.assign(
+            ticker=df_articles["isin"].map(isin_map),
+            article_dt=pd.to_datetime(df_articles["date"], utc=True, errors="coerce"),
+        )
+        .dropna(subset=["ticker", "date", "id", "article_dt"])
         .copy()
     )
-    print(f"Eligible articles after ticker/date filtering: {len(df_articles)}")
+    print(
+        f"Eligible articles after ticker/date filtering: {len(df_articles)} "
+        f"(prepared in {time.time() - t_prepare:.2f}s)"
+    )
+    if df_articles.empty:
+        print(f"Done! Total runtime: {time.time() - t_total:.2f}s")
+        conn.close()
+        return
 
-    updates_df_list = []
-    unique_tickers = sorted(df_articles["ticker"].dropna().unique().tolist())
-    print(f"Tickers to process: {len(unique_tickers)}")
-
-    for idx, ticker in enumerate(unique_tickers, start=1):
+    # 3a. Ensure hourly data for each ticker in required bounded range
+    t_fetch = time.time()
+    by_ticker = (
+        df_articles.groupby("ticker", as_index=False)
+        .agg(min_dt=("article_dt", "min"), max_dt=("article_dt", "max"))
+        .reset_index(drop=True)
+    )
+    print(f"Tickers to process: {len(by_ticker)}")
+    ready_tickers = []
+    for idx, row in by_ticker.iterrows():
+        ticker = row["ticker"]
+        start_date = (row["min_dt"] - timedelta(days=10)).strftime("%Y-%m-%d %H:%M:%S")
+        end_date = (row["max_dt"] + timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
         resolved_ticker = fetch_hourly_data_with_fallback(
-            conn, ticker, force_refresh=args.force_refresh_prices
+            conn,
+            ticker,
+            force_refresh=args.force_refresh_prices,
+            start_date=start_date,
+            end_date=end_date,
         )
         if not resolved_ticker:
             continue
+        ready_tickers.append(resolved_ticker)
+        if (idx + 1) % 10 == 0 or (idx + 1) == len(by_ticker):
+            print(f"  -> Hourly data ready: {idx + 1}/{len(by_ticker)} tickers")
+    print(f"Hourly data phase done in {time.time() - t_fetch:.2f}s")
+    if not ready_tickers:
+        print(f"Done! Total runtime: {time.time() - t_total:.2f}s")
+        conn.close()
+        return
 
-        df_prices = _load_hourly_prices(conn, resolved_ticker)
-        df_ticker_articles = df_articles.query("ticker == @ticker")[["id", "date"]].copy()
-        ticker_updates = _vectorized_impacts_for_ticker(df_prices, df_ticker_articles)
-        if not ticker_updates.empty:
-            updates_df_list.append(ticker_updates)
-        if idx % 10 == 0 or idx == len(unique_tickers):
-            print(f"  Processed tickers: {idx}/{len(unique_tickers)}")
+    # 3b. Parallel compute per ticker
+    t_compute = time.time()
+    updates_df_list = []
+    workers = max(1, min(int(args.workers), len(ready_tickers)))
+    print(f"Compute phase: using {workers} worker(s)")
+    ticker_article_frames = {
+        t: df_articles.query("ticker == @t")[["id", "date"]].copy()
+        for t in ready_tickers
+    }
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(_compute_updates_for_ticker, ticker, ticker_article_frames[ticker]): ticker
+            for ticker in ready_tickers
+        }
+        completed = 0
+        for fut in as_completed(futures):
+            ticker = futures[fut]
+            try:
+                ticker_updates = fut.result()
+                if not ticker_updates.empty:
+                    updates_df_list.append(ticker_updates)
+            except Exception as e:
+                print(f"  !! Compute failed for {ticker}: {e}")
+            completed += 1
+            if completed % 10 == 0 or completed == len(futures):
+                print(f"  -> Computed {completed}/{len(futures)} tickers")
+    print(f"Compute phase done in {time.time() - t_compute:.2f}s")
 
     # 4. Bulk Update (Batched)
     updates = []
@@ -245,22 +316,67 @@ def main():
     if updates:
         print(f"Updating {len(updates)} articles in database...")
         cursor = conn.cursor()
-
-        batch_size = 1000
         total = len(updates)
+        load_batch_size = 2000
+        write_t0 = time.time()
 
-        for i in range(0, total, batch_size):
-            batch = updates[i : i + batch_size]
+        cursor.execute("DROP TABLE IF EXISTS _tmp_impact_updates")
+        cursor.execute(
+            """
+            CREATE TEMP TABLE _tmp_impact_updates (
+                id INTEGER PRIMARY KEY,
+                impact_score REAL,
+                impact_label TEXT
+            )
+            """
+        )
+
+        for i in range(0, total, load_batch_size):
+            batch = updates[i : i + load_batch_size]
             cursor.executemany(
-                f'UPDATE "{articles_table}" SET impact_score = ?, impact_label = ? WHERE "{c_id}" = ?',
+                "INSERT OR REPLACE INTO _tmp_impact_updates (impact_score, impact_label, id) VALUES (?, ?, ?)",
                 batch,
             )
-            conn.commit()
             print(
-                f"  -> Committed batch {i + 1}-{min(i + batch_size, total)} of {total}"
+                f"  -> Staged {min(i + load_batch_size, total)}/{total} updates...",
+                flush=True,
             )
 
-    print("Done!")
+        cursor.execute(
+            f'''
+            UPDATE "{articles_table}"
+            SET impact_score = (
+                    SELECT u.impact_score
+                    FROM _tmp_impact_updates u
+                    WHERE u.id = "{articles_table}"."{c_id}"
+                ),
+                impact_label = (
+                    SELECT u.impact_label
+                    FROM _tmp_impact_updates u
+                    WHERE u.id = "{articles_table}"."{c_id}"
+                )
+            WHERE "{c_id}" IN (SELECT id FROM _tmp_impact_updates)
+              AND (
+                    IFNULL(impact_score, -1e308) != IFNULL(
+                        (SELECT u.impact_score FROM _tmp_impact_updates u WHERE u.id = "{articles_table}"."{c_id}"),
+                        -1e308
+                    )
+                 OR IFNULL(impact_label, '') != IFNULL(
+                        (SELECT u.impact_label FROM _tmp_impact_updates u WHERE u.id = "{articles_table}"."{c_id}"),
+                        ''
+                    )
+              )
+            '''
+        )
+        changed_rows = cursor.rowcount
+        conn.commit()
+        cursor.execute("DROP TABLE IF EXISTS _tmp_impact_updates")
+        print(
+            f"  -> Applied {changed_rows} changed rows in {time.time() - write_t0:.2f}s",
+            flush=True,
+        )
+
+    print(f"Done! Total runtime: {time.time() - t_total:.2f}s")
     conn.close()
 
 

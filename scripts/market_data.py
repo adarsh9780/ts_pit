@@ -3,6 +3,7 @@ import yfinance as yf
 import pandas as pd
 import requests
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 # Add backend directory to path to import config
@@ -98,7 +99,16 @@ def ensure_hourly_table(conn):
     return table_name
 
 
-def fetch_hourly_data_with_fallback(conn, ticker, force_refresh=False):
+def _normalize_date_str(value):
+    if not value:
+        return None
+    try:
+        return pd.to_datetime(value, utc=True, errors="coerce").strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return None
+
+
+def fetch_hourly_data_with_fallback(conn, ticker, force_refresh=False, start_date=None, end_date=None):
     """
     Fetch 730 days of 1h data for ticker and cache it.
     INCLUDES FALLBACK: if data is missing, resolve ticker from ISIN and fetch prices,
@@ -109,25 +119,51 @@ def fetch_hourly_data_with_fallback(conn, ticker, force_refresh=False):
     ticker_col = cols["ticker"]
     date_col_db = cols["date"]
 
+    norm_start = _normalize_date_str(start_date)
+    norm_end = _normalize_date_str(end_date)
+
     # 1. Check Cache
     if not force_refresh:
         cursor = conn.cursor()
         cursor.execute(
-            f'SELECT COUNT(*) FROM "{table_name}" WHERE "{ticker_col}" = ?', (ticker,)
+            f'''
+            SELECT COUNT(*), MIN("{date_col_db}"), MAX("{date_col_db}")
+            FROM "{table_name}" WHERE "{ticker_col}" = ?
+            ''',
+            (ticker,),
         )
-        count = cursor.fetchone()[0]
-
+        count, min_dt, max_dt = cursor.fetchone()
         if count > 100:
-            print(f"  -> Found {count} cached hourly candles for {ticker}")
-            return ticker  # Return the working ticker
+            has_range = True
+            if norm_start and min_dt and str(min_dt) > str(norm_start):
+                has_range = False
+            if norm_end and max_dt and str(max_dt) < str(norm_end):
+                has_range = False
+            if has_range:
+                print(f"  -> Found {count} cached hourly candles for {ticker}")
+                return ticker  # Return the working ticker
 
-    print(f"  -> Fetching ONE HOUR data for {ticker} (Last 730 days)...")
+    if norm_start and norm_end:
+        print(f"  -> Fetching ONE HOUR data for {ticker} ({norm_start} to {norm_end})...")
+    else:
+        print(f"  -> Fetching ONE HOUR data for {ticker} (Last 730 days)...")
 
     requested_ticker = ticker
 
     # 2. Try Fetch
     try:
-        df = yf.Ticker(ticker).history(period="730d", interval="1h")
+        history_kwargs = {"interval": "1h"}
+        if norm_start and norm_end:
+            # yfinance `end` is exclusive; add +1 day to ensure end coverage.
+            end_plus = (
+                pd.to_datetime(norm_end, utc=True, errors="coerce") + timedelta(days=1)
+            ).strftime("%Y-%m-%d %H:%M:%S")
+            history_kwargs["start"] = norm_start
+            history_kwargs["end"] = end_plus
+        else:
+            history_kwargs["period"] = "730d"
+
+        df = yf.Ticker(ticker).history(**history_kwargs)
 
         # 3. Fallback Logic if Empty
         if df.empty:
@@ -152,7 +188,7 @@ def fetch_hourly_data_with_fallback(conn, ticker, force_refresh=False):
 
                 if new_ticker and new_ticker != ticker:
                     print(f"  -> FOUND NEW TICKER: {ticker} -> {new_ticker}")
-                    df = yf.Ticker(new_ticker).history(period="730d", interval="1h")
+                    df = yf.Ticker(new_ticker).history(**history_kwargs)
                     if df.empty:
                         print(f"  !! No 1h data found for fallback ticker {new_ticker}")
                         return None
