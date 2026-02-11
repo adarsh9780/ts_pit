@@ -1,10 +1,7 @@
-import os
 import sys
 import sqlite3
-import yfinance as yf
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
 from pathlib import Path
 
 # Add backend directory to path to import config
@@ -36,94 +33,102 @@ from market_data import ensure_hourly_table, fetch_hourly_data_with_fallback
 # ensure_hourly_table and fetch_hourly_data moved to market_data.py
 
 
-def calculate_z_score(conn, ticker, article_date_str):
-    """
-    Calculate Z-Score for the article.
-    Window: 10 days BEFORE article date.
-    Event: Candle immediately AFTER article date.
-    """
+def _load_hourly_prices(conn, ticker):
+    """Load hourly candles for one ticker, sorted by timestamp."""
     table_name = config.get_table_name("prices_hourly")
     cols = config.get_columns("prices_hourly")
-
-    # Parse article date
-    # Handle varying formats if necessary, assuming ISO or near-ISO
-    try:
-        art_dt = pd.to_datetime(article_date_str)
-    except:
-        return None, None
-
-    # Define Window
-    start_window = (art_dt - timedelta(days=10)).strftime("%Y-%m-%d %H:%M:%S")
-    end_window = art_dt.strftime("%Y-%m-%d %H:%M:%S")
-
-    # Query Data
     query = f'''
-        SELECT "{cols["date"]}", "{cols["close"]}", "{cols["open"]}"
+        SELECT "{cols["date"]}" AS dt, "{cols["open"]}" AS open_px, "{cols["close"]}" AS close_px
         FROM "{table_name}"
-        WHERE "{cols["ticker"]}" = ? 
-        AND "{cols["date"]}" >= ? 
-        AND "{cols["date"]}" <= ?
+        WHERE "{cols["ticker"]}" = ?
         ORDER BY "{cols["date"]}" ASC
     '''
-    df_window = pd.read_sql_query(
-        query, conn, params=(ticker, start_window, end_window)
+    return pd.read_sql_query(query, conn, params=(ticker,))
+
+
+def _vectorized_impacts_for_ticker(df_prices, df_articles, baseline_days=10, min_baseline_points=10):
+    """
+    Vectorized impact calculation for one ticker.
+    Returns DataFrame with columns: id, impact_score, impact_label
+    """
+    if df_prices.empty or df_articles.empty:
+        return pd.DataFrame(columns=["id", "impact_score", "impact_label"])
+
+    prices = (
+        df_prices.assign(
+            dt=pd.to_datetime(df_prices["dt"], utc=True, errors="coerce"),
+            open_px=pd.to_numeric(df_prices["open_px"], errors="coerce"),
+            close_px=pd.to_numeric(df_prices["close_px"], errors="coerce"),
+        )
+        .dropna(subset=["dt", "open_px", "close_px"])
+        .query("open_px != 0")
+        .sort_values("dt")
+        .assign(ret=lambda d: (d["close_px"] - d["open_px"]) / d["open_px"])
+        .reset_index(drop=True)
     )
+    if prices.empty:
+        return pd.DataFrame(columns=["id", "impact_score", "impact_label"])
 
-    if len(df_window) < 10:
-        return None, "Insufficient Data"
+    articles = (
+        df_articles.assign(article_dt=pd.to_datetime(df_articles["date"], utc=True, errors="coerce"))
+        .dropna(subset=["article_dt"])
+        .sort_values("article_dt")
+        .reset_index(drop=True)
+    )
+    if articles.empty:
+        return pd.DataFrame(columns=["id", "impact_score", "impact_label"])
 
-    # Calculate Hourly Returns: (Close - Open) / Open
-    # Or (Close_t - Close_t-1) / Close_t-1 ??
-    # User specified: "Magnitude of the candle" -> associated with specific time.
-    # Let's use (Close - Open) / Open for purely intraday hourly moves,
-    # OR (Close - PrevClose) / PrevClose.
-    # Given the prompt "Time of the news to the Magnitude of the candle",
-    # (Close - Open) / Open is the specific move OF that hour.
+    ts = prices["dt"].values.astype("datetime64[ns]")
+    open_px = prices["open_px"].to_numpy(dtype=float)
+    close_px = prices["close_px"].to_numpy(dtype=float)
+    returns = prices["ret"].to_numpy(dtype=float)
 
-    df_window["return"] = (
-        df_window[cols["close"]] - df_window[cols["open"]]
-    ) / df_window[cols["open"]]
+    # Prefix sums allow O(1) window moments per article after O(n) preprocessing.
+    csum = np.concatenate(([0.0], np.cumsum(returns)))
+    csum2 = np.concatenate(([0.0], np.cumsum(returns * returns)))
 
-    # Baseline Volatility (Std Dev of returns)
-    volatility = df_window["return"].std()
+    art_ts = articles["article_dt"].values.astype("datetime64[ns]")
+    baseline_delta = np.timedelta64(int(baseline_days), "D")
+    left = np.searchsorted(ts, art_ts - baseline_delta, side="left")
+    right = np.searchsorted(ts, art_ts, side="right")  # inclusive of candle <= article_dt
+    count = right - left
 
-    if volatility == 0 or np.isnan(volatility):
-        return 0, "Flatline"
+    baseline_ok = count >= min_baseline_points
+    sum_r = csum[right] - csum[left]
+    sum_r2 = csum2[right] - csum2[left]
+    count_f = count.astype(float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        mean = sum_r / count_f
+        var = (sum_r2 - (sum_r * sum_r) / count_f) / (count_f - 1.0)  # sample std (ddof=1)
+    sigma = np.sqrt(var)
 
-    # Get Event Candle (The one that contains or is immediately after the news)
-    # We look for the first candle where date >= article_date
-    query_event = f'''
-        SELECT "{cols["date"]}", "{cols["close"]}", "{cols["open"]}"
-        FROM "{table_name}"
-        WHERE "{cols["ticker"]}" = ? 
-        AND "{cols["date"]}" >= ? 
-        ORDER BY "{cols["date"]}" ASC
-        LIMIT 1
-    '''
-    cursor = conn.cursor()
-    cursor.execute(query_event, (ticker, article_date_str))
-    event_row = cursor.fetchone()
+    event_idx = np.searchsorted(ts, art_ts, side="left")  # first candle >= article_dt
+    has_event = event_idx < len(ts)
 
-    if not event_row:
-        return None, "No Price Data"
+    event_return = np.full(len(articles), np.nan, dtype=float)
+    valid_event_idx = event_idx[has_event]
+    event_return[has_event] = (close_px[valid_event_idx] - open_px[valid_event_idx]) / open_px[
+        valid_event_idx
+    ]
 
-    event_open = event_row[2]
-    event_close = event_row[1]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        z_score = np.abs(event_return) / sigma
 
-    event_return = (event_close - event_open) / event_open
+    flatline = baseline_ok & has_event & ((sigma == 0) | np.isnan(sigma))
+    z_score[flatline] = 0.0
 
-    # Z-Score
-    z_score = abs(event_return) / volatility
+    valid = baseline_ok & has_event
+    labels = np.full(len(articles), "", dtype=object)
+    labels[flatline] = "Flatline"
+    non_flat = valid & ~flatline
+    labels[non_flat & (z_score < 2.0)] = "Low"
+    labels[non_flat & (z_score >= 2.0) & (z_score < 4.0)] = "Medium"
+    labels[non_flat & (z_score >= 4.0)] = "High"
 
-    # Labeling
-    if z_score < 2.0:
-        label = "Low"
-    elif z_score < 4.0:
-        label = "Medium"
-    else:
-        label = "High"
-
-    return round(z_score, 2), label
+    out = articles.loc[valid, ["id"]].copy()
+    out["impact_score"] = np.round(z_score[valid], 2)
+    out["impact_label"] = labels[valid]
+    return out
 
 
 import argparse
@@ -202,46 +207,41 @@ def main():
 
     print(f"Found {len(df_articles)} articles needing analysis.")
 
-    # 3. Process
-    # Cache for tickers we've already checked in this run
-    checked_tickers = set()
+    # 3. Process in vectorized ticker batches
+    df_articles = (
+        df_articles.assign(ticker=df_articles["isin"].map(isin_map))
+        .dropna(subset=["ticker", "date", "id"])
+        .copy()
+    )
+    print(f"Eligible articles after ticker/date filtering: {len(df_articles)}")
 
-    updates = []
+    updates_df_list = []
+    unique_tickers = sorted(df_articles["ticker"].dropna().unique().tolist())
+    print(f"Tickers to process: {len(unique_tickers)}")
 
-    for index, row in df_articles.iterrows():
-        isin = row["isin"]
-        ticker = isin_map.get(isin)
-
-        if not ticker:
+    for idx, ticker in enumerate(unique_tickers, start=1):
+        resolved_ticker = fetch_hourly_data_with_fallback(
+            conn, ticker, force_refresh=args.force_refresh_prices
+        )
+        if not resolved_ticker:
             continue
 
-        # Ensure Data (Once per ticker)
-        actual_ticker = ticker
-        if ticker not in checked_tickers:
-            resolved_ticker = fetch_hourly_data_with_fallback(
-                conn, ticker, force_refresh=args.force_refresh_prices
-            )
-            if resolved_ticker:
-                actual_ticker = resolved_ticker
-            else:
-                # Failed to get data even with fallback
-                continue
-            checked_tickers.add(ticker)
-            # Also add actual_ticker to avoid re-checking if different
-            if actual_ticker != ticker:
-                checked_tickers.add(actual_ticker)
-
-        # Calculate
-        z, label = calculate_z_score(conn, actual_ticker, row["date"])
-
-        if z is not None:
-            updates.append((z, label, row["id"]))
-            if index % 10 == 0:
-                print(
-                    f"  Processed {index + 1}/{len(df_articles)}: {ticker} Z={z} ({label})"
-                )
+        df_prices = _load_hourly_prices(conn, resolved_ticker)
+        df_ticker_articles = df_articles.query("ticker == @ticker")[["id", "date"]].copy()
+        ticker_updates = _vectorized_impacts_for_ticker(df_prices, df_ticker_articles)
+        if not ticker_updates.empty:
+            updates_df_list.append(ticker_updates)
+        if idx % 10 == 0 or idx == len(unique_tickers):
+            print(f"  Processed tickers: {idx}/{len(unique_tickers)}")
 
     # 4. Bulk Update (Batched)
+    updates = []
+    if updates_df_list:
+        updates_df = pd.concat(updates_df_list, ignore_index=True)
+        updates = list(
+            updates_df[["impact_score", "impact_label", "id"]].itertuples(index=False, name=None)
+        )
+
     if updates:
         print(f"Updating {len(updates)} articles in database...")
         cursor = conn.cursor()

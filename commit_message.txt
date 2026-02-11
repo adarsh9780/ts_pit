@@ -1,7 +1,7 @@
-docs(scoring): add canonical recomputation methodology for agent_v2
+perf(impact): vectorize impact-score calculation and remove per-row SQL loop
 
-- add `artifacts/SCORING_METHODOLOGY.md` with deterministic formulas for impact and materiality
-- document source-of-truth field precedence and edge-case handling
-- include P2 datetime parsing/timezone rules and a worked `LHM` example
-- include operational guidance for on-demand recompute and mismatch reporting
-- link the canonical scoring spec from `artifacts/TECHNICAL_IMPLEMENTATION.md`
+- replace per-article `iterrows` + SQL queries with vectorized ticker-batch computation
+- load hourly prices once per ticker and compute baseline/event metrics with NumPy arrays
+- use prefix sums + `searchsorted` for fast 10-day window std-dev and event-candle lookup
+- keep existing scoring thresholds/labels and update semantics unchanged
+- increase pandas chaining usage with `.assign()/.dropna()/.query()` pipeline
