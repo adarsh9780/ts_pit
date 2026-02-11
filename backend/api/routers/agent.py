@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 import aiosqlite
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -34,14 +34,28 @@ class ChatRequest(BaseModel):
 
 
 @router.get("/agent/history/{session_id}")
-async def get_chat_history(session_id: str, request: Request):
+async def get_chat_history(
+    session_id: str,
+    request: Request,
+    limit: int = Query(default=10, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+):
     agent = request.app.state.agent
     run_config = {"configurable": {"thread_id": session_id}}
 
     try:
         state = await agent.aget_state(run_config)
         if not state or not state.values:
-            return {"messages": []}
+            return {
+                "messages": [],
+                "pagination": {
+                    "limit": limit,
+                    "offset": offset,
+                    "next_offset": offset,
+                    "has_more": False,
+                    "total": 0,
+                },
+            }
 
         messages = state.values.get("messages", [])
         frontend_messages = []
@@ -72,11 +86,35 @@ async def get_chat_history(session_id: str, request: Request):
 
             frontend_messages.append({"role": role, "content": content, "tools": []})
 
-        return {"messages": frontend_messages}
+        total = len(frontend_messages)
+        end = max(total - offset, 0)
+        start = max(end - limit, 0)
+        page_messages = frontend_messages[start:end]
+        next_offset = offset + len(page_messages)
+
+        return {
+            "messages": page_messages,
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "next_offset": next_offset,
+                "has_more": start > 0,
+                "total": total,
+            },
+        }
 
     except Exception as e:
         logprint("Failed to fetch chat history", level="ERROR", session_id=session_id, error=str(e))
-        return {"messages": []}
+        return {
+            "messages": [],
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "next_offset": offset,
+                "has_more": False,
+                "total": 0,
+            },
+        }
 
 
 @router.delete("/agent/history/{session_id}")

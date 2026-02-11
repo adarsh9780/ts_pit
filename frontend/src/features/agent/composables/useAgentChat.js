@@ -11,9 +11,14 @@ import {
 import { API_BASE_URL } from '../../../api/index.js';
 
 export function useAgentChat(alertIdRef) {
+  const HISTORY_PAGE_SIZE = 10;
   const messages = ref([]);
   const inputMessage = ref('');
   const isLoading = ref(false);
+  const historyLoading = ref(false);
+  const hasMoreHistory = ref(false);
+  const historyOffset = ref(0);
+  const isPrependingHistory = ref(false);
   const sessionId = ref('');
   const messagesContainer = ref(null);
   const inputRef = ref(null);
@@ -86,26 +91,55 @@ export function useAgentChat(alertIdRef) {
     }
   };
 
-  const fetchChatHistory = async (sid) => {
-    messages.value = [];
+  const mapFrontendMessages = (rawMessages) => (
+    rawMessages.map((msg) => {
+      if (msg.role === 'agent') {
+        return {
+          ...msg,
+          segments: msg.content ? [{ type: 'text', content: msg.content }] : [],
+          tools: msg.tools || [],
+        };
+      }
+      return msg;
+    })
+  );
+
+  const fetchChatHistory = async (sid, { appendOlder = false } = {}) => {
+    if (!sid || historyLoading.value) return;
+    if (appendOlder && !hasMoreHistory.value) return;
+    historyLoading.value = true;
+    isPrependingHistory.value = appendOlder;
     try {
-      const data = await getChatHistory(sid);
-      if (data.messages?.length) {
-        messages.value = data.messages.map((msg) => {
-          if (msg.role === 'agent') {
-            return {
-              ...msg,
-              segments: msg.content ? [{ type: 'text', content: msg.content }] : [],
-              tools: msg.tools || [],
-            };
-          }
-          return msg;
-        });
+      const requestOffset = appendOlder ? historyOffset.value : 0;
+      const data = await getChatHistory(sid, {
+        limit: HISTORY_PAGE_SIZE,
+        offset: requestOffset,
+      });
+      const pageMessages = mapFrontendMessages(data.messages || []);
+      const pagination = data.pagination || {};
+      hasMoreHistory.value = Boolean(pagination.has_more);
+      historyOffset.value = typeof pagination.next_offset === 'number'
+        ? pagination.next_offset
+        : requestOffset + pageMessages.length;
+
+      if (appendOlder) {
+        messages.value = [...pageMessages, ...messages.value];
+      } else {
+        messages.value = pageMessages;
       }
     } catch (e) {
       console.error('Failed to fetch chat history:', e);
+      if (!appendOlder) messages.value = [];
+      hasMoreHistory.value = false;
+    } finally {
+      historyLoading.value = false;
+      isPrependingHistory.value = false;
     }
-    await scrollToBottom();
+    if (!appendOlder) await scrollToBottom();
+  };
+
+  const loadMoreHistory = async () => {
+    await fetchChatHistory(sessionId.value, { appendOlder: true });
   };
 
   const initializeSession = async (alertId) => {
@@ -137,6 +171,8 @@ export function useAgentChat(alertIdRef) {
           localStorage.setItem(sessionKey, storedSession);
         }
         sessionId.value = storedSession;
+        hasMoreHistory.value = false;
+        historyOffset.value = 0;
         await fetchChatHistory(sessionId.value);
         await fetchArtifacts();
 
@@ -161,6 +197,8 @@ export function useAgentChat(alertIdRef) {
     localStorage.setItem(sessionKey, newSessionId);
     sessionId.value = newSessionId;
     artifacts.value = [];
+    hasMoreHistory.value = false;
+    historyOffset.value = 0;
     messages.value = [{ role: 'agent', content: generateGreeting(alertInfo.value) }];
   };
 
@@ -430,6 +468,7 @@ export function useAgentChat(alertIdRef) {
   watch(
     [messages, isLoading],
     () => {
+      if (isPrependingHistory.value) return;
       void scrollToBottom();
     },
     { deep: true, flush: 'post' }
@@ -439,6 +478,8 @@ export function useAgentChat(alertIdRef) {
     messages,
     inputMessage,
     isLoading,
+    historyLoading,
+    hasMoreHistory,
     sessionId,
     messagesContainer,
     inputRef,
@@ -461,6 +502,7 @@ export function useAgentChat(alertIdRef) {
     toggleArtifactsMenu,
     downloadArtifact,
     handleComposerKeydown,
+    loadMoreHistory,
     sendMessage,
     stopGeneration,
     startResize,

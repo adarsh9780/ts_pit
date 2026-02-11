@@ -1,12 +1,8 @@
-feat(agent_v2): add python capability introspection and improve runner/tool reliability
+feat(agent-chat): paginate history and add load-older UX
 
-- add new `get_python_capabilities` tool to expose execute_python runtime status
-  - enabled flag, venv path, required/allowed/effective imports
-  - execution limits (timeout, memory, cpu, max output)
-- register `get_python_capabilities` in agent_v2 TOOL_REGISTRY
-- update agent_v2 system prompt to call `get_python_capabilities` before complex python tasks
-- inject python capability context from config into agent_v2 runtime context
-  so model decisions reflect actual configured imports/runtime
-- suppress platform RLIMIT warning noise from safe_py_runner stderr on Windows
-  to avoid false “python execution failed” interpretations
-- keep compile/tests green after changes
+- add backend pagination to GET /agent/history/{session_id} with limit/offset
+- return pagination metadata (has_more, next_offset, total)
+- load latest 10 messages on panel open
+- add "Load older messages" button to fetch next 10 messages
+- avoid auto-scroll to bottom when prepending older history
+- update frontend API service to pass history query params

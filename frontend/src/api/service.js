@@ -41,8 +41,8 @@ export const getNews = async (isin, query = {}) => {
   return response.data;
 };
 
-export const getChatHistory = async (sessionId) => {
-  const response = await api.agent.getChatHistoryAgentHistorySessionIdGet(sessionId);
+export const getChatHistory = async (sessionId, query = {}) => {
+  const response = await api.agent.getChatHistoryAgentHistorySessionIdGet(sessionId, { query });
   return response.data;
 };
 

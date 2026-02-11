@@ -52,6 +52,8 @@ const {
   messages,
   inputMessage,
   isLoading,
+  historyLoading,
+  hasMoreHistory,
   sessionId,
   messagesContainer,
   inputRef,
@@ -72,6 +74,7 @@ const {
   toggleArtifactsMenu,
   downloadArtifact,
   handleComposerKeydown,
+  loadMoreHistory,
   sendMessage,
   stopGeneration,
   startResize,
@@ -102,6 +105,12 @@ const {
     </div>
 
     <div class="messages-area" ref="messagesContainer">
+      <div v-if="hasMoreHistory || historyLoading" class="history-more-wrap">
+        <button class="history-more-btn" @click="loadMoreHistory" :disabled="historyLoading">
+          {{ historyLoading ? 'Loading...' : 'Load older messages' }}
+        </button>
+      </div>
+
       <div v-for="(msg, index) in messages" :key="index" :class="['message', msg.role]">
         <template v-if="msg.role === 'context-switch'">
           <div class="context-switch-divider">
@@ -313,6 +322,30 @@ const {
   display: flex;
   flex-direction: column;
   gap: var(--spacing-3);
+}
+
+.history-more-wrap {
+  display: flex;
+  justify-content: center;
+}
+
+.history-more-btn {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-hover);
+  color: var(--color-text-muted);
+  border-radius: 9999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.history-more-btn:hover:enabled {
+  background: #e7f0ff;
+}
+
+.history-more-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.75;
 }
 
 .message {
