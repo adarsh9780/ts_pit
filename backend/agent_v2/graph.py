@@ -17,6 +17,8 @@ from .prompts import AGENT_V2_SYSTEM_PROMPT
 from .state import AgentV2State
 
 ALL_TOOLS = list(TOOL_REGISTRY.values())
+SUMMARY_TRIGGER_TOKENS_EST = 7000
+RECENT_MESSAGES_WINDOW = 14
 
 
 def ensure_system_prompt(state: AgentV2State, config: RunnableConfig) -> dict:
@@ -47,6 +49,71 @@ def _latest_user_text(messages: list) -> str:
 def _contains_any(text_value: str, tokens: tuple[str, ...]) -> bool:
     lowered = text_value.lower()
     return any(token in lowered for token in tokens)
+
+
+def _message_text(message) -> str:
+    content = getattr(message, "content", "")
+    if isinstance(content, list):
+        text_parts: list[str] = []
+        for part in content:
+            if isinstance(part, str):
+                text_parts.append(part)
+            elif isinstance(part, dict) and "text" in part:
+                text_parts.append(str(part["text"]))
+        return " ".join(text_parts).strip()
+    return str(content or "").strip()
+
+
+def _estimate_tokens(text: str) -> int:
+    # Practical approximation for English-heavy prompts.
+    return max(1, len(text) // 4)
+
+
+def _conversation_messages(state: AgentV2State) -> list:
+    messages = state.get("messages", [])
+    return [
+        m
+        for m in messages
+        if getattr(m, "type", "") not in {"system", "tool"}
+    ]
+
+
+def _recent_dialogue(messages: list, window: int = RECENT_MESSAGES_WINDOW) -> list:
+    return messages[-window:] if len(messages) > window else list(messages)
+
+
+def _messages_for_model(state: AgentV2State) -> list:
+    all_messages = state.get("messages", [])
+    dialogue = _conversation_messages(state)
+    selected: list = []
+
+    # Keep the latest base/runtime system guidance.
+    latest_by_id: dict[str, object] = {}
+    for message in all_messages:
+        if getattr(message, "type", "") != "system":
+            continue
+        msg_id = getattr(message, "id", None)
+        if msg_id in {"agent-v2-system-prompt", "agent-v2-runtime-context"}:
+            latest_by_id[msg_id] = message
+    if "agent-v2-system-prompt" in latest_by_id:
+        selected.append(latest_by_id["agent-v2-system-prompt"])
+    if "agent-v2-runtime-context" in latest_by_id:
+        selected.append(latest_by_id["agent-v2-runtime-context"])
+
+    summary_text = str(state.get("summary") or "").strip()
+    if summary_text:
+        selected.append(
+            SystemMessage(
+                content=(
+                    "Conversation memory summary (older context):\n"
+                    f"{summary_text}"
+                ),
+                id="agent-v2-memory-summary",
+            )
+        )
+
+    selected.extend(_recent_dialogue(dialogue))
+    return selected
 
 
 def _looks_like_code_submission(text_value: str) -> bool:
@@ -117,8 +184,8 @@ def classify_intent(state: AgentV2State, config: RunnableConfig) -> dict:
     }
 
 
-def route_after_intent(state: AgentV2State) -> Literal["reject_execute_code", "plan_request"]:
-    return "reject_execute_code" if state.get("disallow_execute_code") else "plan_request"
+def route_after_intent(state: AgentV2State) -> Literal["reject_execute_code", "summarize_and_trim"]:
+    return "reject_execute_code" if state.get("disallow_execute_code") else "summarize_and_trim"
 
 
 def reject_execute_code_node(state: AgentV2State, config: RunnableConfig):
@@ -135,6 +202,56 @@ def reject_execute_code_node(state: AgentV2State, config: RunnableConfig):
         ],
         "route": "direct",
     }
+
+
+def summarize_and_trim_node(state: AgentV2State, config: RunnableConfig) -> dict:
+    _ = config
+    dialogue = _conversation_messages(state)
+    if len(dialogue) <= RECENT_MESSAGES_WINDOW:
+        return {}
+
+    total_est_tokens = sum(_estimate_tokens(_message_text(m)) for m in dialogue)
+    if total_est_tokens < SUMMARY_TRIGGER_TOKENS_EST:
+        return {}
+
+    older_messages = dialogue[:-RECENT_MESSAGES_WINDOW]
+    if not older_messages:
+        return {}
+
+    existing_summary = str(state.get("summary") or "").strip()
+    transcript = "\n".join(
+        f"{getattr(m, 'type', 'message').upper()}: {_message_text(m)}"
+        for m in older_messages
+        if _message_text(m)
+    )
+    if not transcript.strip():
+        return {}
+
+    llm = get_llm_model()
+    summary_response = llm.invoke(
+        [
+            SystemMessage(
+                content=(
+                    "Summarize the older conversation context for memory compression. "
+                    "Keep only durable facts: user goals, constraints, key findings, assumptions, "
+                    "and unresolved questions. Omit small talk and verbosity. "
+                    "Return concise markdown bullet points."
+                )
+            ),
+            HumanMessage(
+                content=(
+                    "Existing summary:\n"
+                    f"{existing_summary or '(none)'}\n\n"
+                    "Older transcript to fold into summary:\n"
+                    f"{transcript}"
+                )
+            ),
+        ]
+    )
+    new_summary = _message_text(summary_response)
+    if not new_summary:
+        return {}
+    return {"summary": new_summary}
 
 
 def plan_request(state: AgentV2State, config: RunnableConfig) -> dict:
@@ -265,19 +382,20 @@ def route_after_plan(state: AgentV2State) -> Literal["direct_answer", "agent"]:
 def direct_answer_node(state: AgentV2State, config: RunnableConfig):
     _ = config
     llm = get_llm_model()
-    response = llm.invoke(state["messages"])
+    response = llm.invoke(_messages_for_model(state))
     return {"messages": [response]}
 
 
 def agent_node(state: AgentV2State, config: RunnableConfig):
     _ = config
     llm = get_llm_model()
+    model_messages = _messages_for_model(state)
     active_names = state.get("active_tool_names") or []
     selected_tools = [TOOL_REGISTRY[name] for name in active_names if name in TOOL_REGISTRY]
     if selected_tools:
-        response = llm.bind_tools(selected_tools).invoke(state["messages"])
+        response = llm.bind_tools(selected_tools).invoke(model_messages)
     else:
-        response = llm.invoke(state["messages"])
+        response = llm.invoke(model_messages)
     return {"messages": [response]}
 
 
@@ -298,6 +416,7 @@ def build_graph():
     workflow.add_node("ensure_system_prompt", ensure_system_prompt)
     workflow.add_node("classify_intent", classify_intent)
     workflow.add_node("reject_execute_code", reject_execute_code_node)
+    workflow.add_node("summarize_and_trim", summarize_and_trim_node)
     workflow.add_node("plan_request", plan_request)
     workflow.add_node("load_context", load_context)
     workflow.add_node("direct_answer", direct_answer_node)
@@ -308,6 +427,7 @@ def build_graph():
     workflow.add_edge("ensure_system_prompt", "classify_intent")
     workflow.add_conditional_edges("classify_intent", route_after_intent)
     workflow.add_edge("reject_execute_code", END)
+    workflow.add_edge("summarize_and_trim", "plan_request")
     workflow.add_edge("plan_request", "load_context")
     workflow.add_conditional_edges("load_context", route_after_plan)
     workflow.add_edge("direct_answer", END)

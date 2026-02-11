@@ -1,9 +1,9 @@
-feat(agent-policy): hard reject submitted SQL/Python code with intent gating
+feat(agent_v2): add token-based summarize-and-trim memory node
 
-- add API-level guard in POST /agent/chat to detect submitted SQL/Python snippets
-- short-circuit rejected requests with SSE refusal response (token + done), avoiding agent/tool execution
-- add agent_v2 intent classifier node with explicit intents
-  - execute_code, data_analysis, alert_analysis, methodology_discussion, mixed, other
-- route execute_code intent to dedicated rejection node in v2 graph
-- extend agent_v2 state with intent_labels and disallow_execute_code
-- add prompt-level policy reminders in v1/v2 to refuse user-submitted SQL/Python snippets
+- add summarize_and_trim node to the v2 graph before planning
+- trigger memory compression when estimated conversation tokens exceed threshold
+- create/update rolling conversation summary from older dialogue turns
+- keep recent dialogue window while preserving durable context via summary
+- switch model invocations to use curated context (system + runtime + summary + recent messages)
+- keep persisted chat history unchanged while reducing prompt growth risk
+- fix route typing for classify_intent conditional edge
