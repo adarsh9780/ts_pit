@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -33,6 +34,51 @@ def _error(message: str, code: str = "TOOL_ERROR", **meta) -> str:
         {"ok": False, "error": {"code": code, "message": message}, "meta": meta},
         default=str,
     )
+
+
+def _quote_identifier(identifier: str) -> str:
+    escaped = str(identifier).replace('"', '""')
+    return f'"{escaped}"'
+
+
+def _logical_to_physical_column_map() -> dict[str, str]:
+    cfg = get_config()
+    mappings: dict[str, str] = {}
+    for table_key in ("alerts", "articles", "prices", "prices_hourly", "article_themes"):
+        try:
+            cols = cfg.get_columns(table_key)
+        except Exception:
+            continue
+        for logical_name, physical_name in cols.items():
+            logical = str(logical_name or "").strip()
+            physical = str(physical_name or "").strip()
+            if not logical or not physical:
+                continue
+            # First write wins to avoid cross-table ambiguity.
+            mappings.setdefault(logical.lower(), physical)
+    return mappings
+
+
+def _rewrite_logical_sql(query: str) -> tuple[str, bool]:
+    """
+    Best-effort rewrite from logical column names to physical mapped names.
+    This reduces common LLM SQL errors like `WHERE id = ...`.
+    """
+    rewritten = query
+    changed = False
+    mappings = _logical_to_physical_column_map()
+    # Replace longer logical names first to avoid partial overlaps.
+    logical_names = sorted(mappings.keys(), key=len, reverse=True)
+    for logical in logical_names:
+        physical = mappings[logical]
+        # Always quote physical identifiers; required for names with spaces.
+        replacement = _quote_identifier(physical)
+        pattern = re.compile(rf"\b{re.escape(logical)}\b", flags=re.IGNORECASE)
+        candidate = pattern.sub(replacement, rewritten)
+        if candidate != rewritten:
+            rewritten = candidate
+            changed = True
+    return rewritten, changed
 
 
 def _load_schema_text() -> str:
@@ -73,13 +119,19 @@ def execute_sql(query: str) -> str:
         )
 
     try:
-        stmt = text(query)
+        rewritten_query, auto_rewritten = _rewrite_logical_sql(query)
+        stmt = text(rewritten_query)
         with engine.connect() as conn:
             result = conn.execute(stmt)
             rows = result.fetchall()
             columns = list(result.keys())
         results = [dict(zip(columns, row)) for row in rows]
-        return _ok(results, row_count=len(results))
+        return _ok(
+            results,
+            row_count=len(results),
+            query_rewritten=auto_rewritten,
+            executed_query=rewritten_query if auto_rewritten else query,
+        )
     except Exception as e:
         msg = str(e)
         hint = ""
