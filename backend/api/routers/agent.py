@@ -262,6 +262,24 @@ Status: {ctx.status or "N/A"}
                 return None
         return None
 
+    def _tool_commentary(tool_name: str) -> str:
+        comments = {
+            "get_article_by_id": "I will load the target article details first.",
+            "get_schema": "I will verify table/column mappings before querying.",
+            "execute_sql": "I will run a read-only SQL query to gather the required data.",
+            "get_python_capabilities": "I will check Python runtime capabilities before computing.",
+            "execute_python": "I will run a bounded Python calculation using the retrieved inputs.",
+            "analyze_current_alert": "I will run deterministic alert analysis for the current alert.",
+            "get_current_alert_news": "I will fetch in-window news for the current alert.",
+            "generate_current_alert_report": "I will generate the report artifact now.",
+            "list_files": "I will list available knowledge files relevant to this task.",
+            "read_file": "I will read the selected file for methodology details.",
+            "search_web": "I will search the web for supporting external context.",
+            "search_web_news": "I will search recent web news and summarize relevant hits.",
+            "scrape_websites": "I will scrape the selected URLs for detailed evidence.",
+        }
+        return comments.get(tool_name, f"I will run `{tool_name}` to continue.")
+
     async def event_generator():
         tool_started_at: dict[str, float] = {}
         try:
@@ -289,6 +307,7 @@ Status: {ctx.status or "N/A"}
                     tool_name = event["name"]
                     tool_started_at[tool_name] = time.time()
                     tool_input = event.get("data", {}).get("input")
+                    yield f"data: {json.dumps({'type': 'token', 'content': _tool_commentary(tool_name) + ' '})}\n\n"
                     yield (
                         f"data: {json.dumps({'type': 'tool_start', 'tool': tool_name, 'input': _safe_preview(tool_input)})}\n\n"
                     )

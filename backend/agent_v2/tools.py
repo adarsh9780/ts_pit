@@ -519,7 +519,12 @@ def execute_python(code: str, input_data_json: str = "{}") -> str:
             )
         ),
         allowed_builtins=list(cfg.get("allowed_builtins", [])),
-        extra_globals={},
+        # Backward-compatible aliases for model-generated snippets that still
+        # reference `input_data_json` or `input_data_dict`.
+        extra_globals={
+            "input_data_json": json.dumps(input_data),
+            "input_data_dict": input_data,
+        },
     )
     try:
         python_executable = str(ensure_python_runtime(cfg))

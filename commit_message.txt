@@ -1,7 +1,6 @@
-test(agent_v2): add execute_sql coverage across all core tables and safety paths
+fix(agent_v2): improve tool UX commentary and python input alias compatibility
 
-- add isolated temp-DB test suite for `backend.agent_v2.tools.execute_sql`
-- validate successful SELECT reads for alerts, articles, prices, article_themes, prices_hourly
-- verify logical-column rewrite behavior (`SELECT id, ticker FROM alerts`)
-- assert read-only enforcement for non-SELECT SQL
-- assert DB error path and schema hint for invalid column queries
+- emit concise commentary token before each tool start in `/agent/chat` stream
+- add backward-compatible python globals: `input_data_json` and `input_data_dict`
+- prevent execute_python failures for model-generated snippets referencing old input names
+- keep existing tool execution contract and safety limits unchanged
