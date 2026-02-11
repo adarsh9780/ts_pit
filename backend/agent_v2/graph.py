@@ -75,8 +75,55 @@ def _conversation_messages(state: AgentV2State, include_tool: bool = False) -> l
     return [m for m in messages if getattr(m, "type", "") not in excluded]
 
 
+def _ai_tool_call_ids(message) -> set[str]:
+    ids: set[str] = set()
+    for call in (getattr(message, "tool_calls", None) or []):
+        if isinstance(call, dict):
+            call_id = call.get("id")
+        else:
+            call_id = getattr(call, "id", None)
+        if call_id:
+            ids.add(str(call_id))
+    return ids
+
+
+def _sanitize_tool_sequence(messages: list) -> list:
+    """
+    Ensure tool messages are only kept when paired with a preceding AI tool_calls message.
+    This prevents API contract violations when context trimming cuts message boundaries.
+    """
+    sanitized: list = []
+    pending_tool_ids: set[str] = set()
+    for message in messages:
+        msg_type = getattr(message, "type", "")
+        if msg_type == "ai":
+            pending_tool_ids = _ai_tool_call_ids(message)
+            sanitized.append(message)
+            continue
+        if msg_type == "tool":
+            tool_call_id = getattr(message, "tool_call_id", None)
+            if not pending_tool_ids or not tool_call_id:
+                continue
+            tool_call_id = str(tool_call_id)
+            if tool_call_id not in pending_tool_ids:
+                continue
+            sanitized.append(message)
+            pending_tool_ids.discard(tool_call_id)
+            continue
+        pending_tool_ids = set()
+        sanitized.append(message)
+    return sanitized
+
+
 def _recent_dialogue(messages: list, window: int = RECENT_MESSAGES_WINDOW) -> list:
-    return messages[-window:] if len(messages) > window else list(messages)
+    if len(messages) <= window:
+        return _sanitize_tool_sequence(list(messages))
+
+    start_idx = len(messages) - window
+    # Do not start the slice at a tool message; pull left to include its parent AI tool_calls message.
+    while start_idx > 0 and getattr(messages[start_idx], "type", "") == "tool":
+        start_idx -= 1
+    return _sanitize_tool_sequence(list(messages[start_idx:]))
 
 
 def _messages_for_model(state: AgentV2State) -> list:

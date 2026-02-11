@@ -1,5 +1,7 @@
-fix(agent_v2): include tool messages in model context after tool calls
+test(agent_v2): add execute_sql coverage across all core tables and safety paths
 
-- preserve `tool` messages in agent_v2 `_messages_for_model` payload construction
-- prevent OpenAI chat contract violation where assistant `tool_calls` lacked matching tool responses
-- keep summary/trimming behavior unchanged by only including tool messages for model invocation path
+- add isolated temp-DB test suite for `backend.agent_v2.tools.execute_sql`
+- validate successful SELECT reads for alerts, articles, prices, article_themes, prices_hourly
+- verify logical-column rewrite behavior (`SELECT id, ticker FROM alerts`)
+- assert read-only enforcement for non-SELECT SQL
+- assert DB error path and schema hint for invalid column queries
