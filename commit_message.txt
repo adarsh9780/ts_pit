@@ -1,8 +1,6 @@
-refactor(safe_py_runner): simplify policy to memory + timeout + blocked imports/builtins
+refactor(agent_v2): remove prescriptive tool routing and define surveillance responsibilities
 
-- remove complex mode matrix (allowlist/denylist/restricted write-guard toggles)
-- keep wall-clock timeout and memory limit as first-class controls
-- switch to denylist model: allow by default, block configured imports and builtins
-- add `max_input_json_kb` input-size guard
-- update `get_python_capabilities` and runtime context to expose simple policy fields
-- refresh config defaults with sensible blocked imports/builtins
+- remove prompt instructions that dictate specific tool selection/order
+- keep tool use autonomous based on request and bound capabilities
+- rewrite runtime context hints to capability-only language (no "use first" guidance)
+- add explicit agent responsibilities for alert/article analysis and materiality/impact cross-checks

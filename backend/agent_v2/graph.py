@@ -360,16 +360,16 @@ def load_context(state: AgentV2State, config: RunnableConfig) -> dict:
     context_lines: list[str] = []
 
     if state.get("needs_db"):
-        loaded_context["db"] = "Use `get_schema` first if column/table names are uncertain."
-        context_lines.append("- DB context is available via `get_schema` and `execute_sql`.")
+        loaded_context["db"] = "DB tools are available for schema inspection and read-only queries."
+        context_lines.append("- DB context is available.")
 
     if state.get("needs_kb"):
-        loaded_context["kb"] = "Use file tools to discover and load only required documents."
-        context_lines.append("- Document context is available via `list_files` and `read_file`.")
+        loaded_context["kb"] = "Filesystem tools are available within configured allowed directories."
+        context_lines.append("- Document context is available.")
 
     if state.get("needs_web"):
-        loaded_context["web"] = "Use web search tools only when internal data is insufficient."
-        context_lines.append("- Web context is available via `search_web`/`search_web_news` and optional `scrape_websites`.")
+        loaded_context["web"] = "Web/news search and scraping tools are available."
+        context_lines.append("- Web context is available.")
 
     # Automatically expose Python runtime capabilities from config so the model
     # knows what libraries/imports are actually allowed.
@@ -379,10 +379,10 @@ def load_context(state: AgentV2State, config: RunnableConfig) -> dict:
         blocked_imports = [str(x).strip() for x in py_cfg.get("blocked_imports", []) if str(x).strip()]
         blocked_builtins = [str(x).strip() for x in py_cfg.get("blocked_builtins", []) if str(x).strip()]
         loaded_context["python"] = (
-            "Use execute_python while avoiding blocked imports/builtins from policy."
+            "Python execution is available with policy constraints."
         )
         context_lines.append(
-            "- Python runtime is enabled. Prefer execute_python for computations."
+            "- Python runtime is enabled."
         )
         context_lines.append(
             "- Blocked python imports: " + (", ".join(blocked_imports) if blocked_imports else "(none)")
@@ -391,7 +391,7 @@ def load_context(state: AgentV2State, config: RunnableConfig) -> dict:
             "- Blocked python builtins: " + (", ".join(blocked_builtins) if blocked_builtins else "(none)")
         )
     else:
-        context_lines.append("- Python runtime is disabled in config; do not rely on execute_python.")
+        context_lines.append("- Python runtime is disabled in config.")
 
     if not context_lines:
         context_lines.append("- No extra context preloaded for this request.")

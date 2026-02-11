@@ -254,7 +254,7 @@ proxy:
 # - v1: current production graph (backend/agent)
 # - v2: experimental graph entrypoint (backend/agent_v2)
 agent:
-  mode: "v1"
+  mode: "v2"
 
 agent_v2:
   filesystem:
