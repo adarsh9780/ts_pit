@@ -1,5 +1,5 @@
-fix(impact): handle non-integer article ids in staged update path
+fix(agent_v2): include tool messages in model context after tool calls
 
-- change temp update table id type from INTEGER to TEXT to avoid sqlite datatype mismatch
-- compare target article ids using `CAST(... AS TEXT)` in set-based update and diff checks
-- preserve optimized write strategy while supporting mixed id representations across datasets
+- preserve `tool` messages in agent_v2 `_messages_for_model` payload construction
+- prevent OpenAI chat contract violation where assistant `tool_calls` lacked matching tool responses
+- keep summary/trimming behavior unchanged by only including tool messages for model invocation path

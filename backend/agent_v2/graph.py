@@ -69,13 +69,10 @@ def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
-def _conversation_messages(state: AgentV2State) -> list:
+def _conversation_messages(state: AgentV2State, include_tool: bool = False) -> list:
     messages = state.get("messages", [])
-    return [
-        m
-        for m in messages
-        if getattr(m, "type", "") not in {"system", "tool"}
-    ]
+    excluded = {"system"} if include_tool else {"system", "tool"}
+    return [m for m in messages if getattr(m, "type", "") not in excluded]
 
 
 def _recent_dialogue(messages: list, window: int = RECENT_MESSAGES_WINDOW) -> list:
@@ -84,7 +81,9 @@ def _recent_dialogue(messages: list, window: int = RECENT_MESSAGES_WINDOW) -> li
 
 def _messages_for_model(state: AgentV2State) -> list:
     all_messages = state.get("messages", [])
-    dialogue = _conversation_messages(state)
+    # IMPORTANT: include tool messages so every assistant tool_call has
+    # corresponding tool responses in subsequent model invocations.
+    dialogue = _conversation_messages(state, include_tool=True)
     selected: list = []
 
     # Keep the latest base/runtime system guidance.
