@@ -1,9 +1,8 @@
-feat(agent_v2): add token-based summarize-and-trim memory node
+fix(scoring,scripts): correct P2 datetime parsing and stop ticker mutation in impact fallback
 
-- add summarize_and_trim node to the v2 graph before planning
-- trigger memory compression when estimated conversation tokens exceed threshold
-- create/update rolling conversation summary from older dialogue turns
-- keep recent dialogue window while preserving durable context via summary
-- switch model invocations to use curated context (system + runtime + summary + recent messages)
-- keep persisted chat history unchanged while reducing prompt growth risk
-- fix route typing for classify_intent conditional edge
+- parse article datetimes with space-separated and timezone formats in `calculate_p2`
+- keep timezone-aware values comparable by normalizing to naive UTC
+- add regression tests for P2 using `YYYY-MM-DD HH:MM:SS(+TZ)` inputs
+- keep alert ticker immutable in hourly-price fallback flow
+- when fallback ticker is found via ISIN, fetch prices from fallback but cache under original ticker
+- preserve existing impact-score workflow while avoiding unintended updates to `alerts.ticker`

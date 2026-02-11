@@ -101,7 +101,8 @@ def ensure_hourly_table(conn):
 def fetch_hourly_data_with_fallback(conn, ticker, force_refresh=False):
     """
     Fetch 730 days of 1h data for ticker and cache it.
-    INCLUDES FALLBACK: If data missing, looks up ISIN -> New Ticker -> Retry.
+    INCLUDES FALLBACK: if data is missing, resolve ticker from ISIN and fetch prices,
+    but keep data keyed by the original alert ticker.
     """
     table_name = config.get_table_name("prices_hourly")
     cols = config.get_columns("prices_hourly")
@@ -122,6 +123,8 @@ def fetch_hourly_data_with_fallback(conn, ticker, force_refresh=False):
 
     print(f"  -> Fetching ONE HOUR data for {ticker} (Last 730 days)...")
 
+    requested_ticker = ticker
+
     # 2. Try Fetch
     try:
         df = yf.Ticker(ticker).history(period="730d", interval="1h")
@@ -130,7 +133,7 @@ def fetch_hourly_data_with_fallback(conn, ticker, force_refresh=False):
         if df.empty:
             print(f"  !! No 1h data found for {ticker}")
 
-            # Try ISIN Lookup
+            # Try ISIN lookup, but do not mutate alerts.ticker.
             alerts_table = config.get_table_name("alerts")
             t_ticker = config.get_column("alerts", "ticker")
             t_isin = config.get_column("alerts", "isin")
@@ -149,20 +152,16 @@ def fetch_hourly_data_with_fallback(conn, ticker, force_refresh=False):
 
                 if new_ticker and new_ticker != ticker:
                     print(f"  -> FOUND NEW TICKER: {ticker} -> {new_ticker}")
-
-                    # Update Alerts Table
-                    cursor.execute(
-                        f'UPDATE "{alerts_table}" SET "{t_ticker}" = ? WHERE "{t_isin}" = ?',
-                        (new_ticker, isin),
-                    )
-                    conn.commit()
-
-                    # Recursive Retry with new ticker
-                    return fetch_hourly_data_with_fallback(
-                        conn, new_ticker, force_refresh
-                    )
-
-            return None
+                    df = yf.Ticker(new_ticker).history(period="730d", interval="1h")
+                    if df.empty:
+                        print(f"  !! No 1h data found for fallback ticker {new_ticker}")
+                        return None
+                    # Keep original alert ticker stable; cache fetched data under it.
+                    ticker = requested_ticker
+                else:
+                    return None
+            else:
+                return None
 
         # 4. Process Data if found
         df = df.reset_index()
@@ -221,7 +220,8 @@ def fetch_hourly_data_with_fallback(conn, ticker, force_refresh=False):
         conn.commit()
         print(f"  -> Cached {len(data_to_insert)} candles for {ticker}.")
 
-        return ticker  # Return the working ticker
+        # Always return requested/original ticker used by downstream queries.
+        return requested_ticker
 
     except Exception as e:
         print(f"  !! Error fetching {ticker}: {e}")

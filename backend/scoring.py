@@ -1,8 +1,37 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 # ==============================================================================
 # SCORING LOGIC (P1, P2, P3)
 # ==============================================================================
+
+
+def _parse_datetime(value: str | datetime | None) -> datetime | None:
+    """Parse common DB/API datetime representations into naive UTC datetimes."""
+    if value is None:
+        return None
+
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        raw = str(value).strip()
+        if not raw:
+            return None
+        normalized = raw.replace("Z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(normalized)
+        except ValueError:
+            for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S"):
+                try:
+                    dt = datetime.strptime(normalized, fmt)
+                    break
+                except ValueError:
+                    continue
+            else:
+                return None
+
+    if dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
 
 
 def calculate_p2(art_date_str: str, start_date_str: str, end_date_str: str) -> str:
@@ -16,17 +45,13 @@ def calculate_p2(art_date_str: str, start_date_str: str, end_date_str: str) -> s
         return "L"
 
     try:
-        # Normalize dates
-        dt_start = datetime.strptime(start_date_str, "%Y-%m-%d")
-        dt_end = datetime.strptime(end_date_str, "%Y-%m-%d")
+        dt_start = _parse_datetime(start_date_str)
+        dt_end = _parse_datetime(end_date_str)
+        dt_art = _parse_datetime(art_date_str)
+    except Exception:
+        return "L"
 
-        # Handle ISO format or simple YYYY-MM-DD
-        dt_art = (
-            datetime.fromisoformat(art_date_str)
-            if "T" in art_date_str
-            else datetime.strptime(art_date_str, "%Y-%m-%d")
-        )
-    except ValueError:
+    if not dt_start or not dt_end or not dt_art:
         return "L"
 
     duration = (dt_end - dt_start).total_seconds()
