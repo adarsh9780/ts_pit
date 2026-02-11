@@ -1,9 +1,12 @@
-feat(schema-gen): include all physical DB columns in generated agent schema
+feat(agent_v2): add python capability introspection and improve runner/tool reliability
 
-- update `scripts/generate_schema.py` to emit every column discovered in the database
-- keep config-mapped logical keys where available; use physical column name as key for unmapped columns
-- add `db_column` for all entries to preserve physical identifier reference
-- add `mapped_from_config` metadata per column (`true/false`)
-- preserve existing descriptions when keys match from prior schema versions
-- improve generator metadata/instructions to reflect mixed mapped + unmapped output
-- update warnings to report included unmapped columns instead of skipping them
+- add new `get_python_capabilities` tool to expose execute_python runtime status
+  - enabled flag, venv path, required/allowed/effective imports
+  - execution limits (timeout, memory, cpu, max output)
+- register `get_python_capabilities` in agent_v2 TOOL_REGISTRY
+- update agent_v2 system prompt to call `get_python_capabilities` before complex python tasks
+- inject python capability context from config into agent_v2 runtime context
+  so model decisions reflect actual configured imports/runtime
+- suppress platform RLIMIT warning noise from safe_py_runner stderr on Windows
+  to avoid false “python execution failed” interpretations
+- keep compile/tests green after changes

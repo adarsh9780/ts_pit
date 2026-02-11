@@ -563,6 +563,50 @@ def execute_python(code: str, input_data_json: str = "{}") -> str:
 
 
 @tool
+def get_python_capabilities() -> str:
+    """
+    Return current execute_python runtime capabilities from config.
+
+    Use this before complex Python tasks to discover:
+    - whether runtime is enabled
+    - available/allowed imports
+    - execution limits
+    """
+    cfg = get_config().get_agent_v2_safe_py_runner_config()
+    enabled = bool(cfg.get("enabled", False))
+    required_imports = [
+        str(x).strip()
+        for x in cfg.get("required_imports", [])
+        if str(x).strip() and str(x).strip() != "RestrictedPython"
+    ]
+    allowed_imports = [str(x).strip() for x in cfg.get("allowed_imports", []) if str(x).strip()]
+    # Merge to reflect effective import policy used by execute_python.
+    seen: set[str] = set()
+    effective_imports: list[str] = []
+    for item in [*required_imports, *allowed_imports]:
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        effective_imports.append(item)
+
+    data = {
+        "enabled": enabled,
+        "venv_path": str(cfg.get("venv_path", "")),
+        "required_imports": required_imports,
+        "allowed_imports": allowed_imports,
+        "effective_allowed_imports": effective_imports,
+        "limits": {
+            "timeout_seconds": int(cfg.get("timeout_seconds", 5)),
+            "memory_limit_mb": int(cfg.get("memory_limit_mb", 256)),
+            "cpu_time_seconds": int(cfg.get("cpu_time_seconds", 5)),
+            "max_output_kb": int(cfg.get("max_output_kb", 128)),
+        },
+    }
+    return _ok(data)
+
+
+@tool
 async def search_web_news(
     query: str, max_results: int = 5, start_date: str = None, end_date: str = None
 ) -> str:
@@ -780,6 +824,7 @@ async def scrape_websites(urls: list[str]) -> str:
 TOOL_REGISTRY = {
     "execute_sql": execute_sql,
     "execute_python": execute_python,
+    "get_python_capabilities": get_python_capabilities,
     "get_schema": get_schema,
     "list_files": list_files,
     "read_file": read_file,

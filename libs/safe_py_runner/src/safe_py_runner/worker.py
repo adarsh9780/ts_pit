@@ -157,8 +157,9 @@ def main() -> int:
         printed_text = str(exec_globals.get("printed", ""))
         stdout_text = (stdout_buffer.getvalue() + printed_text)[:max_output_bytes]
         stderr_text = stderr_buffer.getvalue()[:max_output_bytes]
-        if limit_warnings:
-            stderr_text = ("; ".join(limit_warnings) + "\n" + stderr_text).strip()
+        # Don't surface platform capability notes (like missing RLIMIT on Windows)
+        # as stderr; they confuse downstream LLM/tool consumers into treating
+        # successful runs as failures.
 
         resp = {
             "ok": True,

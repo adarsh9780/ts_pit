@@ -11,6 +11,7 @@ from .tools import (
     TOOL_REGISTRY,
 )
 from ..llm import get_llm_model
+from ..config import get_config
 from .prompts import AGENT_V2_SYSTEM_PROMPT
 from .state import AgentV2State
 
@@ -117,6 +118,40 @@ def load_context(state: AgentV2State, config: RunnableConfig) -> dict:
     if state.get("needs_web"):
         loaded_context["web"] = "Use web search tools only when internal data is insufficient."
         context_lines.append("- Web context is available via `search_web`/`search_web_news` and optional `scrape_websites`.")
+
+    # Automatically expose Python runtime capabilities from config so the model
+    # knows what libraries/imports are actually allowed.
+    py_cfg = get_config().get_agent_v2_safe_py_runner_config()
+    py_enabled = bool(py_cfg.get("enabled", False))
+    if py_enabled:
+        required = [
+            str(x).strip()
+            for x in py_cfg.get("required_imports", [])
+            if str(x).strip() and str(x).strip() != "RestrictedPython"
+        ]
+        allowed = [str(x).strip() for x in py_cfg.get("allowed_imports", []) if str(x).strip()]
+        # Keep order, dedupe
+        seen: set[str] = set()
+        preferred_imports: list[str] = []
+        for item in [*required, *allowed]:
+            key = item.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            preferred_imports.append(item)
+
+        loaded_context["python"] = (
+            "Use execute_python with imports from configured allowlist only: "
+            + ", ".join(preferred_imports)
+        )
+        context_lines.append(
+            "- Python runtime is enabled. Prefer execute_python for computations."
+        )
+        context_lines.append(
+            "- Allowed python imports: " + (", ".join(preferred_imports) if preferred_imports else "(none)")
+        )
+    else:
+        context_lines.append("- Python runtime is disabled in config; do not rely on execute_python.")
 
     if not context_lines:
         context_lines.append("- No extra context preloaded for this request.")
