@@ -67,17 +67,27 @@ def _rewrite_logical_sql(query: str) -> tuple[str, bool]:
     rewritten = query
     changed = False
     mappings = _logical_to_physical_column_map()
-    # Replace longer logical names first to avoid partial overlaps.
-    logical_names = sorted(mappings.keys(), key=len, reverse=True)
-    for logical in logical_names:
-        physical = mappings[logical]
-        # Always quote physical identifiers; required for names with spaces.
-        replacement = _quote_identifier(physical)
-        pattern = re.compile(rf"\b{re.escape(logical)}\b", flags=re.IGNORECASE)
-        candidate = pattern.sub(replacement, rewritten)
-        if candidate != rewritten:
-            rewritten = candidate
+
+    # Replace only in unquoted segments so we don't corrupt
+    # existing quoted identifiers like "Alert date".
+    parts = re.split(r'(".*?(?<!\\)"|\'.*?(?<!\\)\')', query)
+    for idx, part in enumerate(parts):
+        if idx % 2 == 1:
+            # Inside quotes -> do not rewrite.
+            continue
+
+        segment = part
+        logical_names = sorted(mappings.keys(), key=len, reverse=True)
+        for logical in logical_names:
+            physical = mappings[logical]
+            replacement = _quote_identifier(physical)
+            pattern = re.compile(rf"\b{re.escape(logical)}\b", flags=re.IGNORECASE)
+            segment = pattern.sub(replacement, segment)
+        if segment != part:
             changed = True
+            parts[idx] = segment
+
+    rewritten = "".join(parts)
     return rewritten, changed
 
 

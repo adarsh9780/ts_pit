@@ -37,3 +37,5 @@ __pycache__/
 artifacts/reports/*
 *.db-shm
 *.db-wal
+backend/agent/db_schema.yaml
+backend/agent_v2/db_schema.yaml

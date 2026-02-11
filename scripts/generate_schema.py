@@ -3,12 +3,13 @@
 Schema Generator for AI Agent
 ==============================
 Generates a YAML schema description from the SQLite database.
-Uses config.yaml for column name mapping to ensure portability.
+Includes all physical DB columns and preserves config.yaml logical mappings when available.
 
 Features:
-- Uses config.yaml column names (not raw DB names) for portability
+- Includes all columns found in the physical database
+- Uses config.yaml logical names when mapped
 - Preserves human-edited descriptions when re-run
-- Colored warnings for missing/new columns
+- Colored warnings for missing descriptions
 - Includes sample values for context
 
 Usage:
@@ -116,7 +117,7 @@ def generate_schema(
     db_path: Path, output_path: Path
 ) -> tuple[dict, list[str], list[str], list[str]]:
     """
-    Generate schema from database using config.yaml column names.
+    Generate schema from database, including all physical DB columns.
 
     Args:
         db_path: Path to the SQLite database
@@ -141,7 +142,9 @@ def generate_schema(
             "generated_by": "scripts/generate_schema.py",
             "database": str(db_path.name),
             "instructions": (
-                "Column names are from config.yaml (not raw DB names) for portability. "
+                "This schema includes all physical DB columns. "
+                "Mapped columns use logical keys from config.yaml; unmapped columns "
+                "use their physical DB column name as the key. "
                 "Add descriptions to help the AI agent understand column semantics."
             ),
         },
@@ -189,23 +192,25 @@ def generate_schema(
 
         existing_cols = existing_tables.get(table_key, {}).get("columns", {})
 
-        # Process columns that are in config.yaml
-        for ui_key, db_col in config_columns.items():
-            if not db_col:
-                continue
-
-            # Find the DB column info
-            db_col_info = next((c for c in db_columns if c["name"] == db_col), None)
-            if not db_col_info:
-                continue
-
-            sample = get_sample_value(cursor, table_name, db_col)
+        # Process all DB columns.
+        for db_col_info in db_columns:
+            db_col_name = db_col_info["name"]
+            ui_key = db_to_ui.get(db_col_name, db_col_name)
+            sample = get_sample_value(cursor, table_name, db_col_name)
 
             col_info = {
                 "type": db_col_info["type"],
                 "description": "",
-                "db_column": db_col,  # Store actual DB column name for reference
+                "db_column": db_col_name,  # Always keep physical DB column name
             }
+
+            if db_col_name in db_to_ui:
+                col_info["mapped_from_config"] = True
+            else:
+                col_info["mapped_from_config"] = False
+                new_column_warnings.append(
+                    f"  └─ Column '{table_name}.{db_col_name}' is unmapped in config.yaml (included as '{ui_key}')"
+                )
 
             if db_col_info["primary_key"]:
                 col_info["primary_key"] = True
@@ -213,7 +218,7 @@ def generate_schema(
             if sample is not None:
                 col_info["example"] = sample
 
-            # Preserve existing description
+            # Preserve existing description if present on same key.
             if ui_key in existing_cols:
                 existing_desc = existing_cols[ui_key].get("description", "")
                 if existing_desc:
@@ -228,13 +233,6 @@ def generate_schema(
                 )
 
             table_info["columns"][ui_key] = col_info
-
-        # Check for DB columns NOT in config (new/unmapped columns)
-        for db_col in db_columns:
-            if db_col["name"] not in mapped_db_cols:
-                new_column_warnings.append(
-                    f"  └─ Column '{table_name}.{db_col['name']}' exists in DB but not in config.yaml"
-                )
 
         schema["tables"][table_key] = table_info
 
@@ -318,10 +316,7 @@ def main():
     # Show new/unmapped columns (magenta)
     if new_cols:
         print(
-            f"\n{Fore.MAGENTA}🆕 Columns in DB but not in config.yaml ({len(new_cols)} items):{Style.RESET_ALL}"
-        )
-        print(
-            f"{Fore.MAGENTA}   Consider adding these to config.yaml if needed:{Style.RESET_ALL}"
+            f"\n{Fore.MAGENTA}🆕 Unmapped DB columns included ({len(new_cols)} items):{Style.RESET_ALL}"
         )
         for w in new_cols:
             print(f"{Fore.MAGENTA}{w}{Style.RESET_ALL}")
