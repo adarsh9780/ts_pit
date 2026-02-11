@@ -1,8 +1,8 @@
-feat(agent_v2): auto-retry after tool errors with config-driven retry cap
+feat(agent_v2): add internal methodology doc paths to system prompt for grounded scoring responses
 
-- add `agent_v2.retries.max_tool_error_retries` to config (default: 1)
-- add config getter `get_agent_v2_retry_config()` with validation/clamping
-- update graph continuation logic to detect latest `{"ok": false}` tool payloads
-- inject retry guidance message and loop back to agent when retries remain
-- stop retrying once configured cap is exhausted
-- add unit tests for retry routing behavior after tool errors
+- list canonical internal references and their purpose:
+  - artifacts/SCORING_METHODOLOGY.md
+  - artifacts/TECHNICAL_IMPLEMENTATION.md
+  - artifacts/BUSINESS_METHODOLOGY.md
+- instruct model to ground methodology/calculation answers in internal docs/data before hypothetical formulas
+- keep tool choice autonomous (no tool-order directives added)
