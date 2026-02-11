@@ -36,6 +36,15 @@ export function useAgentChat(alertIdRef) {
   let abortController = null;
   let toolSeq = 0;
 
+  const ensureTextSegment = (msg) => {
+    if (!msg.segments) msg.segments = [];
+    const last = msg.segments[msg.segments.length - 1];
+    if (!last || last.type !== 'text') {
+      msg.segments.push({ type: 'text', content: '' });
+    }
+    return msg.segments[msg.segments.length - 1];
+  };
+
   const generateGreeting = (info) => {
     if (!info) return 'Hello! I am your Trade Surveillance Assistant. How can I help you investigate this alert?';
     return `Hello! I'm your Trade Surveillance Assistant. I can see you're investigating:\n\n` +
@@ -82,7 +91,16 @@ export function useAgentChat(alertIdRef) {
     try {
       const data = await getChatHistory(sid);
       if (data.messages?.length) {
-        messages.value = data.messages;
+        messages.value = data.messages.map((msg) => {
+          if (msg.role === 'agent') {
+            return {
+              ...msg,
+              segments: msg.content ? [{ type: 'text', content: msg.content }] : [],
+              tools: msg.tools || [],
+            };
+          }
+          return msg;
+        });
       }
     } catch (e) {
       console.error('Failed to fetch chat history:', e);
@@ -259,7 +277,7 @@ export function useAgentChat(alertIdRef) {
     await captureAndUploadChartSnapshot();
 
     const agentMsgIndex = messages.value.length;
-    messages.value.push({ role: 'agent', content: '', tools: [] });
+    messages.value.push({ role: 'agent', content: '', tools: [], segments: [] });
 
     abortController = new AbortController();
 
@@ -306,10 +324,13 @@ export function useAgentChat(alertIdRef) {
             const data = JSON.parse(line.slice(6));
 
             if (data.type === 'token') {
-              messages.value[agentMsgIndex].content += data.content;
+              const msg = messages.value[agentMsgIndex];
+              const segment = ensureTextSegment(msg);
+              segment.content += data.content;
+              msg.content += data.content;
             } else if (data.type === 'tool_start') {
               toolSeq += 1;
-              messages.value[agentMsgIndex].tools.push({
+              const toolRun = {
                 id: `${data.tool}-${toolSeq}`,
                 name: data.tool,
                 status: 'running',
@@ -317,7 +338,11 @@ export function useAgentChat(alertIdRef) {
                 output: null,
                 durationMs: null,
                 startedAt: Date.now(),
-              });
+              };
+              const msg = messages.value[agentMsgIndex];
+              msg.tools.push(toolRun);
+              if (!msg.segments) msg.segments = [];
+              msg.segments.push({ type: 'tool', tool: toolRun });
             } else if (data.type === 'tool_end') {
               const tool = messages.value[agentMsgIndex].tools.find(
                 (t) => t.name === data.tool && t.status === 'running'
@@ -337,7 +362,10 @@ export function useAgentChat(alertIdRef) {
               const reportLine = reportUrl
                 ? `\n\nReport generated. [Download report](${reportUrl}) or use the Artifact button below the chat box.`
                 : '\n\nReport generated. Use the Artifact button below the chat box to download it.';
-              messages.value[agentMsgIndex].content += reportLine;
+              const msg = messages.value[agentMsgIndex];
+              const segment = ensureTextSegment(msg);
+              segment.content += reportLine;
+              msg.content += reportLine;
               showArtifactsMenu.value = true;
               await fetchArtifacts();
             }

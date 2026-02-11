@@ -35,6 +35,15 @@ const prettyToolData = (value) => {
     return String(value);
   }
 };
+const messageSegments = (msg) => {
+  if (msg?.segments?.length) return msg.segments;
+  const segments = [];
+  if (msg?.content) segments.push({ type: 'text', content: msg.content });
+  if (msg?.tools?.length) {
+    for (const tool of msg.tools) segments.push({ type: 'tool', tool });
+  }
+  return segments;
+};
 
 const props = defineProps({ alertId: String });
 defineEmits(['close']);
@@ -110,48 +119,48 @@ const {
         </template>
 
         <div v-else class="message-content">
-          <div
-            v-if="msg.content"
-            :key="`md-${index}-${msg.content.length}`"
-            class="text markdown-content"
-            v-html="renderMarkdown(msg.content)"
-          ></div>
+          <div v-for="(segment, segIndex) in messageSegments(msg)" :key="`seg-${index}-${segIndex}`">
+            <div
+              v-if="segment.type === 'text' && segment.content"
+              :key="`md-${index}-${segIndex}-${segment.content.length}`"
+              class="text markdown-content"
+              v-html="renderMarkdown(segment.content)"
+            ></div>
 
-          <div v-if="msg.tools && msg.tools.length > 0" class="tools-container">
-            <details
-              v-for="tool in msg.tools"
-              :key="tool.id || `${tool.name}-${tool.startedAt || 0}`"
-              class="tool-trace"
-              :open="tool.status === 'error'"
-            >
-              <summary class="tool-summary">
-                <span class="tool-main">
-                  <span class="status-dot" :class="tool.status"></span>
-                  <span class="tool-name">{{ formatToolLabel(tool.name) }}</span>
-                </span>
-                <span class="tool-meta">
-                  <span class="tool-status">{{ tool.status }}</span>
-                  <span v-if="formatDuration(tool.durationMs)" class="tool-duration">
-                    {{ formatDuration(tool.durationMs) }}
+            <div v-else-if="segment.type === 'tool'" class="tools-container">
+              <details
+                class="tool-trace"
+                :open="segment.tool.status === 'error'"
+              >
+                <summary class="tool-summary">
+                  <span class="tool-main">
+                    <span class="status-dot" :class="segment.tool.status"></span>
+                    <span class="tool-name">{{ formatToolLabel(segment.tool.name) }}</span>
                   </span>
-                </span>
-              </summary>
-              <div class="tool-body">
-                <div v-if="tool.input" class="tool-section">
-                  <div class="tool-section-title">Input</div>
-                  <pre class="tool-pre">{{ prettyToolData(tool.input) }}</pre>
+                  <span class="tool-meta">
+                    <span class="tool-status">{{ segment.tool.status }}</span>
+                    <span v-if="formatDuration(segment.tool.durationMs)" class="tool-duration">
+                      {{ formatDuration(segment.tool.durationMs) }}
+                    </span>
+                  </span>
+                </summary>
+                <div class="tool-body">
+                  <div v-if="segment.tool.input" class="tool-section">
+                    <div class="tool-section-title">Input</div>
+                    <pre class="tool-pre">{{ prettyToolData(segment.tool.input) }}</pre>
+                  </div>
+                  <div v-if="segment.tool.output" class="tool-section">
+                    <div class="tool-section-title">Output</div>
+                    <pre class="tool-pre">{{ prettyToolData(segment.tool.output) }}</pre>
+                  </div>
+                  <div v-if="segment.tool.errorCode || segment.tool.errorMessage" class="tool-section tool-error">
+                    <div class="tool-section-title">Error</div>
+                    <div v-if="segment.tool.errorCode" class="tool-error-line">Code: {{ segment.tool.errorCode }}</div>
+                    <div v-if="segment.tool.errorMessage" class="tool-error-line">Message: {{ segment.tool.errorMessage }}</div>
+                  </div>
                 </div>
-                <div v-if="tool.output" class="tool-section">
-                  <div class="tool-section-title">Output</div>
-                  <pre class="tool-pre">{{ prettyToolData(tool.output) }}</pre>
-                </div>
-                <div v-if="tool.errorCode || tool.errorMessage" class="tool-section tool-error">
-                  <div class="tool-section-title">Error</div>
-                  <div v-if="tool.errorCode" class="tool-error-line">Code: {{ tool.errorCode }}</div>
-                  <div v-if="tool.errorMessage" class="tool-error-line">Message: {{ tool.errorMessage }}</div>
-                </div>
-              </div>
-            </details>
+              </details>
+            </div>
           </div>
         </div>
       </div>
@@ -422,9 +431,11 @@ const {
   margin: 0;
   max-width: 100%;
   max-height: 180px;
-  overflow-x: auto;
+  overflow-x: hidden;
   overflow-y: auto;
-  white-space: pre;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
   padding: 8px;
   border-radius: 4px;
   border: 1px solid var(--color-border);
