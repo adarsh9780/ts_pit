@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import re
 from typing import Literal
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
@@ -46,6 +47,94 @@ def _latest_user_text(messages: list) -> str:
 def _contains_any(text_value: str, tokens: tuple[str, ...]) -> bool:
     lowered = text_value.lower()
     return any(token in lowered for token in tokens)
+
+
+def _looks_like_code_submission(text_value: str) -> bool:
+    txt = (text_value or "").strip()
+    if not txt:
+        return False
+    lowered = txt.lower()
+
+    if "```python" in lowered or "```py" in lowered or "```sql" in lowered:
+        return True
+
+    if re.search(r"\bselect\b[\s\S]{0,240}\bfrom\b", lowered):
+        return True
+    if re.search(r"^\s*(with|select|insert|update|delete|create|drop|alter)\b", lowered):
+        return True
+
+    py_patterns = [
+        r"^\s*import\s+[a-zA-Z_][\w.]*",
+        r"^\s*from\s+[a-zA-Z_][\w.]*\s+import\s+",
+        r"^\s*def\s+[a-zA-Z_]\w*\s*\(",
+        r"^\s*class\s+[A-Z][A-Za-z0-9_]*\s*[:(]",
+        r"^\s*for\s+.+\s+in\s+.+:",
+        r"^\s*while\s+.+:",
+        r"^\s*if\s+.+:",
+        r"^\s*print\s*\(",
+    ]
+    return any(re.search(pattern, txt, flags=re.IGNORECASE | re.MULTILINE) for pattern in py_patterns)
+
+
+def classify_intent(state: AgentV2State, config: RunnableConfig) -> dict:
+    _ = config
+    text_value = _latest_user_text(state.get("messages", []))
+    lowered = text_value.lower()
+
+    intent_labels: list[str] = []
+    disallow_execute_code = _looks_like_code_submission(text_value)
+    if disallow_execute_code:
+        intent_labels.append("execute_code")
+
+    if _contains_any(
+        lowered,
+        ("analyze", "analysis", "trend", "correlation", "distribution", "z score", "z-score", "compare", "summary"),
+    ):
+        intent_labels.append("data_analysis")
+
+    if _contains_any(
+        lowered,
+        ("alert", "ticker", "isin", "trade type", "status", "news item", "article"),
+    ):
+        intent_labels.append("alert_analysis")
+
+    if _contains_any(
+        lowered,
+        ("methodology", "method", "framework", "definition", "explain score", "how is"),
+    ):
+        intent_labels.append("methodology_discussion")
+
+    if not intent_labels:
+        intent_labels.append("other")
+    elif len(intent_labels) > 1:
+        intent_labels.append("mixed")
+
+    # Preserve first occurrence order and remove duplicates.
+    deduped_labels = list(dict.fromkeys(intent_labels))
+    return {
+        "intent_labels": deduped_labels,
+        "disallow_execute_code": disallow_execute_code,
+    }
+
+
+def route_after_intent(state: AgentV2State) -> Literal["reject_execute_code", "plan_request"]:
+    return "reject_execute_code" if state.get("disallow_execute_code") else "plan_request"
+
+
+def reject_execute_code_node(state: AgentV2State, config: RunnableConfig):
+    _ = config
+    _ = state
+    return {
+        "messages": [
+            AIMessage(
+                content=(
+                    "I can't process submitted SQL or Python code. "
+                    "Please describe your objective in plain language, and I can help with analysis steps or findings."
+                )
+            )
+        ],
+        "route": "direct",
+    }
 
 
 def plan_request(state: AgentV2State, config: RunnableConfig) -> dict:
@@ -207,6 +296,8 @@ def build_graph():
 
     workflow = StateGraph(AgentV2State)
     workflow.add_node("ensure_system_prompt", ensure_system_prompt)
+    workflow.add_node("classify_intent", classify_intent)
+    workflow.add_node("reject_execute_code", reject_execute_code_node)
     workflow.add_node("plan_request", plan_request)
     workflow.add_node("load_context", load_context)
     workflow.add_node("direct_answer", direct_answer_node)
@@ -214,7 +305,9 @@ def build_graph():
     workflow.add_node("tools", tool_node)
 
     workflow.add_edge(START, "ensure_system_prompt")
-    workflow.add_edge("ensure_system_prompt", "plan_request")
+    workflow.add_edge("ensure_system_prompt", "classify_intent")
+    workflow.add_conditional_edges("classify_intent", route_after_intent)
+    workflow.add_edge("reject_execute_code", END)
     workflow.add_edge("plan_request", "load_context")
     workflow.add_conditional_edges("load_context", route_after_plan)
     workflow.add_edge("direct_answer", END)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 from typing import Optional
@@ -14,6 +15,33 @@ from ...logger import logprint
 
 
 router = APIRouter(tags=["agent"])
+
+
+def _looks_like_code_submission(text_value: str) -> bool:
+    txt = (text_value or "").strip()
+    if not txt:
+        return False
+    lowered = txt.lower()
+
+    if "```python" in lowered or "```py" in lowered or "```sql" in lowered:
+        return True
+
+    if re.search(r"\bselect\b[\s\S]{0,240}\bfrom\b", lowered):
+        return True
+    if re.search(r"^\s*(with|select|insert|update|delete|create|drop|alter)\b", lowered):
+        return True
+
+    py_patterns = [
+        r"^\s*import\s+[a-zA-Z_][\w.]*",
+        r"^\s*from\s+[a-zA-Z_][\w.]*\s+import\s+",
+        r"^\s*def\s+[a-zA-Z_]\w*\s*\(",
+        r"^\s*class\s+[A-Z][A-Za-z0-9_]*\s*[:(]",
+        r"^\s*for\s+.+\s+in\s+.+:",
+        r"^\s*while\s+.+:",
+        r"^\s*if\s+.+:",
+        r"^\s*print\s*\(",
+    ]
+    return any(re.search(pattern, txt, flags=re.IGNORECASE | re.MULTILINE) for pattern in py_patterns)
 
 
 class AlertContext(BaseModel):
@@ -149,6 +177,18 @@ async def delete_chat_history(session_id: str, request: Request):
 
 @router.post("/agent/chat")
 async def chat_agent(request: Request, body: ChatRequest):
+    if _looks_like_code_submission(body.message):
+        refusal = (
+            "I can't process submitted SQL or Python code. "
+            "Please describe your objective in plain language, and I can help with analysis steps or findings."
+        )
+
+        async def rejection_event_generator():
+            yield f"data: {json.dumps({'type': 'token', 'content': refusal})}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+        return StreamingResponse(rejection_event_generator(), media_type="text/event-stream")
+
     agent = request.app.state.agent
     run_config = {"configurable": {"thread_id": body.session_id}}
 

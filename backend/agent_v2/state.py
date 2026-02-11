@@ -13,6 +13,8 @@ class AgentV2State(TypedDict):
     messages: Annotated[list, add_messages]
     summary: str
     route: str
+    intent_labels: list[str]
+    disallow_execute_code: bool
     planner_reason: str
     needs_db: bool
     needs_kb: bool

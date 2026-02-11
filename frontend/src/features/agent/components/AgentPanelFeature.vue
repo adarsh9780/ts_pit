@@ -17,10 +17,22 @@ marked.use(
   markedKatex({
     throwOnError: false,
     output: 'html',
+    nonStandard: true,
   })
 );
 
-const renderMarkdown = (content) => (content ? marked.parse(content) : '');
+const normalizeLatexDelimiters = (content) => {
+  if (!content || typeof content !== 'string') return content;
+  return content
+    // Convert block math from \[...\] to $$...$$.
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_, expr) => `$$${expr.trim()}$$`)
+    // Convert inline math from \(...\) to $...$.
+    .replace(/\\\(([\s\S]*?)\\\)/g, (_, expr) => `$${expr.trim()}$`)
+    // Recover math accidentally wrapped as [ ... ] (non-link), only when TeX commands are present.
+    .replace(/\[(\s*[^]\n]*\\[a-zA-Z][^]\n]*)\](?!\()/g, (_, expr) => `$$${expr.trim()}$$`);
+};
+
+const renderMarkdown = (content) => (content ? marked.parse(normalizeLatexDelimiters(content)) : '');
 const formatToolLabel = (name) => name?.replaceAll('_', ' ') || 'tool';
 const formatDuration = (ms) => {
   if (typeof ms !== 'number' || Number.isNaN(ms)) return '';
@@ -389,6 +401,26 @@ const {
   border-radius: 3px;
   font-family: 'SF Mono', Monaco, Consolas, monospace;
   font-size: 0.9em;
+}
+.markdown-content :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.75em 0;
+  font-size: 0.92em;
+}
+.markdown-content :deep(th),
+.markdown-content :deep(td) {
+  border: 1px solid var(--color-border);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+.markdown-content :deep(thead th) {
+  background: var(--color-surface-hover);
+  font-weight: 700;
+}
+.markdown-content :deep(tbody tr:nth-child(even)) {
+  background: rgba(2, 6, 23, 0.02);
 }
 
 .tools-container {

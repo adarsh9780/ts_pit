@@ -1,6 +1,9 @@
-feat(agent_v2): require capability-based next steps in responses
+feat(agent-policy): hard reject submitted SQL/Python code with intent gating
 
-- update agent_v2 system prompt output rules
-- require a short "Next steps" section (1-3 actions) for non-greeting responses
-- ensure suggestions are grounded in tools available in the current run
-- allow minimal/optional next steps when a precise user command is already fully completed
+- add API-level guard in POST /agent/chat to detect submitted SQL/Python snippets
+- short-circuit rejected requests with SSE refusal response (token + done), avoiding agent/tool execution
+- add agent_v2 intent classifier node with explicit intents
+  - execute_code, data_analysis, alert_analysis, methodology_discussion, mixed, other
+- route execute_code intent to dedicated rejection node in v2 graph
+- extend agent_v2 state with intent_labels and disallow_execute_code
+- add prompt-level policy reminders in v1/v2 to refuse user-submitted SQL/Python snippets
