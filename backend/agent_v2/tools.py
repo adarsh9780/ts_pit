@@ -545,6 +545,7 @@ def execute_python(code: str, input_data_json: str = "{}") -> str:
             code="PYTHON_EXEC_DISABLED",
         )
 
+    normalized_from = "dict"
     try:
         max_input_json_kb = int(cfg.get("max_input_json_kb", 256))
         if len((input_data_json or "").encode("utf-8")) > (max_input_json_kb * 1024):
@@ -552,9 +553,18 @@ def execute_python(code: str, input_data_json: str = "{}") -> str:
                 f"input_data_json exceeds {max_input_json_kb} KB limit.",
                 code="INPUT_TOO_LARGE",
             )
-        input_data = json.loads(input_data_json or "{}")
-        if not isinstance(input_data, dict):
-            return _error("input_data_json must decode to an object/dict.", code="INVALID_INPUT")
+        decoded_input = json.loads(input_data_json or "{}")
+        if isinstance(decoded_input, dict):
+            input_data = decoded_input
+        elif isinstance(decoded_input, list):
+            # Be tolerant of model-produced top-level arrays.
+            input_data = {"rows": decoded_input}
+            normalized_from = "list"
+        else:
+            return _error(
+                "input_data_json must decode to an object/dict or a list.",
+                code="INVALID_INPUT",
+            )
     except Exception as e:
         return _error(f"Invalid input_data_json: {e}", code="INVALID_INPUT")
 
@@ -569,6 +579,7 @@ def execute_python(code: str, input_data_json: str = "{}") -> str:
         extra_globals={
             "input_data_json": json.dumps(input_data),
             "input_data_dict": input_data,
+            "input_rows": input_data.get("rows", []) if isinstance(input_data, dict) else [],
         },
     )
     try:
@@ -609,6 +620,7 @@ def execute_python(code: str, input_data_json: str = "{}") -> str:
             "exit_code": result.exit_code,
         },
         message="Python executed successfully",
+        normalized_input_from=normalized_from,
     )
 
 

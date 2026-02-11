@@ -284,6 +284,22 @@ class Config:
         merged.update(cfg)
         return merged
 
+    def get_agent_v2_retry_config(self) -> Dict[str, Any]:
+        """Get retry policy for agent v2 autonomous tool-error correction."""
+        defaults: Dict[str, Any] = {
+            "max_tool_error_retries": 1,
+        }
+        cfg = self._config.get("agent_v2", {}).get("retries", {})
+        if not isinstance(cfg, dict):
+            return defaults
+        merged = dict(defaults)
+        merged.update(cfg)
+        try:
+            merged["max_tool_error_retries"] = max(0, int(merged.get("max_tool_error_retries", 1)))
+        except Exception:
+            merged["max_tool_error_retries"] = defaults["max_tool_error_retries"]
+        return merged
+
     def get_impact_label_aliases(self) -> Dict[str, str]:
         """
         Get optional impact-label aliases.
