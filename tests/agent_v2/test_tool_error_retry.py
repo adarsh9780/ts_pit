@@ -1034,6 +1034,114 @@ class ToolErrorRetryTests(unittest.TestCase):
         out = self.graph.validate_answer_node(state, config={})
         self.assertFalse(out.get("needs_answer_rewrite"))
 
+    # ---------------------------------------------------------------
+    #  Bug fix: text→diagnose→text loop prevention
+    # ---------------------------------------------------------------
+
+    def test_text_only_after_diagnostic_goes_to_validate_not_loop(self):
+        """THE BUG: text-only response after a diagnostic was already given
+        must NOT loop back to diagnose. It should go to validate_answer."""
+        state = {
+            "messages": [
+                HumanMessage(content="summarize alerts for September"),
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "id": "c1",
+                            "name": "execute_sql",
+                            "args": {
+                                "query": "SELECT * FROM alerts WHERE alert_date='2025-09-01'"
+                            },
+                        }
+                    ],
+                ),
+                ToolMessage(
+                    content='{"ok": true, "data": [], "meta": {"row_count": 0}}',
+                    tool_call_id="c1",
+                ),
+                # Diagnostic was injected on first attempt
+                SystemMessage(
+                    content="Diagnostic: use DATE()", id="agent-v2-tool-error-retry-1"
+                ),
+                # LLM ignored diagnostic and responded with text
+                AIMessage(content="There are no alerts for 1st September."),
+            ]
+        }
+        cfg = type(
+            "Cfg",
+            (),
+            {"get_agent_v2_retry_config": lambda self: {"max_tool_error_retries": 3}},
+        )()
+        with patch.object(self.graph, "get_config", return_value=cfg):
+            decision = self.graph.should_continue(state)
+        # MUST go to validate_answer, NOT back to diagnose_empty_result
+        self.assertEqual(decision, "validate_answer")
+
+    def test_diagnostic_exists_since_last_tool_returns_true(self):
+        """Helper should detect a diagnostic after the last ToolMessage."""
+        messages = [
+            HumanMessage(content="test"),
+            AIMessage(
+                content="", tool_calls=[{"id": "c1", "name": "execute_sql", "args": {}}]
+            ),
+            ToolMessage(content='{"ok": true, "data": []}', tool_call_id="c1"),
+            SystemMessage(content="retry guidance", id="agent-v2-tool-error-retry-1"),
+            AIMessage(content="No data."),
+        ]
+        self.assertTrue(self.graph._diagnostic_exists_since_last_tool(messages))
+
+    def test_diagnostic_exists_since_last_tool_returns_false(self):
+        """Helper should return False when no diagnostic exists after last tool."""
+        messages = [
+            HumanMessage(content="test"),
+            AIMessage(
+                content="", tool_calls=[{"id": "c1", "name": "execute_sql", "args": {}}]
+            ),
+            ToolMessage(content='{"ok": true, "data": []}', tool_call_id="c1"),
+            AIMessage(content="No data."),
+        ]
+        self.assertFalse(self.graph._diagnostic_exists_since_last_tool(messages))
+
+    def test_tool_calls_branch_still_retries_even_after_diagnostic(self):
+        """When LLM issues a tool call (identical) after diagnostic, the tool_calls
+        branch should still intercept and route to diagnose (up to the cap)."""
+        query = "SELECT * FROM alerts WHERE alert_date='2025-09-01'"
+        state = {
+            "messages": [
+                HumanMessage(content="show alerts"),
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {"id": "c1", "name": "execute_sql", "args": {"query": query}}
+                    ],
+                ),
+                ToolMessage(
+                    content='{"ok": true, "data": [], "meta": {"row_count": 0}}',
+                    tool_call_id="c1",
+                ),
+                SystemMessage(
+                    content="Diagnostic: try DATE()", id="agent-v2-tool-error-retry-1"
+                ),
+                # LLM retried with tool_calls but same query
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {"id": "c2", "name": "execute_sql", "args": {"query": query}}
+                    ],
+                ),
+            ]
+        }
+        cfg = type(
+            "Cfg",
+            (),
+            {"get_agent_v2_retry_config": lambda self: {"max_tool_error_retries": 3}},
+        )()
+        with patch.object(self.graph, "get_config", return_value=cfg):
+            decision = self.graph.should_continue(state)
+        # The tool_calls branch should still intercept identical retries
+        self.assertEqual(decision, "diagnose_empty_result")
+
 
 if __name__ == "__main__":
     unittest.main()

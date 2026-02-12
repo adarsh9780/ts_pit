@@ -430,6 +430,21 @@ def _tool_error_retry_attempts(messages: list) -> int:
     return attempts
 
 
+def _diagnostic_exists_since_last_tool(messages: list) -> bool:
+    """Check if a diagnostic SystemMessage was already injected since the
+    last ToolMessage.  Walk backwards from the end of the message list."""
+    for msg in reversed(messages):
+        msg_type = getattr(msg, "type", "")
+        if msg_type == "tool":
+            # Reached the last tool result without finding a diagnostic
+            return False
+        if msg_type == "system":
+            msg_id = str(getattr(msg, "id", "") or "")
+            if msg_id.startswith(TOOL_ERROR_RETRY_MSG_ID_PREFIX):
+                return True
+    return False
+
+
 def _max_tool_error_retries() -> int:
     cfg = get_config().get_agent_v2_retry_config()
     try:
@@ -931,11 +946,17 @@ def should_continue(
             if new_sig and new_sig == empty_call.get("signature"):
                 return "diagnose_empty_result"
         return "tools"
-    if failed_call and can_correct:
-        if attempts < _max_tool_error_retries():
+    # -- Text-only response (LLM did NOT issue tool calls) ----------------
+    # Only route to diagnose if the LLM has NOT already seen a diagnostic
+    # message for this empty/error result.  If a diagnostic was injected
+    # and the LLM still responded with text, it means it won't comply –
+    # accept the answer instead of looping.
+    diagnostic_already_given = _diagnostic_exists_since_last_tool(messages)
+    if not diagnostic_already_given:
+        if failed_call and can_correct and attempts < _max_tool_error_retries():
             return "diagnose_empty_result"
-    if empty_call and attempts < _max_tool_error_retries():
-        return "diagnose_empty_result"
+        if empty_call and attempts < _max_tool_error_retries():
+            return "diagnose_empty_result"
     if failed_call:
         return "__end__"
     return "validate_answer"
