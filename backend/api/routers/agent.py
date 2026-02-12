@@ -216,10 +216,22 @@ async def get_chat_history(
         turn_tools_map: dict[str, dict] = {}
         turn_tool_seq = 0
         final_assistant_content: str | None = None
+        last_user_content: str | None = None
 
         def _flush_turn():
             nonlocal turn_tools_map, turn_tool_seq, final_assistant_content
             content = (final_assistant_content or "").strip()
+            if content:
+                tools = list(turn_tools_map.values())
+                # Drop pure assistant echo of the latest user prompt when there are no tool traces.
+                if (
+                    not tools
+                    and last_user_content
+                    and " ".join(content.split()).lower()
+                    == " ".join(last_user_content.split()).lower()
+                ):
+                    content = ""
+
             if content:
                 tools = list(turn_tools_map.values())
                 if (
@@ -242,6 +254,7 @@ async def get_chat_history(
             kind = event.get("kind")
             if kind == "user":
                 _flush_turn()
+                last_user_content = str(event["content"])
                 frontend_messages.append(
                     {"role": "user", "content": event["content"], "tools": []}
                 )

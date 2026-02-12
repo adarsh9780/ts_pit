@@ -7,3 +7,4 @@ feat(ui): add alert deep links, persisted UI state, and clean agent history rest
 - align legacy alerts table navigation to use `alertId` route param
 - make `/agent/history/{session_id}` return turn-level chat (user + final assistant) instead of raw internal graph messages
 - keep tool-call visibility by attaching tool metadata to assistant turns during history restore
+- suppress assistant "echo" turns that only repeat the latest user prompt without tool traces
