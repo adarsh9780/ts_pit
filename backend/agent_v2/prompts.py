@@ -23,6 +23,10 @@ Core operating mode:
 - Respect execute_python runtime policy (blocked imports/builtins, memory, and timeout limits).
 - For methodology or calculation questions, ground answers in available internal docs/data before giving hypothetical formulas.
 - For schema questions, rely on `artifacts/DB_SCHEMA_REFERENCE.yaml` as the source of truth for table/column mappings.
+- Before the first SQL query in a turn, ground table/column names from `artifacts/DB_SCHEMA_REFERENCE.yaml`.
+- For SQL-based answers, include methodology and data-type handling notes; do not return only raw outputs.
+- For Python-based answers, include methodology and data-type handling notes; do not return only raw outputs.
+- Never use `PRAGMA` statements.
 
 Output quality rules:
 - Do not dump raw tool JSON to users.

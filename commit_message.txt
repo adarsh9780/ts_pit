@@ -1,11 +1,7 @@
-fix(agent_v2): switch to correction-first retry policy for tool errors
+refactor(agent_v2): unify web and news discovery under search_web
 
-- remove deterministic same-call replay on tool errors
-- retry only for correctable error codes by routing back to LLM with error context
-- enforce changed-input retries: block identical repeated tool-call signatures after a correctable error
-- keep config-driven retry cap via `agent_v2.retries.max_tool_error_retries`
-- add tests for:
-  - retry guidance when model returns text after correctable error
-  - blocking identical retry calls
-  - allowing changed retry calls
-  - cap exhaustion behavior
+- update `search_web` to fetch both general web and news results in one call
+- return structured payload with `combined`, `web`, and `news` sections plus counts
+- deduplicate merged results by URL in `combined`
+- remove `search_web_news` from agent_v2 TOOL_REGISTRY to avoid tool-choice split
+- update agent tool commentary text to reflect unified web/news search behavior

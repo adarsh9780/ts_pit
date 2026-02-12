@@ -845,9 +845,12 @@ async def search_web_news(
 @tool
 async def search_web(query: str, max_results: int = 5) -> str:
     """
-    Search the web for general (non-news-specific) information.
+    Unified web search: returns both general web and news results.
 
-    Returns lightweight search results with title, url, and snippet.
+    Returns:
+    - combined: deduplicated merged results
+    - web: general web results
+    - news: news results
     """
     import asyncio
 
@@ -862,24 +865,63 @@ async def search_web(query: str, max_results: int = 5) -> str:
         if proxy_url:
             kwargs["proxy"] = proxy_url
         with DDGS(**kwargs) as ddgs:
-            return list(ddgs.text(query, max_results=max_results))
+            web_hits = list(ddgs.text(query, max_results=max_results))
+            news_hits = list(ddgs.news(query, max_results=max_results))
+            return web_hits, news_hits
 
     try:
-        results = await asyncio.to_thread(_search)
-        if not results:
+        web_hits, news_hits = await asyncio.to_thread(_search)
+        if not web_hits and not news_hits:
             return _ok([], message=f"No web results found for: {query}", query=query)
 
-        final_results = []
-        for item in results:
-            final_results.append(
+        web_results = []
+        for item in web_hits:
+            web_results.append(
                 {
                     "title": item.get("title", "No title"),
                     "url": item.get("href", ""),
                     "snippet": item.get("body", ""),
                     "source": item.get("source", "web"),
+                    "kind": "web",
                 }
             )
-        return _ok(final_results, query=query, row_count=len(final_results))
+
+        news_results = []
+        for item in news_hits:
+            news_results.append(
+                {
+                    "title": item.get("title", "No title"),
+                    "url": item.get("url", ""),
+                    "snippet": item.get("body", ""),
+                    "source": item.get("source", "news"),
+                    "date": item.get("date", ""),
+                    "kind": "news",
+                }
+            )
+
+        seen_urls: set[str] = set()
+        combined_results = []
+        for item in web_results + news_results:
+            url = str(item.get("url") or "").strip()
+            key = url.lower()
+            if not key:
+                continue
+            if key in seen_urls:
+                continue
+            seen_urls.add(key)
+            combined_results.append(item)
+
+        return _ok(
+            {
+                "combined": combined_results,
+                "web": web_results,
+                "news": news_results,
+            },
+            query=query,
+            combined_count=len(combined_results),
+            web_count=len(web_results),
+            news_count=len(news_results),
+        )
     except Exception as e:
         return _error(f"Error searching web: {str(e)}", code="WEB_SEARCH_ERROR", query=query)
 
@@ -951,7 +993,6 @@ TOOL_REGISTRY = {
     "get_article_by_id": get_article_by_id,
     "analyze_current_alert": analyze_current_alert,
     "search_web": search_web,
-    "search_web_news": search_web_news,
     "generate_current_alert_report": generate_current_alert_report,
     "scrape_websites": scrape_websites,
 }

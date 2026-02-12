@@ -274,8 +274,7 @@ Status: {ctx.status or "N/A"}
             "generate_current_alert_report": "I will generate the report artifact now.",
             "list_files": "I will list available knowledge files relevant to this task.",
             "read_file": "I will read the selected file for methodology details.",
-            "search_web": "I will search the web for supporting external context.",
-            "search_web_news": "I will search recent web news and summarize relevant hits.",
+            "search_web": "I will search web and news sources for supporting external context.",
             "scrape_websites": "I will scrape the selected URLs for detailed evidence.",
         }
         return comments.get(tool_name, f"I will run `{tool_name}` to continue.")
