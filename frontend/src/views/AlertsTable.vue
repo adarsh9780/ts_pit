@@ -52,10 +52,10 @@ const updateStatus = async (alertId, newStatus, event) => {
 const goToDetail = (alertId, event) => {
   // Check if Ctrl/Cmd is pressed for new tab, otherwise same tab
   if (event.ctrlKey || event.metaKey) {
-    const route = router.resolve({ name: 'AlertDetail', params: { id: alertId } });
+    const route = router.resolve({ name: 'AlertDetail', params: { alertId } });
     window.open(route.href, '_blank');
   } else {
-    router.push({ name: 'AlertDetail', params: { id: alertId } });
+    router.push({ name: 'AlertDetail', params: { alertId } });
   }
 };
 

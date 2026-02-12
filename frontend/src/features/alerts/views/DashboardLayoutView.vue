@@ -1,9 +1,12 @@
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import AlertsSidebar from '../../../components/AlertsSidebar.vue';
 import AlertDetail from './AlertDetailView.vue'; 
 import AgentPanel from '../../agent/components/AgentPanelFeature.vue';
 import { getAlerts, getConfig } from '../../../api/service.js';
+
+const DASHBOARD_UI_STATE_KEY = 'ts_pit.dashboard.ui_state.v1';
 
 // State
 const alerts = ref([]);
@@ -15,15 +18,8 @@ const mappings = ref({}); // Keep mappings if needed by children
 const validStatuses = ref(['NEEDS_REVIEW', 'ESCALATE_L2', 'DISMISS']);
 const isSidebarCollapsed = ref(false);
 const isAgentOpen = ref(false); // Controls Agent Panel visibility
-
-const toggleSidebar = () => {
-    isSidebarCollapsed.value = !isSidebarCollapsed.value;
-};
-
-// Toggle Agent Panel
-const toggleAgent = () => {
-    isAgentOpen.value = !isAgentOpen.value;
-};
+const route = useRoute();
+const router = useRouter();
 
 const resolveAlertId = (item) => {
   if (item == null) return null;
@@ -31,6 +27,66 @@ const resolveAlertId = (item) => {
     return item.id ?? item.alert_id ?? item.alertId ?? item['Alert ID'] ?? null;
   }
   return item;
+};
+
+const normalizeAlertId = (item) => {
+  const id = resolveAlertId(item);
+  if (id == null || id === '') return null;
+  return String(id);
+};
+
+const currentFilters = ref({
+  search: '',
+  status: '',
+  type: '',
+  date: ''
+});
+
+const persistUiState = () => {
+  try {
+    localStorage.setItem(
+      DASHBOARD_UI_STATE_KEY,
+      JSON.stringify({
+        filters: currentFilters.value,
+        isSidebarCollapsed: isSidebarCollapsed.value,
+        isAgentOpen: isAgentOpen.value
+      })
+    );
+  } catch (error) {
+    console.warn('Failed to persist dashboard UI state:', error);
+  }
+};
+
+const restoreUiState = () => {
+  try {
+    const raw = localStorage.getItem(DASHBOARD_UI_STATE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      const filters = parsed.filters ?? {};
+      currentFilters.value = {
+        search: typeof filters.search === 'string' ? filters.search : '',
+        status: typeof filters.status === 'string' ? filters.status : '',
+        type: typeof filters.type === 'string' ? filters.type : '',
+        date: typeof filters.date === 'string' ? filters.date : ''
+      };
+      isSidebarCollapsed.value = Boolean(parsed.isSidebarCollapsed);
+      isAgentOpen.value = Boolean(parsed.isAgentOpen) && Boolean(normalizeAlertId(route.params.alertId));
+    }
+  } catch (error) {
+    console.warn('Failed to restore dashboard UI state:', error);
+  }
+};
+
+const toggleSidebar = () => {
+  isSidebarCollapsed.value = !isSidebarCollapsed.value;
+  persistUiState();
+};
+
+// Toggle Agent Panel
+const toggleAgent = () => {
+  isAgentOpen.value = !isAgentOpen.value;
+  persistUiState();
 };
 
 const fetchConfig = async () => {
@@ -51,21 +107,17 @@ const fetchAlerts = async (date = null) => {
   try {
     const params = date ? { date } : {};
     alerts.value = await getAlerts(params);
-    applyFilters(); // Initial filter application
     
-    // Extract dates if not already set (or always update if needed)
+    // Extract dates and default date only when there is no restored user preference.
     if (!date && alerts.value.length > 0) {
       const dates = [...new Set(alerts.value.map(a => a.alert_date))].sort().reverse();
       availableDates.value = dates;
-      
-      // Default to the latest date (Today - 1 concept)
-      if (dates.length > 0) {
-          currentFilters.value.date = dates[0];
-          applyFilters();
+
+      if (dates.length > 0 && !currentFilters.value.date) {
+        currentFilters.value.date = dates[0];
       }
-    } else {
-        applyFilters();
     }
+    applyFilters();
   } catch (error) {
     console.error('Error fetching alerts:', error);
   } finally {
@@ -73,28 +125,20 @@ const fetchAlerts = async (date = null) => {
   }
 };
 
-onMounted(async () => {
-  await fetchConfig();
-  await fetchAlerts();
-});
-
 // Selection Handler
 const onAlertSelect = (payload) => {
-  const id = resolveAlertId(payload?.id != null ? payload.id : payload);
-  selectedAlertId.value = id != null ? String(id) : null;
+  const id = normalizeAlertId(payload?.id != null ? payload.id : payload);
+  if (!id) return;
+  selectedAlertId.value = id;
   // Auto-collapse on selection if not already collapsed
   if (!isSidebarCollapsed.value) {
     isSidebarCollapsed.value = true;
+    persistUiState();
+  }
+  if (route.params.alertId !== id) {
+    router.push({ name: 'AlertDetail', params: { alertId: id } });
   }
 };
-
-// Filter State
-const currentFilters = ref({
-    search: '',
-    status: '',
-    type: '',
-    date: ''
-});
 
 const normalizeTradeType = (value) => String(value || '').trim().toLowerCase();
 const toNumber = (value) => {
@@ -129,7 +173,7 @@ const applyFilters = () => {
 
     if (search) {
         const q = search.toLowerCase();
-        result = result.filter(a => a.ticker.toLowerCase().includes(q));
+        result = result.filter(a => String(a.ticker || '').toLowerCase().includes(q));
     }
     
     if (status) {
@@ -153,6 +197,39 @@ const onFilterDate = (val) => {
     applyFilters();
 };
 
+watch(
+  () => route.params.alertId,
+  (nextAlertId) => {
+    selectedAlertId.value = normalizeAlertId(nextAlertId);
+    if (!selectedAlertId.value && isAgentOpen.value) {
+      isAgentOpen.value = false;
+      persistUiState();
+    }
+  },
+  { immediate: true }
+);
+
+watch(
+  () => isAgentOpen.value,
+  () => {
+    persistUiState();
+  }
+);
+
+watch(
+  currentFilters,
+  () => {
+    persistUiState();
+  },
+  { deep: true }
+);
+
+onMounted(async () => {
+  restoreUiState();
+  await fetchConfig();
+  await fetchAlerts();
+});
+
 </script>
 
 <template>
@@ -170,6 +247,10 @@ const onFilterDate = (val) => {
                 :availableDates="availableDates"
                 :selectedId="selectedAlertId"
                 :validStatuses="validStatuses"
+                :searchValue="currentFilters.search"
+                :statusValue="currentFilters.status"
+                :typeValue="currentFilters.type"
+                :dateValue="currentFilters.date"
                 @select="onAlertSelect"
                 @filter-search="onFilterSearch"
                 @filter-status="onFilterStatus"

@@ -5,6 +5,11 @@ const routes = [
         path: '/',
         name: 'Dashboard',
         component: () => import('../views/DashboardLayout.vue')
+    },
+    {
+        path: '/:alertId',
+        name: 'AlertDetail',
+        component: () => import('../views/DashboardLayout.vue')
     }
 ];
 

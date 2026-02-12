@@ -92,7 +92,8 @@ async def get_chat_history(
                 if msg.type in {"system", "tool"}:
                     continue
 
-            role = "user" if (hasattr(msg, "type") and msg.type == "human") else "agent"
+            msg_type = getattr(msg, "type", "")
+            role = "user" if msg_type in {"human", "user"} else "agent"
             content = msg.content if hasattr(msg, "content") else str(msg)
 
             if isinstance(content, list):

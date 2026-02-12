@@ -15,6 +15,7 @@ import { useAlertDetail } from '../composables/useAlertDetail.js';
 // Register ECharts components
 use([CanvasRenderer, LineChart, ScatterChart, BarChart, CandlestickChart, GridComponent, TooltipComponent, LegendComponent, MarkAreaComponent, MarkLineComponent]);
 
+const ALERT_DETAIL_UI_STATE_NS = 'ts_pit.alert_detail.ui_state.v1';
 
 const props = defineProps({
   alertId: {
@@ -80,6 +81,62 @@ const periods = [
     { label: 'YTD', value: 'ytd' },
     { label: 'Max', value: 'max' },
 ];
+const periodValues = new Set(periods.map((period) => period.value));
+const allowedViewModes = new Set(['chart', 'table']);
+const allowedChartTypes = new Set(['line', 'candle']);
+const allowedPriceModes = new Set(['actual', 'rebased']);
+const allowedSummaryTabs = new Set(['narrative', 'recommendation']);
+
+const getDetailUiStateKey = (alertId) => `${ALERT_DETAIL_UI_STATE_NS}:${String(alertId)}`;
+
+const restoreDetailUiState = (alertId) => {
+    if (!alertId) return;
+    try {
+        const raw = localStorage.getItem(getDetailUiStateKey(alertId));
+        if (!raw) return;
+
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') return;
+
+        if (typeof parsed.activeTheme === 'string') activeTheme.value = parsed.activeTheme;
+        if (typeof parsed.selectedPeriod === 'string' && periodValues.has(parsed.selectedPeriod)) {
+            selectedPeriod.value = parsed.selectedPeriod;
+        }
+        if (typeof parsed.viewMode === 'string' && allowedViewModes.has(parsed.viewMode)) {
+            viewMode.value = parsed.viewMode;
+        }
+        if (typeof parsed.chartType === 'string' && allowedChartTypes.has(parsed.chartType)) {
+            chartType.value = parsed.chartType;
+        }
+        if (typeof parsed.priceMode === 'string' && allowedPriceModes.has(parsed.priceMode)) {
+            priceMode.value = parsed.priceMode;
+        }
+        if (typeof parsed.summaryTab === 'string' && allowedSummaryTabs.has(parsed.summaryTab)) {
+            summaryTab.value = parsed.summaryTab;
+        }
+    } catch (error) {
+        console.warn('Failed to restore alert detail UI state:', error);
+    }
+};
+
+const persistDetailUiState = () => {
+    if (!props.alertId) return;
+    try {
+        localStorage.setItem(
+            getDetailUiStateKey(props.alertId),
+            JSON.stringify({
+                activeTheme: activeTheme.value,
+                selectedPeriod: selectedPeriod.value,
+                viewMode: viewMode.value,
+                chartType: chartType.value,
+                priceMode: priceMode.value,
+                summaryTab: summaryTab.value
+            })
+        );
+    } catch (error) {
+        console.warn('Failed to persist alert detail UI state:', error);
+    }
+};
 
 // Materiality color scale
 const getMaterialityColor = (code) => {
@@ -736,13 +793,22 @@ watch([viewMode, chartType], ([nextViewMode, nextChartType]) => {
     }
 });
 
+watch(
+    [activeTheme, selectedPeriod, viewMode, chartType, priceMode, summaryTab],
+    () => {
+        persistDetailUiState();
+    }
+);
+
 onMounted(async () => {
     await fetchConfig();
+    restoreDetailUiState(props.alertId);
     await loadData();
 });
 
 watch(() => props.alertId, async (newId) => {
     if (newId) {
+        restoreDetailUiState(newId);
         alertData.value = null;
         await loadData();
     }
@@ -833,6 +899,9 @@ const loadData = async () => {
         alertData.value = bundle.alert;
         prices.value = bundle.prices;
         news.value = bundle.news;
+        if (activeTheme.value !== 'All' && !news.value.some((article) => article.theme === activeTheme.value)) {
+            activeTheme.value = 'All';
+        }
         prepareChartData();
     } catch (error) {
         console.error('Error loading alert bundle:', error);

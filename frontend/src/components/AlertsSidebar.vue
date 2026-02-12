@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 
 const props = defineProps({
   alerts: {
@@ -17,15 +17,47 @@ const props = defineProps({
   validStatuses: {
     type: Array,
     default: () => ['NEEDS_REVIEW', 'ESCALATE_L2', 'DISMISS']
+  },
+  searchValue: {
+    type: String,
+    default: ''
+  },
+  statusValue: {
+    type: String,
+    default: ''
+  },
+  typeValue: {
+    type: String,
+    default: ''
+  },
+  dateValue: {
+    type: String,
+    default: ''
   }
 });
 
 const emit = defineEmits(['select', 'filter-date', 'filter-search', 'filter-status', 'filter-type']);
 
-const searchQuery = ref('');
-const statusFilter = ref('');
-const typeFilter = ref('');
-const dateFilter = ref('');
+const searchQuery = ref(props.searchValue);
+const statusFilter = ref(props.statusValue);
+const typeFilter = ref(props.typeValue);
+const dateFilter = ref(props.dateValue);
+
+watch(() => props.searchValue, (value) => {
+  searchQuery.value = value || '';
+});
+
+watch(() => props.statusValue, (value) => {
+  statusFilter.value = value || '';
+});
+
+watch(() => props.typeValue, (value) => {
+  typeFilter.value = value || '';
+});
+
+watch(() => props.dateValue, (value) => {
+  dateFilter.value = value || '';
+});
 
 // Computed filtered alerts to show counts
 const filteredCount = computed(() => {

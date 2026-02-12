@@ -1,0 +1,7 @@
+feat(ui): support per-alert deep links and persist dashboard/detail state
+
+- add route support for `/ui/:alertId` and keep dashboard rendering on direct alert URLs
+- sync selected alert with route params so refresh reopens the same alert
+- persist dashboard UI state (filters, sidebar collapse, agent panel) in localStorage
+- persist per-alert detail preferences (theme, period, chart/view modes, summary tab)
+- align legacy alerts table navigation to use `alertId` route param
