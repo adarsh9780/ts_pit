@@ -241,6 +241,26 @@ class ToolErrorRetryTests(unittest.TestCase):
         ]
         self.assertEqual(len(tool_call_msgs), 0)
 
+    def test_messages_for_model_includes_retry_control_system_messages(self):
+        state = {
+            "messages": [
+                SystemMessage(content="base", id="agent-v2-system-prompt"),
+                HumanMessage(content="count alerts"),
+                SystemMessage(
+                    content="retry with revised sql",
+                    id="agent-v2-tool-error-retry-1",
+                ),
+                SystemMessage(
+                    content="rewrite the answer format",
+                    id="agent-v2-answer-format-rewrite-1",
+                ),
+            ]
+        }
+        msgs = self.graph._messages_for_model(state)
+        ids = [str(getattr(m, "id", "") or "") for m in msgs if getattr(m, "type", "") == "system"]
+        self.assertIn("agent-v2-tool-error-retry-1", ids)
+        self.assertIn("agent-v2-answer-format-rewrite-1", ids)
+
 
 if __name__ == "__main__":
     unittest.main()

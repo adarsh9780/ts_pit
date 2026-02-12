@@ -497,6 +497,18 @@ def _messages_for_model(state: AgentV2State) -> list:
     if "agent-v2-runtime-context" in latest_by_id:
         selected.append(latest_by_id["agent-v2-runtime-context"])
 
+    # Keep per-turn control directives (retry/answer rewrite) so the next model
+    # invocation can actually follow them.
+    latest_human_idx = _latest_human_index(all_messages)
+    for message in all_messages[latest_human_idx + 1 :]:
+        if getattr(message, "type", "") != "system":
+            continue
+        msg_id = str(getattr(message, "id", "") or "")
+        if msg_id.startswith(TOOL_ERROR_RETRY_MSG_ID_PREFIX) or msg_id.startswith(
+            ANSWER_REWRITE_MSG_ID_PREFIX
+        ):
+            selected.append(message)
+
     summary_text = str(state.get("summary") or "").strip()
     if summary_text:
         selected.append(

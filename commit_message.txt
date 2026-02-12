@@ -1,10 +1,5 @@
-feat(ui): add alert deep links, persisted UI state, and clean agent history restore
+fix(agent-v2): enforce retry guidance visibility and align retry cap with config
 
-- add route support for `/ui/:alertId` and keep dashboard rendering on direct alert URLs
-- sync selected alert with route params so refresh reopens the same alert
-- persist dashboard UI state (filters, sidebar collapse, agent panel) in localStorage
-- persist per-alert detail preferences (theme, period, chart/view modes, summary tab)
-- align legacy alerts table navigation to use `alertId` route param
-- make `/agent/history/{session_id}` return turn-level chat (user + final assistant) instead of raw internal graph messages
-- keep tool-call visibility by attaching tool metadata to assistant turns during history restore
-- suppress assistant "echo" turns that only repeat the latest user prompt without tool traces
+- include per-turn retry/rewrite control `SystemMessage`s in model input so retry instructions are actually applied
+- increase `agent_v2.retries.max_tool_error_retries` from 1 to 3 in `config.yaml`
+- add regression coverage to ensure retry/rewrite control messages are present in `_messages_for_model`

@@ -260,7 +260,7 @@ agent_v2:
   retries:
     # Number of autonomous retry turns after a tool returns {"ok": false}.
     # 0 disables retry-after-error behavior.
-    max_tool_error_retries: 1
+    max_tool_error_retries: 3
 
   filesystem:
     # Directories are resolved relative to project root unless absolute.
