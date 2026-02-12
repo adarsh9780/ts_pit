@@ -1142,6 +1142,113 @@ class ToolErrorRetryTests(unittest.TestCase):
         # The tool_calls branch should still intercept identical retries
         self.assertEqual(decision, "diagnose_empty_result")
 
+    # ---------------------------------------------------------------
+    #  Phase 3: route_after_tools tests
+    # ---------------------------------------------------------------
+
+    def test_route_after_tools_intercepts_empty_result(self):
+        """route_after_tools should intercept empty result and route to diagnose."""
+        state = {
+            "messages": [
+                HumanMessage(content="run sql"),
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "id": "c1",
+                            "name": "execute_sql",
+                            "args": {"query": "SELECT 1"},
+                        }
+                    ],
+                ),
+                ToolMessage(
+                    content='{"ok": true, "data": [], "meta": {"row_count": 0}}',
+                    tool_call_id="c1",
+                ),
+            ]
+        }
+        decision = self.graph.route_after_tools(state)
+        self.assertEqual(decision, "diagnose_empty_result")
+
+    def test_route_after_tools_intercepts_failed_result(self):
+        """route_after_tools should intercept failed result and route to diagnose."""
+        state = {
+            "messages": [
+                HumanMessage(content="run sql"),
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "id": "c1",
+                            "name": "execute_sql",
+                            "args": {"query": "SELECT 1"},
+                        }
+                    ],
+                ),
+                ToolMessage(
+                    content='{"ok": false, "error": {"code": "DB_ERROR", "message": "fail"}}',
+                    tool_call_id="c1",
+                ),
+            ]
+        }
+        decision = self.graph.route_after_tools(state)
+        self.assertEqual(decision, "diagnose_empty_result")
+
+    def test_route_after_tools_passes_success_to_agent(self):
+        """route_after_tools should pass successful result to agent."""
+        state = {
+            "messages": [
+                HumanMessage(content="run sql"),
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "id": "c1",
+                            "name": "execute_sql",
+                            "args": {"query": "SELECT 1"},
+                        }
+                    ],
+                ),
+                ToolMessage(
+                    content='{"ok": true, "data": [{"x": 1}], "meta": {"row_count": 1}}',
+                    tool_call_id="c1",
+                ),
+            ]
+        }
+        decision = self.graph.route_after_tools(state)
+        self.assertEqual(decision, "agent")
+
+    def test_route_after_tools_respects_retry_cap(self):
+        """route_after_tools should default to agent if retry cap hit."""
+        # mock max retries = 0
+        cfg = type(
+            "Cfg",
+            (),
+            {"get_agent_v2_retry_config": lambda self: {"max_tool_error_retries": 0}},
+        )()
+        with patch.object(self.graph, "get_config", return_value=cfg):
+            state = {
+                "messages": [
+                    HumanMessage(content="run sql"),
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "id": "c1",
+                                "name": "execute_sql",
+                                "args": {"query": "SELECT 1"},
+                            }
+                        ],
+                    ),
+                    ToolMessage(
+                        content='{"ok": true, "data": [], "meta": {"row_count": 0}}',
+                        tool_call_id="c1",
+                    ),
+                ]
+            }
+            decision = self.graph.route_after_tools(state)
+            self.assertEqual(decision, "agent")
+
 
 if __name__ == "__main__":
     unittest.main()

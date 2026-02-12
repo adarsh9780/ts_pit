@@ -1242,6 +1242,32 @@ def route_after_validate_answer(state: AgentV2State) -> Literal["agent", "__end_
     return "agent" if state.get("needs_answer_rewrite") else "__end__"
 
 
+def route_after_tools(state: AgentV2State) -> Literal["diagnose_empty_result", "agent"]:
+    """Route after tools execution. If the last tool call failed or was empty,
+    route to diagnose_empty_result to inject guidance BEFORE the agent sees it.
+    This prevents the agent from generating a 'No data' text response first."""
+    messages = state.get("messages", [])
+    failed_call = _latest_failed_tool_call(messages)
+    empty_call = _latest_empty_success_tool_call(messages)
+
+    # Only diagnose if we haven't hit the retry limit
+    attempts = _tool_error_retry_attempts(messages)
+    if attempts >= _max_tool_error_retries():
+        return "agent"
+
+    # For failed calls, check if correctable
+    if failed_call:
+        error_code = failed_call.get("error_code")
+        if _is_correctable_tool_error(error_code):
+            return "diagnose_empty_result"
+
+    # For empty calls, always diagnose if under cap
+    if empty_call:
+        return "diagnose_empty_result"
+
+    return "agent"
+
+
 def build_graph():
     tool_node = ToolNode(ALL_TOOLS)
 
@@ -1269,7 +1295,7 @@ def build_graph():
     workflow.add_edge("direct_answer", END)
     workflow.add_conditional_edges("schema_preflight", route_after_schema_preflight)
     workflow.add_conditional_edges("agent", should_continue)
-    workflow.add_edge("tools", "agent")
+    workflow.add_conditional_edges("tools", route_after_tools)
     workflow.add_edge("diagnose_empty_result", "agent")
     workflow.add_conditional_edges("validate_answer", route_after_validate_answer)
 

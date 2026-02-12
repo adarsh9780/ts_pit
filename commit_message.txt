@@ -1,22 +1,11 @@
-fix(agent_v2): prevent text→diagnose→text infinite loop in should_continue
+feat(agent_v2): zero-duplicate validation flow via route_after_tools
 
-Root cause: when the LLM responded with text (no tool_calls) after an
-empty SQL result, should_continue routed to diagnose_empty_result. The
-diagnostic node injected guidance, but the LLM ignored it and responded
-with text again — creating an infinite text→diagnose→text loop that
-produced the repeated "Next Steps" blocks.
+Refactored graph wiring to intercept empty/failed tool outputs *before* the agent sees them.
 
-Fix:
-- Add _diagnostic_exists_since_last_tool() helper that walks backwards
-  from the last message to check if a diagnostic SystemMessage was
-  already injected since the last ToolMessage.
-- Guard the text-only branch in should_continue: only route to
-  diagnose_empty_result if NO diagnostic has been given yet. If a
-  diagnostic was already injected and the LLM still responded with text,
-  accept it and route to validate_answer.
-- The tool_calls branch is unaffected — it still intercepts identical
-  retries for further diagnostic cycles.
-- Fix regex bug in _extract_sql_filters: AND/OR keywords were being
-  captured as part of column names.
+Previously, the agent would see an empty result, generate a "No data" text output, THEN `should_continue` would route to diagnosis, causing a second "No data" response after the retry (and potentially looping).
 
-All 46 tests pass (4 new tests for the exact bug scenario).
+New `route_after_tools` conditional edge detects the need for diagnosis immediately after tool execution. If diagnosis is needed (and retries remain), it routes to `diagnose_empty_result`, injects the guidance, and THEN the agent runs. This ensures the agent has the diagnostic context for its *first* response attempt in that cycle, eliminating the "No data" text duplication entirely.
+
+Also cleaned up graph wiring to remove duplicate edge definitions.
+Updated tests to verify `route_after_tools` logic.
+All 50 tests passing.
