@@ -85,35 +85,185 @@ async def get_chat_history(
                 },
             }
 
-        messages = state.values.get("messages", [])
-        frontend_messages = []
-        for msg in messages:
-            if hasattr(msg, "type"):
-                if msg.type in {"system", "tool"}:
-                    continue
-
-            msg_type = getattr(msg, "type", "")
-            role = "user" if msg_type in {"human", "user"} else "agent"
-            content = msg.content if hasattr(msg, "content") else str(msg)
-
-            if isinstance(content, list):
-                text_parts = []
-                for part in content:
+        def _content_to_text(value) -> str:
+            if value is None:
+                return ""
+            if isinstance(value, str):
+                return value
+            if isinstance(value, list):
+                text_parts: list[str] = []
+                for part in value:
                     if isinstance(part, str):
                         text_parts.append(part)
                     elif isinstance(part, dict) and "text" in part:
-                        text_parts.append(part["text"])
-                content = " ".join(text_parts)
+                        text_parts.append(str(part["text"]))
+                return " ".join(text_parts)
+            return str(value)
 
-            if not content or (isinstance(content, str) and not content.strip()):
+        def _extract_tool_calls(msg) -> list[dict]:
+            raw_calls = getattr(msg, "tool_calls", None)
+            if not raw_calls:
+                additional = getattr(msg, "additional_kwargs", None)
+                if isinstance(additional, dict):
+                    raw_calls = additional.get("tool_calls")
+            if not isinstance(raw_calls, list):
+                return []
+
+            tools: list[dict] = []
+            for idx, call in enumerate(raw_calls, start=1):
+                if not isinstance(call, dict):
+                    continue
+                tool_name = call.get("name")
+                if not tool_name:
+                    fn = call.get("function")
+                    if isinstance(fn, dict):
+                        tool_name = fn.get("name")
+                if not tool_name:
+                    continue
+
+                tool_args = call.get("args")
+                if tool_args is None:
+                    fn = call.get("function")
+                    if isinstance(fn, dict):
+                        tool_args = fn.get("arguments")
+                if isinstance(tool_args, (dict, list)):
+                    tool_input = json.dumps(tool_args, default=str)
+                elif tool_args is None:
+                    tool_input = None
+                else:
+                    tool_input = str(tool_args)
+
+                call_id = call.get("id")
+                if not call_id:
+                    call_id = f"{tool_name}-{idx}"
+
+                tools.append(
+                    {
+                        "id": str(call_id),
+                        "name": str(tool_name),
+                        "status": "done",
+                        "input": tool_input,
+                        "output": None,
+                        "durationMs": None,
+                        "commentary": None,
+                        "errorCode": None,
+                        "errorMessage": None,
+                    }
+                )
+            return tools
+
+        def _attach_tool_output(tool_map: dict[str, dict], tool_entry: dict) -> None:
+            call_id = tool_entry.get("tool_call_id")
+            tool_name = tool_entry.get("name")
+            target = None
+            if call_id and call_id in tool_map:
+                target = tool_map[call_id]
+            elif tool_name:
+                for existing in tool_map.values():
+                    if existing.get("name") == tool_name:
+                        target = existing
+            if not target:
+                return
+
+            target["output"] = tool_entry.get("output")
+            if tool_entry.get("status"):
+                target["status"] = tool_entry["status"]
+
+        messages = state.values.get("messages", [])
+
+        normalized_events: list[dict] = []
+        for msg in messages:
+            msg_type = getattr(msg, "type", "")
+            if msg_type == "system":
                 continue
 
-            if role == "user" and "[USER QUESTION]" in content:
-                parts = content.split("[USER QUESTION]")
-                if len(parts) > 1:
-                    content = parts[1].strip()
+            if msg_type in {"human", "user"}:
+                user_content = _content_to_text(getattr(msg, "content", ""))
+                if user_content and "[USER QUESTION]" in user_content:
+                    parts = user_content.split("[USER QUESTION]")
+                    if len(parts) > 1:
+                        user_content = parts[1].strip()
+                if user_content and user_content.strip():
+                    normalized_events.append(
+                        {"kind": "user", "content": user_content.strip()}
+                    )
+                continue
 
-            frontend_messages.append({"role": role, "content": content, "tools": []})
+            if msg_type in {"ai", "assistant"}:
+                assistant_content = _content_to_text(getattr(msg, "content", ""))
+                tool_calls = _extract_tool_calls(msg)
+                normalized_events.append(
+                    {
+                        "kind": "assistant",
+                        "content": assistant_content.strip() if isinstance(assistant_content, str) else "",
+                        "tools": tool_calls,
+                    }
+                )
+                continue
+
+            if msg_type == "tool":
+                normalized_events.append(
+                    {
+                        "kind": "tool",
+                        "name": str(getattr(msg, "name", "") or ""),
+                        "tool_call_id": str(getattr(msg, "tool_call_id", "") or ""),
+                        "output": _content_to_text(getattr(msg, "content", "")),
+                        "status": str(getattr(msg, "status", "") or "done"),
+                    }
+                )
+
+        frontend_messages: list[dict] = []
+        turn_tools_map: dict[str, dict] = {}
+        turn_tool_seq = 0
+        final_assistant_content: str | None = None
+
+        def _flush_turn():
+            nonlocal turn_tools_map, turn_tool_seq, final_assistant_content
+            content = (final_assistant_content or "").strip()
+            if content:
+                tools = list(turn_tools_map.values())
+                if (
+                    frontend_messages
+                    and frontend_messages[-1].get("role") == "agent"
+                    and str(frontend_messages[-1].get("content", "")).strip() == content
+                ):
+                    if tools:
+                        existing = frontend_messages[-1].setdefault("tools", [])
+                        existing.extend(tools)
+                else:
+                    frontend_messages.append(
+                        {"role": "agent", "content": content, "tools": tools}
+                    )
+            turn_tools_map = {}
+            turn_tool_seq = 0
+            final_assistant_content = None
+
+        for event in normalized_events:
+            kind = event.get("kind")
+            if kind == "user":
+                _flush_turn()
+                frontend_messages.append(
+                    {"role": "user", "content": event["content"], "tools": []}
+                )
+                continue
+
+            if kind == "assistant":
+                content = str(event.get("content") or "").strip()
+                if content:
+                    final_assistant_content = content
+
+                for tool in event.get("tools", []):
+                    turn_tool_seq += 1
+                    tool_id = str(tool.get("id") or f"{tool.get('name', 'tool')}-{turn_tool_seq}")
+                    if tool_id in turn_tools_map:
+                        continue
+                    turn_tools_map[tool_id] = tool
+                continue
+
+            if kind == "tool":
+                _attach_tool_output(turn_tools_map, event)
+
+        _flush_turn()
 
         total = len(frontend_messages)
         end = max(total - offset, 0)

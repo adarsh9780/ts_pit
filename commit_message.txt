@@ -1,7 +1,9 @@
-fix(agent-v2): harden tool-call sequencing and empty SQL retry behavior
+feat(ui): add alert deep links, persisted UI state, and clean agent history restore
 
-- prevent dangling assistant `tool_calls` blocks from being sent without matching tool responses
-- sanitize model context to include only complete ai/tool message pairs and avoid `tool_call_id` protocol errors
-- improve empty-result detection to retry when aggregate SQL returns only zero-like values (e.g., `COUNT(*) = 0`)
-- keep existing retry-cap controls while enabling schema/type correction retries for false-empty SQL outcomes
-- add regression tests for dangling tool-calls and aggregate-zero retry routing
+- add route support for `/ui/:alertId` and keep dashboard rendering on direct alert URLs
+- sync selected alert with route params so refresh reopens the same alert
+- persist dashboard UI state (filters, sidebar collapse, agent panel) in localStorage
+- persist per-alert detail preferences (theme, period, chart/view modes, summary tab)
+- align legacy alerts table navigation to use `alertId` route param
+- make `/agent/history/{session_id}` return turn-level chat (user + final assistant) instead of raw internal graph messages
+- keep tool-call visibility by attaching tool metadata to assistant turns during history restore
