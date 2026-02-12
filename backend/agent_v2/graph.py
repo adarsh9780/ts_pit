@@ -174,6 +174,57 @@ def _latest_failed_tool_call(messages: list) -> dict | None:
     return None
 
 
+def _latest_empty_sql_tool_call(messages: list) -> dict | None:
+    """
+    Return the latest execute_sql tool call when it succeeded but returned zero rows.
+    """
+    empty_tool_call_id = None
+    for message in reversed(messages):
+        if getattr(message, "type", "") != "tool":
+            continue
+        payload = _parse_tool_payload(message)
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("ok") is not True:
+            return None
+        meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+        row_count = meta.get("row_count")
+        try:
+            row_count = int(row_count)
+        except Exception:
+            row_count = None
+        if row_count != 0:
+            return None
+        empty_tool_call_id = str(getattr(message, "tool_call_id", "") or "")
+        break
+
+    if not empty_tool_call_id:
+        return None
+
+    for message in reversed(messages):
+        if getattr(message, "type", "") != "ai":
+            continue
+        for call in (getattr(message, "tool_calls", None) or []):
+            call_id = str(call.get("id") if isinstance(call, dict) else getattr(call, "id", "") or "")
+            if call_id != empty_tool_call_id:
+                continue
+            name, args = _tool_call_name_and_args(call)
+            if name != "execute_sql":
+                return None
+            query = str(args.get("query") or "")
+            try:
+                signature = f"{name}:{json.dumps(args, sort_keys=True, separators=(',', ':'))}"
+            except Exception:
+                signature = f"{name}:{str(args)}"
+            return {
+                "name": name,
+                "args": args,
+                "query": query,
+                "signature": signature,
+            }
+    return None
+
+
 def _is_correctable_tool_error(error_code: str | None) -> bool:
     return str(error_code or "").strip().upper() in CORRECTABLE_ERROR_CODES
 
@@ -683,21 +734,27 @@ def should_continue(state: AgentV2State) -> Literal["tools", "retry_after_tool_e
         return "__end__"
     last_message = messages[-1]
     failed_call = _latest_failed_tool_call(messages)
+    empty_sql_call = _latest_empty_sql_tool_call(messages)
     latest_error = _latest_tool_error(messages) or {}
     error_code = latest_error.get("code")
     can_correct = _is_correctable_tool_error(error_code)
+    attempts = _tool_error_retry_attempts(messages)
     if getattr(last_message, "tool_calls", None):
         if failed_call and can_correct:
-            attempts = _tool_error_retry_attempts(messages)
             if attempts < _max_tool_error_retries():
                 new_sig = _ai_first_tool_call_signature(last_message)
                 if new_sig and new_sig == failed_call.get("signature"):
                     return "retry_after_tool_error"
+        if empty_sql_call and attempts < _max_tool_error_retries():
+            new_sig = _ai_first_tool_call_signature(last_message)
+            if new_sig and new_sig == empty_sql_call.get("signature"):
+                return "retry_after_tool_error"
         return "tools"
     if failed_call and can_correct:
-        attempts = _tool_error_retry_attempts(messages)
         if attempts < _max_tool_error_retries():
             return "retry_after_tool_error"
+    if empty_sql_call and attempts < _max_tool_error_retries():
+        return "retry_after_tool_error"
     if failed_call:
         return "__end__"
     return "validate_answer"
@@ -707,22 +764,31 @@ def retry_after_tool_error_node(state: AgentV2State, config: RunnableConfig):
     _ = config
     messages = state.get("messages", [])
     failed_call = _latest_failed_tool_call(messages)
-    if not failed_call:
+    empty_sql_call = _latest_empty_sql_tool_call(messages)
+    if not failed_call and not empty_sql_call:
         return {}
 
     attempts = _tool_error_retry_attempts(messages)
     next_attempt = attempts + 1
-    error_code = failed_call.get("error_code") or "UNKNOWN_ERROR"
-    error_message = failed_call.get("error_message") or "Tool returned an error payload."
+    if failed_call:
+        error_code = failed_call.get("error_code") or "UNKNOWN_ERROR"
+        error_message = failed_call.get("error_message") or "Tool returned an error payload."
+        content = (
+            "The previous tool call failed with a correctable error. "
+            f"Error code: {error_code}. Error message: {error_message}. "
+            "Issue a corrected tool call with revised inputs. "
+            "Do not repeat the exact same tool call arguments."
+        )
+    else:
+        content = (
+            "The previous SQL query returned zero rows. "
+            "Before concluding no data exists, try a revised SQL approach with different date/time handling or filters. "
+            "Do not repeat the exact same SQL query."
+        )
     return {
         "messages": [
             SystemMessage(
-                content=(
-                    "The previous tool call failed with a correctable error. "
-                    f"Error code: {error_code}. Error message: {error_message}. "
-                    "Issue a corrected tool call with revised inputs. "
-                    "Do not repeat the exact same tool call arguments."
-                ),
+                content=content,
                 id=f"{TOOL_ERROR_RETRY_MSG_ID_PREFIX}{next_attempt}",
             ),
         ]

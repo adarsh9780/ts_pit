@@ -1,6 +1,7 @@
-feat(agent-ui): add SQL/Python syntax color coding in tool code viewer
+feat(agent_v2): add no-data SQL recovery loop with bounded LLM-guided retries
 
-- add safe HTML escaping for code rendering
-- add lightweight keyword/string/number/comment highlighting for SQL and Python tool calls
-- render highlighted code with read-only editor styling in tool cards
-- keep copy-to-clipboard behavior unchanged
+- detect recoverable no-data case when execute_sql returns `ok=true` with `meta.row_count=0`
+- route back to LLM with guidance to revise date/time filters before concluding no data
+- enforce changed-query retries by blocking identical SQL signature repeats
+- reuse existing retry cap from `agent_v2.retries.max_tool_error_retries`
+- add tests for no-data retry trigger, identical-query blocking, and changed-query acceptance

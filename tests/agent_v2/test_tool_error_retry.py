@@ -135,6 +135,61 @@ class ToolErrorRetryTests(unittest.TestCase):
         self.assertEqual(len(msgs), 1)
         self.assertIsInstance(msgs[0], SystemMessage)
 
+    def test_should_continue_retries_after_empty_sql_result_within_cap(self):
+        state = {
+            "messages": [
+                HumanMessage(content="summarize alerts for date"),
+                AIMessage(content="", tool_calls=[{"id": "c1", "name": "execute_sql", "args": {"query": "SELECT * FROM alerts WHERE alert_date='2025-09-01'"}}]),
+                ToolMessage(
+                    content='{"ok": true, "data": [], "meta": {"row_count": 0}}',
+                    tool_call_id="c1",
+                ),
+                AIMessage(content="No alerts found."),
+            ]
+        }
+
+        cfg = type("Cfg", (), {"get_agent_v2_retry_config": lambda self: {"max_tool_error_retries": 2}})()
+        with patch.object(self.graph, "get_config", return_value=cfg):
+            decision = self.graph.should_continue(state)
+        self.assertEqual(decision, "retry_after_tool_error")
+
+    def test_should_continue_blocks_identical_sql_retry_after_empty_result(self):
+        query = "SELECT * FROM alerts WHERE alert_date='2025-09-01'"
+        state = {
+            "messages": [
+                HumanMessage(content="summarize alerts for date"),
+                AIMessage(content="", tool_calls=[{"id": "c1", "name": "execute_sql", "args": {"query": query}}]),
+                ToolMessage(
+                    content='{"ok": true, "data": [], "meta": {"row_count": 0}}',
+                    tool_call_id="c1",
+                ),
+                AIMessage(content="", tool_calls=[{"id": "c2", "name": "execute_sql", "args": {"query": query}}]),
+            ]
+        }
+
+        cfg = type("Cfg", (), {"get_agent_v2_retry_config": lambda self: {"max_tool_error_retries": 3}})()
+        with patch.object(self.graph, "get_config", return_value=cfg):
+            decision = self.graph.should_continue(state)
+        self.assertEqual(decision, "retry_after_tool_error")
+
+    def test_should_continue_allows_changed_sql_retry_after_empty_result(self):
+        state = {
+            "messages": [
+                HumanMessage(content="summarize alerts for date"),
+                AIMessage(content="", tool_calls=[{"id": "c1", "name": "execute_sql", "args": {"query": "SELECT * FROM alerts WHERE alert_date='2025-09-01'"}}]),
+                ToolMessage(
+                    content='{"ok": true, "data": [], "meta": {"row_count": 0}}',
+                    tool_call_id="c1",
+                ),
+                AIMessage(content="", tool_calls=[{"id": "c2", "name": "execute_sql", "args": {"query": "SELECT * FROM alerts WHERE DATE(alert_date)='2025-09-01'"}}]),
+            ]
+        }
+
+        cfg = type("Cfg", (), {"get_agent_v2_retry_config": lambda self: {"max_tool_error_retries": 3}})()
+        with patch.object(self.graph, "get_config", return_value=cfg):
+            decision = self.graph.should_continue(state)
+        self.assertEqual(decision, "tools")
+
 
 if __name__ == "__main__":
     unittest.main()
