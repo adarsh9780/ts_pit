@@ -1,7 +1,0 @@
-feat(agent_v2): generalize empty-result recovery from SQL-only to all tools
-
-- replace SQL-specific empty-row detection with generic successful-empty payload detection
-- trigger bounded LLM-guided retry when any tool returns `ok=true` but empty data/counts
-- preserve changed-input requirement by blocking identical tool-call signatures
-- keep retry cap controlled by `agent_v2.retries.max_tool_error_retries`
-- add non-SQL test coverage for empty-result retry behavior
