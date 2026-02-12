@@ -190,6 +190,23 @@ class ToolErrorRetryTests(unittest.TestCase):
             decision = self.graph.should_continue(state)
         self.assertEqual(decision, "tools")
 
+    def test_should_continue_retries_after_empty_non_sql_result(self):
+        state = {
+            "messages": [
+                HumanMessage(content="find related coverage"),
+                AIMessage(content="", tool_calls=[{"id": "c1", "name": "search_web", "args": {"query": "foo"}}]),
+                ToolMessage(
+                    content='{"ok": true, "data": {"combined": [], "web": [], "news": []}, "meta": {"combined_count": 0, "web_count": 0, "news_count": 0}}',
+                    tool_call_id="c1",
+                ),
+                AIMessage(content="No web results found."),
+            ]
+        }
+        cfg = type("Cfg", (), {"get_agent_v2_retry_config": lambda self: {"max_tool_error_retries": 2}})()
+        with patch.object(self.graph, "get_config", return_value=cfg):
+            decision = self.graph.should_continue(state)
+        self.assertEqual(decision, "retry_after_tool_error")
+
 
 if __name__ == "__main__":
     unittest.main()
