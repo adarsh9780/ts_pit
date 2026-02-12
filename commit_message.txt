@@ -1,7 +1,11 @@
-fix(agent_v2): retry failed tool calls directly instead of re-prompting model text
+fix(agent_v2): switch to correction-first retry policy for tool errors
 
-- replace retry route from `retry_after_tool_error -> agent` with deterministic tool replay
-- add failed-call reconstruction from latest tool error + original tool_call id
-- retry node now emits a new AI tool_call for the same tool/args and routes to `tools`
-- preserve config-driven retry cap via `agent_v2.retries.max_tool_error_retries`
-- add tests to validate retry route and tool-call re-dispatch behavior
+- remove deterministic same-call replay on tool errors
+- retry only for correctable error codes by routing back to LLM with error context
+- enforce changed-input retries: block identical repeated tool-call signatures after a correctable error
+- keep config-driven retry cap via `agent_v2.retries.max_tool_error_retries`
+- add tests for:
+  - retry guidance when model returns text after correctable error
+  - blocking identical retry calls
+  - allowing changed retry calls
+  - cap exhaustion behavior
