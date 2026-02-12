@@ -66,6 +66,39 @@ const toolCode = (tool) => {
   return '';
 };
 const codeLabel = (tool) => (tool?.name === 'execute_sql' ? 'SQL Code' : 'Python Code');
+const escapeHtml = (value) => String(value || '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;');
+const highlightCode = (tool) => {
+  const raw = toolCode(tool);
+  if (!raw) return '';
+  let html = escapeHtml(raw);
+
+  if (tool?.name === 'execute_sql') {
+    const sqlKeywords = [
+      'SELECT', 'FROM', 'WHERE', 'GROUP BY', 'ORDER BY', 'HAVING', 'JOIN', 'LEFT JOIN', 'RIGHT JOIN',
+      'INNER JOIN', 'OUTER JOIN', 'ON', 'AS', 'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'DISTINCT',
+      'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'AND', 'OR', 'NOT', 'IN', 'BETWEEN', 'LIKE', 'LIMIT',
+    ];
+    const pattern = new RegExp(`\\b(${sqlKeywords.join('|').replace(/ /g, '\\\\s+')})\\b`, 'gi');
+    html = html.replace(pattern, '<span class="tok kw">$1</span>');
+    html = html.replace(/'([^']*)'/g, '<span class="tok str">\'$1\'</span>');
+    html = html.replace(/\b\d+(\.\d+)?\b/g, '<span class="tok num">$&</span>');
+  } else if (tool?.name === 'execute_python') {
+    const pyKeywords = [
+      'def', 'class', 'return', 'if', 'elif', 'else', 'for', 'while', 'in', 'import', 'from', 'as',
+      'try', 'except', 'finally', 'with', 'lambda', 'True', 'False', 'None', 'and', 'or', 'not',
+    ];
+    const pattern = new RegExp(`\\b(${pyKeywords.join('|')})\\b`, 'g');
+    html = html.replace(pattern, '<span class="tok kw">$1</span>');
+    html = html.replace(/'([^']*)'/g, '<span class="tok str">\'$1\'</span>');
+    html = html.replace(/"([^"]*)"/g, '<span class="tok str">"$1"</span>');
+    html = html.replace(/\b\d+(\.\d+)?\b/g, '<span class="tok num">$&</span>');
+    html = html.replace(/(#.*)$/gm, '<span class="tok cmt">$1</span>');
+  }
+  return html;
+};
 const copyToolCode = async (tool) => {
   const code = toolCode(tool);
   if (!code) return;
@@ -204,7 +237,7 @@ const {
                       <div class="tool-section-title">{{ codeLabel(segment.tool) }}</div>
                       <button class="copy-code-btn" @click="copyToolCode(segment.tool)">Copy</button>
                     </div>
-                    <pre class="tool-code">{{ toolCode(segment.tool) }}</pre>
+                    <pre class="tool-code" v-html="highlightCode(segment.tool)"></pre>
                   </div>
 
                   <div v-if="segment.tool.errorCode || segment.tool.errorMessage" class="tool-section tool-error">
@@ -586,6 +619,24 @@ const {
   font-size: 11px;
   line-height: 1.45;
   font-family: 'SF Mono', Monaco, Consolas, monospace;
+}
+
+.tool-code :deep(.tok.kw) {
+  color: #7dd3fc;
+  font-weight: 600;
+}
+
+.tool-code :deep(.tok.str) {
+  color: #86efac;
+}
+
+.tool-code :deep(.tok.num) {
+  color: #fbbf24;
+}
+
+.tool-code :deep(.tok.cmt) {
+  color: #94a3b8;
+  font-style: italic;
 }
 
 .status-dot {
