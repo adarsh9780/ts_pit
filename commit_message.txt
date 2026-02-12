@@ -1,6 +1,5 @@
-feat(agent_v2): enforce session-scoped markdown artifact writes under reports folder
+fix(agent_v2): use short provider-style tool_call ids for injected preflight calls
 
-- enforce `write_file` target path to `artifacts/reports/<session_id>/<filename>.md`
-- add explicit error code `FS_WRITE_SESSION_SCOPE_REQUIRED` for non-session artifact paths
-- increase agent_v2 filesystem max_depth to 3 to support session report subdirectories
-- add prompt rule instructing session-scoped artifact write paths
+- change schema preflight injected tool_call id format to `call_<12 hex>`
+- avoid OpenAI validation failure: max tool_call id length is 40 chars
+- add test assertions for id prefix and length in schema preflight test

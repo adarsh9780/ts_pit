@@ -117,6 +117,8 @@ class ToolErrorRetryTests(unittest.TestCase):
         calls = getattr(msgs[0], "tool_calls", None) or []
         self.assertEqual(calls[0]["name"], "read_file")
         self.assertEqual(calls[0]["args"]["path"], "artifacts/DB_SCHEMA_REFERENCE.yaml")
+        self.assertTrue(str(calls[0]["id"]).startswith("call_"))
+        self.assertLessEqual(len(str(calls[0]["id"])), 40)
 
     def test_validate_answer_requests_methodology_sections_after_sql(self):
         state = {

@@ -650,7 +650,7 @@ def schema_preflight_node(state: AgentV2State, config: RunnableConfig):
                 content="",
                 tool_calls=[
                     {
-                        "id": f"schema-preflight-{uuid4().hex}",
+                        "id": f"call_{uuid4().hex[:12]}",
                         "name": "read_file",
                         "args": {"path": SCHEMA_PREFLIGHT_PATH},
                     }
