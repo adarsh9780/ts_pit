@@ -1,5 +1,9 @@
-fix(agent-v2): enforce retry guidance visibility and align retry cap with config
+fix(agent_v2): stop retry loop from repeating "Next Steps" on empty tool results
 
-- include per-turn retry/rewrite control `SystemMessage`s in model input so retry instructions are actually applied
-- increase `agent_v2.retries.max_tool_error_retries` from 1 to 3 in `config.yaml`
-- add regression coverage to ensure retry/rewrite control messages are present in `_messages_for_model`
+- Remove empty_call retry branch from should_continue's no-tool_calls path;
+  text-only LLM responses should not be re-routed to retry_after_tool_error.
+- Skip validate_answer rewrite when the last tool call returned empty data,
+  avoiding an extra agent loop that compounds with the retry loop.
+
+Fixes: agent producing 5 repeated "Next Steps" blocks instead of respecting
+max_tool_error_retries (3) from config.yaml.

@@ -36,7 +36,8 @@ def ensure_system_prompt(state: AgentV2State, config: RunnableConfig) -> dict:
     _ = config
     messages = state.get("messages", [])
     has_system = any(
-        isinstance(m, SystemMessage) and getattr(m, "id", None) == "agent-v2-system-prompt"
+        isinstance(m, SystemMessage)
+        and getattr(m, "id", None) == "agent-v2-system-prompt"
         for m in messages
     )
     if has_system:
@@ -135,7 +136,9 @@ def _latest_failed_tool_call(messages: list) -> dict | None:
         payload = _parse_tool_payload(message)
         if isinstance(payload, dict) and payload.get("ok") is False:
             failed_tool_call_id = str(getattr(message, "tool_call_id", "") or "")
-            latest_error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
+            latest_error = (
+                payload.get("error") if isinstance(payload.get("error"), dict) else {}
+            )
             break
         return None
 
@@ -145,12 +148,24 @@ def _latest_failed_tool_call(messages: list) -> dict | None:
     for message in reversed(messages):
         if getattr(message, "type", "") != "ai":
             continue
-        for call in (getattr(message, "tool_calls", None) or []):
-            call_id = str(call.get("id") if isinstance(call, dict) else getattr(call, "id", "") or "")
+        for call in getattr(message, "tool_calls", None) or []:
+            call_id = str(
+                call.get("id")
+                if isinstance(call, dict)
+                else getattr(call, "id", "") or ""
+            )
             if call_id != failed_tool_call_id:
                 continue
-            name = call.get("name") if isinstance(call, dict) else getattr(call, "name", None)
-            args = call.get("args") if isinstance(call, dict) else getattr(call, "args", None)
+            name = (
+                call.get("name")
+                if isinstance(call, dict)
+                else getattr(call, "name", None)
+            )
+            args = (
+                call.get("args")
+                if isinstance(call, dict)
+                else getattr(call, "args", None)
+            )
             if isinstance(args, str):
                 try:
                     args = json.loads(args)
@@ -161,7 +176,9 @@ def _latest_failed_tool_call(messages: list) -> dict | None:
             if not name:
                 return None
             try:
-                signature = f"{name}:{json.dumps(args, sort_keys=True, separators=(',', ':'))}"
+                signature = (
+                    f"{name}:{json.dumps(args, sort_keys=True, separators=(',', ':'))}"
+                )
             except Exception:
                 signature = f"{name}:{str(args)}"
             return {
@@ -181,7 +198,14 @@ def _is_empty_success_payload(payload: dict) -> bool:
     meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
 
     # Explicit count-based hints returned by many tools.
-    for key in ("row_count", "item_count", "url_count", "combined_count", "web_count", "news_count"):
+    for key in (
+        "row_count",
+        "item_count",
+        "url_count",
+        "combined_count",
+        "web_count",
+        "news_count",
+    ):
         if key in meta:
             try:
                 if int(meta.get(key)) == 0:
@@ -210,7 +234,11 @@ def _is_empty_success_payload(payload: dict) -> bool:
             return True
     if isinstance(data, str):
         return data.strip() == ""
-    if isinstance(data, list) and data and _looks_like_zero_aggregate_sql_payload(payload):
+    if (
+        isinstance(data, list)
+        and data
+        and _looks_like_zero_aggregate_sql_payload(payload)
+    ):
         return True
     return False
 
@@ -272,15 +300,21 @@ def _latest_empty_success_tool_call(messages: list) -> dict | None:
     for message in reversed(messages):
         if getattr(message, "type", "") != "ai":
             continue
-        for call in (getattr(message, "tool_calls", None) or []):
-            call_id = str(call.get("id") if isinstance(call, dict) else getattr(call, "id", "") or "")
+        for call in getattr(message, "tool_calls", None) or []:
+            call_id = str(
+                call.get("id")
+                if isinstance(call, dict)
+                else getattr(call, "id", "") or ""
+            )
             if call_id != empty_tool_call_id:
                 continue
             name, args = _tool_call_name_and_args(call)
             if not name:
                 return None
             try:
-                signature = f"{name}:{json.dumps(args, sort_keys=True, separators=(',', ':'))}"
+                signature = (
+                    f"{name}:{json.dumps(args, sort_keys=True, separators=(',', ':'))}"
+                )
             except Exception:
                 signature = f"{name}:{str(args)}"
             return {
@@ -349,7 +383,7 @@ def _turn_has_schema_reference_read(messages: list) -> bool:
     for message in _messages_since_latest_human(messages):
         if getattr(message, "type", "") != "ai":
             continue
-        for call in (getattr(message, "tool_calls", None) or []):
+        for call in getattr(message, "tool_calls", None) or []:
             name, args = _tool_call_name_and_args(call)
             if name != "read_file":
                 continue
@@ -363,7 +397,7 @@ def _turn_used_any_tools(messages: list, names: set[str]) -> bool:
     for message in _messages_since_latest_human(messages):
         if getattr(message, "type", "") != "ai":
             continue
-        for call in (getattr(message, "tool_calls", None) or []):
+        for call in getattr(message, "tool_calls", None) or []:
             name, _ = _tool_call_name_and_args(call)
             if name in names:
                 return True
@@ -409,7 +443,7 @@ def _conversation_messages(state: AgentV2State, include_tool: bool = False) -> l
 
 def _ai_tool_call_ids(message) -> set[str]:
     ids: set[str] = set()
-    for call in (getattr(message, "tool_calls", None) or []):
+    for call in getattr(message, "tool_calls", None) or []:
         if isinstance(call, dict):
             call_id = call.get("id")
         else:
@@ -514,8 +548,7 @@ def _messages_for_model(state: AgentV2State) -> list:
         selected.append(
             SystemMessage(
                 content=(
-                    "Conversation memory summary (older context):\n"
-                    f"{summary_text}"
+                    f"Conversation memory summary (older context):\n{summary_text}"
                 ),
                 id="agent-v2-memory-summary",
             )
@@ -536,7 +569,9 @@ def _looks_like_code_submission(text_value: str) -> bool:
 
     if re.search(r"\bselect\b[\s\S]{0,240}\bfrom\b", lowered):
         return True
-    if re.search(r"^\s*(with|select|insert|update|delete|create|drop|alter)\b", lowered):
+    if re.search(
+        r"^\s*(with|select|insert|update|delete|create|drop|alter)\b", lowered
+    ):
         return True
 
     py_patterns = [
@@ -549,7 +584,10 @@ def _looks_like_code_submission(text_value: str) -> bool:
         r"^\s*if\s+.+:",
         r"^\s*print\s*\(",
     ]
-    return any(re.search(pattern, txt, flags=re.IGNORECASE | re.MULTILINE) for pattern in py_patterns)
+    return any(
+        re.search(pattern, txt, flags=re.IGNORECASE | re.MULTILINE)
+        for pattern in py_patterns
+    )
 
 
 def classify_intent(state: AgentV2State, config: RunnableConfig) -> dict:
@@ -564,7 +602,17 @@ def classify_intent(state: AgentV2State, config: RunnableConfig) -> dict:
 
     if _contains_any(
         lowered,
-        ("analyze", "analysis", "trend", "correlation", "distribution", "z score", "z-score", "compare", "summary"),
+        (
+            "analyze",
+            "analysis",
+            "trend",
+            "correlation",
+            "distribution",
+            "z score",
+            "z-score",
+            "compare",
+            "summary",
+        ),
     ):
         intent_labels.append("data_analysis")
 
@@ -593,8 +641,14 @@ def classify_intent(state: AgentV2State, config: RunnableConfig) -> dict:
     }
 
 
-def route_after_intent(state: AgentV2State) -> Literal["reject_execute_code", "summarize_and_trim"]:
-    return "reject_execute_code" if state.get("disallow_execute_code") else "summarize_and_trim"
+def route_after_intent(
+    state: AgentV2State,
+) -> Literal["reject_execute_code", "summarize_and_trim"]:
+    return (
+        "reject_execute_code"
+        if state.get("disallow_execute_code")
+        else "summarize_and_trim"
+    )
 
 
 def reject_execute_code_node(state: AgentV2State, config: RunnableConfig):
@@ -677,7 +731,17 @@ def plan_request(state: AgentV2State, config: RunnableConfig) -> dict:
     )
     needs_db = _contains_any(
         text_value,
-        ("alert", "article", "sql", "database", "table", "ticker", "isin", "status", "count"),
+        (
+            "alert",
+            "article",
+            "sql",
+            "database",
+            "table",
+            "ticker",
+            "isin",
+            "status",
+            "count",
+        ),
     )
     needs_report = _contains_any(
         text_value,
@@ -695,7 +759,9 @@ def plan_request(state: AgentV2State, config: RunnableConfig) -> dict:
 
     # Temporary simplification: for non-smalltalk requests, expose full toolset.
     # This disables dynamic tool gating and makes planner failures less likely.
-    active_tool_names: list[str] = [] if direct_smalltalk else list(TOOL_REGISTRY.keys())
+    active_tool_names: list[str] = (
+        [] if direct_smalltalk else list(TOOL_REGISTRY.keys())
+    )
 
     active_tool_names = [
         name for name in dict.fromkeys(active_tool_names) if name in TOOL_REGISTRY
@@ -723,11 +789,15 @@ def load_context(state: AgentV2State, config: RunnableConfig) -> dict:
     context_lines: list[str] = []
 
     if state.get("needs_db"):
-        loaded_context["db"] = "DB querying is available and schema reference docs are available in artifacts."
+        loaded_context["db"] = (
+            "DB querying is available and schema reference docs are available in artifacts."
+        )
         context_lines.append("- DB context is available.")
 
     if state.get("needs_kb"):
-        loaded_context["kb"] = "Filesystem tools are available within configured allowed directories."
+        loaded_context["kb"] = (
+            "Filesystem tools are available within configured allowed directories."
+        )
         context_lines.append("- Document context is available.")
 
     if state.get("needs_web"):
@@ -739,19 +809,23 @@ def load_context(state: AgentV2State, config: RunnableConfig) -> dict:
     py_cfg = get_config().get_agent_v2_safe_py_runner_config()
     py_enabled = bool(py_cfg.get("enabled", False))
     if py_enabled:
-        blocked_imports = [str(x).strip() for x in py_cfg.get("blocked_imports", []) if str(x).strip()]
-        blocked_builtins = [str(x).strip() for x in py_cfg.get("blocked_builtins", []) if str(x).strip()]
+        blocked_imports = [
+            str(x).strip() for x in py_cfg.get("blocked_imports", []) if str(x).strip()
+        ]
+        blocked_builtins = [
+            str(x).strip() for x in py_cfg.get("blocked_builtins", []) if str(x).strip()
+        ]
         loaded_context["python"] = (
             "Python execution is available with policy constraints."
         )
+        context_lines.append("- Python runtime is enabled.")
         context_lines.append(
-            "- Python runtime is enabled."
+            "- Blocked python imports: "
+            + (", ".join(blocked_imports) if blocked_imports else "(none)")
         )
         context_lines.append(
-            "- Blocked python imports: " + (", ".join(blocked_imports) if blocked_imports else "(none)")
-        )
-        context_lines.append(
-            "- Blocked python builtins: " + (", ".join(blocked_builtins) if blocked_builtins else "(none)")
+            "- Blocked python builtins: "
+            + (", ".join(blocked_builtins) if blocked_builtins else "(none)")
         )
     else:
         context_lines.append("- Python runtime is disabled in config.")
@@ -762,17 +836,20 @@ def load_context(state: AgentV2State, config: RunnableConfig) -> dict:
     runtime_context = (
         "Planner summary:\n"
         f"{state.get('planner_reason', '')}\n"
-        "Runtime context:\n"
-        + "\n".join(context_lines)
+        "Runtime context:\n" + "\n".join(context_lines)
     )
 
     return {
         "loaded_context": loaded_context,
-        "messages": [SystemMessage(content=runtime_context, id="agent-v2-runtime-context")],
+        "messages": [
+            SystemMessage(content=runtime_context, id="agent-v2-runtime-context")
+        ],
     }
 
 
-def route_after_plan(state: AgentV2State) -> Literal["direct_answer", "schema_preflight"]:
+def route_after_plan(
+    state: AgentV2State,
+) -> Literal["direct_answer", "schema_preflight"]:
     return "direct_answer" if state.get("route") == "direct" else "schema_preflight"
 
 
@@ -817,7 +894,9 @@ def agent_node(state: AgentV2State, config: RunnableConfig):
     llm = get_llm_model()
     model_messages = _messages_for_model(state)
     active_names = state.get("active_tool_names") or []
-    selected_tools = [TOOL_REGISTRY[name] for name in active_names if name in TOOL_REGISTRY]
+    selected_tools = [
+        TOOL_REGISTRY[name] for name in active_names if name in TOOL_REGISTRY
+    ]
     if selected_tools:
         response = llm.bind_tools(selected_tools).invoke(model_messages)
     else:
@@ -825,7 +904,9 @@ def agent_node(state: AgentV2State, config: RunnableConfig):
     return {"messages": [response]}
 
 
-def should_continue(state: AgentV2State) -> Literal["tools", "retry_after_tool_error", "validate_answer", "__end__"]:
+def should_continue(
+    state: AgentV2State,
+) -> Literal["tools", "retry_after_tool_error", "validate_answer", "__end__"]:
     messages = state["messages"]
     if not messages:
         return "__end__"
@@ -850,8 +931,6 @@ def should_continue(state: AgentV2State) -> Literal["tools", "retry_after_tool_e
     if failed_call and can_correct:
         if attempts < _max_tool_error_retries():
             return "retry_after_tool_error"
-    if empty_call and attempts < _max_tool_error_retries():
-        return "retry_after_tool_error"
     if failed_call:
         return "__end__"
     return "validate_answer"
@@ -869,7 +948,9 @@ def retry_after_tool_error_node(state: AgentV2State, config: RunnableConfig):
     next_attempt = attempts + 1
     if failed_call:
         error_code = failed_call.get("error_code") or "UNKNOWN_ERROR"
-        error_message = failed_call.get("error_message") or "Tool returned an error payload."
+        error_message = (
+            failed_call.get("error_message") or "Tool returned an error payload."
+        )
         content = (
             "The previous tool call failed with a correctable error. "
             f"Error code: {error_code}. Error message: {error_message}. "
@@ -904,6 +985,11 @@ def validate_answer_node(state: AgentV2State, config: RunnableConfig):
     if getattr(last_message, "tool_calls", None):
         return {"needs_answer_rewrite": False}
     if not _turn_used_any_tools(messages, {"execute_sql", "execute_python"}):
+        return {"needs_answer_rewrite": False}
+
+    # Skip validation if the last tool call returned empty — the answer
+    # is inherently "no data" and rewriting won't add value.
+    if _latest_empty_success_tool_call(messages):
         return {"needs_answer_rewrite": False}
 
     text_value = _message_content_as_text(last_message).lower()

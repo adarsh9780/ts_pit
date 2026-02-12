@@ -4,3 +4,4 @@
 - Do NOT chain multiple tasks (e.g., Backend + Frontend + API) in a single turn.
 - If a task involves multiple files, edit one file, verify it, and then ask the user to proceed.
 - Prioritize user feedback over speed.
+- If you change any file, please write a commit message to the commit file present in the root directory.
