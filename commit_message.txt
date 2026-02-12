@@ -1,9 +1,16 @@
-fix(agent_v2): stop retry loop from repeating "Next Steps" on empty tool results
+feat(agent_v2): replace prompt-based retry with data-driven diagnose_empty_result node
 
-- Remove empty_call retry branch from should_continue's no-tool_calls path;
-  text-only LLM responses should not be re-routed to retry_after_tool_error.
-- Skip validate_answer rewrite when the last tool call returned empty data,
-  avoiding an extra agent loop that compounds with the retry loop.
+- Add diagnose_empty_result_node that replaces the weak retry_after_tool_error_node
+- SQL diagnostics: parse failed query, run SELECT DISTINCT to discover
+  actual data formats, provide concrete hints (e.g. date format mismatch)
+- Python diagnostics: parse error type (KeyError, TypeError, ImportError, NameError)
+  and provide specific fix guidance
+- Generic fallback for other tools (search_web, etc.)
+- Restore empty_call retry path in should_continue so the agent actually retries
+  instead of immediately ending (reverting earlier over-correction)
+- Update build_graph wiring: rename node from retry_after_tool_error to
+  diagnose_empty_result
+- Add PYTHON_EXEC_ERROR to CORRECTABLE_ERROR_CODES
+- Update all 17 existing tests + add 4 new diagnostic-specific tests (21 total)
 
-Fixes: agent producing 5 repeated "Next Steps" blocks instead of respecting
-max_tool_error_retries (3) from config.yaml.
+All 21 tests pass.

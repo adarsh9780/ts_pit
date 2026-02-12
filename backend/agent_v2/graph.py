@@ -9,12 +9,14 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
+from sqlalchemy import text as sa_text
 
 from .tools import (
     TOOL_REGISTRY,
 )
 from ..llm import get_llm_model
 from ..config import get_config
+from ..db import get_engine
 from .prompts import AGENT_V2_SYSTEM_PROMPT
 from .state import AgentV2State
 
@@ -29,6 +31,7 @@ CORRECTABLE_ERROR_CODES = {
     "INVALID_INPUT",
     "TABLE_NOT_FOUND",
     "DB_ERROR",
+    "PYTHON_EXEC_ERROR",
 }
 
 
@@ -906,7 +909,7 @@ def agent_node(state: AgentV2State, config: RunnableConfig):
 
 def should_continue(
     state: AgentV2State,
-) -> Literal["tools", "retry_after_tool_error", "validate_answer", "__end__"]:
+) -> Literal["tools", "diagnose_empty_result", "validate_answer", "__end__"]:
     messages = state["messages"]
     if not messages:
         return "__end__"
@@ -922,21 +925,218 @@ def should_continue(
             if attempts < _max_tool_error_retries():
                 new_sig = _ai_first_tool_call_signature(last_message)
                 if new_sig and new_sig == failed_call.get("signature"):
-                    return "retry_after_tool_error"
+                    return "diagnose_empty_result"
         if empty_call and attempts < _max_tool_error_retries():
             new_sig = _ai_first_tool_call_signature(last_message)
             if new_sig and new_sig == empty_call.get("signature"):
-                return "retry_after_tool_error"
+                return "diagnose_empty_result"
         return "tools"
     if failed_call and can_correct:
         if attempts < _max_tool_error_retries():
-            return "retry_after_tool_error"
+            return "diagnose_empty_result"
+    if empty_call and attempts < _max_tool_error_retries():
+        return "diagnose_empty_result"
     if failed_call:
         return "__end__"
     return "validate_answer"
 
 
-def retry_after_tool_error_node(state: AgentV2State, config: RunnableConfig):
+# ---------------------------------------------------------------------------
+#  Diagnostic helpers for empty / error tool results
+# ---------------------------------------------------------------------------
+
+
+def _extract_sql_filters(query: str) -> list[dict]:
+    """Extract table names and WHERE-clause column/value pairs from SQL."""
+    filters: list[dict] = []
+    table_match = re.search(r'\bFROM\s+["\']?([\w]+)["\']?', query, re.IGNORECASE)
+    if not table_match:
+        return filters
+    table_name = table_match.group(1)
+
+    where_match = re.search(
+        r"\bWHERE\b(.+?)(?:\bGROUP\b|\bORDER\b|\bLIMIT\b|\bHAVING\b|$)",
+        query,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not where_match:
+        return filters
+
+    where_clause = where_match.group(1)
+    # Match: col = 'val', "col" = 'val', col LIKE 'val%', etc.
+    pattern = (
+        r"(?:^|\bAND\b|\bOR\b)\s*"
+        r'["\']?([a-zA-Z_][a-zA-Z0-9_ ]*?[a-zA-Z0-9_]|[a-zA-Z_][a-zA-Z0-9_]*)["\']?'
+        r"\s*(?:=|LIKE|>=|<=|>|<)\s*"
+        r"'([^']*)'"
+    )
+    for match in re.finditer(pattern, where_clause, re.IGNORECASE):
+        col_name = match.group(1).strip().strip("\"'")
+        value = match.group(2).strip()
+        filters.append({"table": table_name, "column": col_name, "value": value})
+    return filters
+
+
+def _resolve_physical_column(table_name: str, col_name: str) -> str:
+    """Resolve a column name to its physical DB column name via config."""
+    try:
+        cfg = get_config()
+        tables_cfg = cfg._config.get("tables", {})
+        for key, table_info in tables_cfg.items():
+            if not isinstance(table_info, dict):
+                continue
+            actual_table = table_info.get("name", key)
+            if (
+                actual_table.lower() != table_name.lower()
+                and key.lower() != table_name.lower()
+            ):
+                continue
+            columns = table_info.get("columns", {})
+            for logical, physical in columns.items():
+                if (
+                    logical.lower() == col_name.lower()
+                    or str(physical).lower() == col_name.lower()
+                ):
+                    return str(physical) if physical else col_name
+            break
+    except Exception:
+        pass
+    return col_name
+
+
+def _run_sample_query(table_name: str, column_name: str, limit: int = 5) -> list[str]:
+    """Run SELECT DISTINCT to discover actual data formats."""
+    try:
+        engine = get_engine()
+        quoted_col = f'"{column_name}"'
+        quoted_table = f'"{table_name}"'
+        sql = (
+            f"SELECT DISTINCT {quoted_col} FROM {quoted_table} "
+            f"WHERE {quoted_col} IS NOT NULL "
+            f"ORDER BY {quoted_col} DESC LIMIT {limit}"
+        )
+        with engine.connect() as conn:
+            result = conn.execute(sa_text(sql))
+            return [str(row[0]) for row in result.fetchall()]
+    except Exception:
+        return []
+
+
+def _diagnose_empty_sql(call_info: dict) -> str:
+    """Analyse an empty SQL result by inspecting the DB for format hints."""
+    query = (call_info.get("args") or {}).get("query", "")
+    if not query:
+        return (
+            "The SQL query returned no results. "
+            "You MUST issue a corrected execute_sql tool call with adjusted filters."
+        )
+
+    filters = _extract_sql_filters(query)
+    if not filters:
+        return (
+            f"The SQL query returned no results: `{query}`. "
+            "Try broadening filters, changing date formats (DATE() or LIKE), "
+            "or removing restrictive conditions. "
+            "You MUST issue a corrected execute_sql tool call."
+        )
+
+    hints: list[str] = []
+    for f in filters:
+        physical_col = _resolve_physical_column(f["table"], f["column"])
+        samples = _run_sample_query(f["table"], physical_col)
+        if not samples and physical_col != f["column"]:
+            samples = _run_sample_query(f["table"], f["column"])
+        if samples:
+            sample_str = ", ".join(f"`{s}`" for s in samples[:5])
+            hints.append(
+                f"Column `{f['column']}` (DB name: `{physical_col}`) "
+                f"has sample values: [{sample_str}]. "
+                f"Your filter used `{f['value']}`."
+            )
+
+    if hints:
+        hint_text = " | ".join(hints)
+        return (
+            f"The SQL query returned no results. Diagnostic: {hint_text}. "
+            "Adjust your query to match the actual data format "
+            "(e.g. DATE() function, LIKE with wildcards, or different value). "
+            "You MUST issue a corrected execute_sql tool call — do NOT respond with text only."
+        )
+
+    return (
+        f"The SQL query returned no results: `{query}`. "
+        "Try DATE() for date comparisons, LIKE for partial matches, "
+        "or relax the filters. "
+        "You MUST issue a corrected execute_sql tool call — do NOT respond with text only."
+    )
+
+
+def _diagnose_tool_error(call_info: dict) -> str:
+    """Provide specific fix guidance for tool errors."""
+    error_code = call_info.get("error_code") or "UNKNOWN_ERROR"
+    error_message = call_info.get("error_message") or "Tool returned an error."
+    tool_name = call_info.get("name") or "tool"
+
+    extra = ""
+    if tool_name == "execute_python":
+        low = error_message.lower()
+        if "keyerror" in low:
+            extra = (
+                " This is a KeyError — the key/column you accessed does not exist "
+                "in the data. Check the actual keys in input_data before accessing them."
+            )
+        elif "typeerror" in low:
+            extra = (
+                " This is a TypeError — check your data types and add explicit "
+                "type conversions (int(), float(), str()) where needed."
+            )
+        elif "modulenotfounderror" in low or "import" in low:
+            extra = (
+                " An import failed — check get_python_capabilities to see which "
+                "modules are available in the sandbox."
+            )
+        elif "nameerror" in low:
+            extra = (
+                " A variable name was not defined — ensure all variables are "
+                "assigned before use and that you read inputs from `input_data`."
+            )
+
+    return (
+        f"The previous `{tool_name}` call failed. "
+        f"Error code: {error_code}. Error: {error_message}.{extra} "
+        "Issue a corrected tool call with revised inputs. "
+        "Do NOT repeat the exact same arguments."
+    )
+
+
+def _diagnose_empty_python(call_info: dict, messages: list) -> str:
+    """Provide guidance when execute_python returned empty/None result."""
+    code = (call_info.get("args") or {}).get("code", "")
+    code_preview = code[:200] + "..." if len(code) > 200 else code
+    return (
+        f"The previous execute_python call returned an empty result. "
+        f"Code preview: `{code_preview}`. "
+        "Common causes: the `result` variable was not assigned, "
+        "or the data filtering produced an empty DataFrame/list. "
+        "Verify the input data structure, check column names, and ensure "
+        "`result` is assigned a value. "
+        "You MUST issue a corrected execute_python tool call — do NOT respond with text only."
+    )
+
+
+def _diagnose_empty_generic(call_info: dict) -> str:
+    """Fallback guidance for other tools returning empty results."""
+    tool_name = call_info.get("name") or "tool"
+    return (
+        f"The previous `{tool_name}` call returned an empty result. "
+        "Try adjusting your query/inputs with different terms or relaxed filters. "
+        "You MUST issue a corrected tool call — do NOT respond with text only."
+    )
+
+
+def diagnose_empty_result_node(state: AgentV2State, config: RunnableConfig):
+    """Inspect empty/error tool results, run diagnostics, and give the LLM
+    concrete, data-driven retry instructions."""
     _ = config
     messages = state.get("messages", [])
     failed_call = _latest_failed_tool_call(messages)
@@ -946,24 +1146,18 @@ def retry_after_tool_error_node(state: AgentV2State, config: RunnableConfig):
 
     attempts = _tool_error_retry_attempts(messages)
     next_attempt = attempts + 1
+
     if failed_call:
-        error_code = failed_call.get("error_code") or "UNKNOWN_ERROR"
-        error_message = (
-            failed_call.get("error_message") or "Tool returned an error payload."
-        )
-        content = (
-            "The previous tool call failed with a correctable error. "
-            f"Error code: {error_code}. Error message: {error_message}. "
-            "Issue a corrected tool call with revised inputs. "
-            "Do not repeat the exact same tool call arguments."
-        )
+        content = _diagnose_tool_error(failed_call)
     else:
-        tool_name = str((empty_call or {}).get("name") or "tool")
-        content = (
-            f"The previous `{tool_name}` call returned an empty result. "
-            "Before concluding no data exists, try a revised approach with adjusted inputs/filters. "
-            "Do not repeat the exact same tool call arguments."
-        )
+        tool_name = (empty_call or {}).get("name", "")
+        if tool_name == "execute_sql":
+            content = _diagnose_empty_sql(empty_call)
+        elif tool_name == "execute_python":
+            content = _diagnose_empty_python(empty_call, messages)
+        else:
+            content = _diagnose_empty_generic(empty_call)
+
     return {
         "messages": [
             SystemMessage(
@@ -1041,7 +1235,7 @@ def build_graph():
     workflow.add_node("schema_preflight", schema_preflight_node)
     workflow.add_node("agent", agent_node)
     workflow.add_node("tools", tool_node)
-    workflow.add_node("retry_after_tool_error", retry_after_tool_error_node)
+    workflow.add_node("diagnose_empty_result", diagnose_empty_result_node)
     workflow.add_node("validate_answer", validate_answer_node)
 
     workflow.add_edge(START, "ensure_system_prompt")
@@ -1055,7 +1249,7 @@ def build_graph():
     workflow.add_conditional_edges("schema_preflight", route_after_schema_preflight)
     workflow.add_conditional_edges("agent", should_continue)
     workflow.add_edge("tools", "agent")
-    workflow.add_edge("retry_after_tool_error", "agent")
+    workflow.add_edge("diagnose_empty_result", "agent")
     workflow.add_conditional_edges("validate_answer", route_after_validate_answer)
 
     return workflow
