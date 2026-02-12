@@ -167,7 +167,7 @@ const {
                 </summary>
                 <div class="tool-body">
                   <div v-if="segment.tool.commentary" class="tool-section">
-                    <div class="tool-section-title">Reasoning</div>
+                    <div class="tool-section-title">Action</div>
                     <div class="tool-commentary">{{ segment.tool.commentary }}</div>
                   </div>
                   <div v-if="segment.tool.input" class="tool-section">

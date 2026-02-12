@@ -104,6 +104,35 @@ class ToolErrorRetryTests(unittest.TestCase):
             decision = self.graph.should_continue(state)
         self.assertEqual(decision, "tools")
 
+    def test_schema_preflight_injects_schema_read_for_db_turn(self):
+        state = {
+            "needs_db": True,
+            "messages": [HumanMessage(content="count alerts by ticker")],
+        }
+        out = self.graph.schema_preflight_node(state, config={})
+        self.assertTrue(out.get("needs_schema_preflight"))
+        msgs = out.get("messages", [])
+        self.assertEqual(len(msgs), 1)
+        self.assertIsInstance(msgs[0], AIMessage)
+        calls = getattr(msgs[0], "tool_calls", None) or []
+        self.assertEqual(calls[0]["name"], "read_file")
+        self.assertEqual(calls[0]["args"]["path"], "artifacts/DB_SCHEMA_REFERENCE.yaml")
+
+    def test_validate_answer_requests_methodology_sections_after_sql(self):
+        state = {
+            "messages": [
+                HumanMessage(content="show grouped totals"),
+                AIMessage(content="", tool_calls=[{"id": "c1", "name": "execute_sql", "args": {"query": "SELECT 1"}}]),
+                ToolMessage(content='{"ok": true, "data": [{"n": 1}]}', tool_call_id="c1"),
+                AIMessage(content="Here is the output table."),
+            ]
+        }
+        out = self.graph.validate_answer_node(state, config={})
+        self.assertTrue(out.get("needs_answer_rewrite"))
+        msgs = out.get("messages", [])
+        self.assertEqual(len(msgs), 1)
+        self.assertIsInstance(msgs[0], SystemMessage)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -365,6 +365,24 @@ def _allowed_write_extensions() -> set[str]:
     return {str(ext).lower() for ext in configured if str(ext).strip()} or {".md"}
 
 
+def _is_session_scoped_artifact_write_path(target: Path) -> bool:
+    """
+    Enforce markdown artifact writes to session-scoped report folders:
+    artifacts/reports/<session_id>/<filename>.md
+    """
+    try:
+        rel = target.resolve().relative_to(PROJECT_ROOT)
+    except Exception:
+        return False
+    parts = rel.parts
+    if len(parts) < 4:
+        return False
+    if parts[0] != "artifacts" or parts[1] != "reports":
+        return False
+    session_id = str(parts[2]).strip()
+    return session_id != ""
+
+
 @tool
 def list_files(path: str = "artifacts") -> str:
     """
@@ -451,6 +469,11 @@ def write_file(path: str, content: str) -> str:
     ext = target.suffix.lower()
     if ext not in _allowed_write_extensions():
         return _error(f"File extension not allowed for write: {ext}", code="FS_WRITE_EXTENSION_BLOCKED")
+    if not _is_session_scoped_artifact_write_path(target):
+        return _error(
+            "Writes must be under artifacts/reports/<session_id>/<filename>.md",
+            code="FS_WRITE_SESSION_SCOPE_REQUIRED",
+        )
 
     try:
         target.parent.mkdir(parents=True, exist_ok=True)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import json
+from uuid import uuid4
 from typing import Literal
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -21,6 +22,8 @@ ALL_TOOLS = list(TOOL_REGISTRY.values())
 SUMMARY_TRIGGER_TOKENS_EST = 7000
 RECENT_MESSAGES_WINDOW = 14
 TOOL_ERROR_RETRY_MSG_ID_PREFIX = "agent-v2-tool-error-retry-"
+ANSWER_REWRITE_MSG_ID_PREFIX = "agent-v2-answer-format-rewrite-"
+SCHEMA_PREFLIGHT_PATH = "artifacts/DB_SCHEMA_REFERENCE.yaml"
 CORRECTABLE_ERROR_CODES = {
     "READ_ONLY_ENFORCED",
     "INVALID_INPUT",
@@ -182,19 +185,7 @@ def _ai_first_tool_call_signature(message) -> str | None:
     if not calls:
         return None
     call = calls[0]
-    if isinstance(call, dict):
-        name = call.get("name")
-        args = call.get("args")
-    else:
-        name = getattr(call, "name", None)
-        args = getattr(call, "args", None)
-    if isinstance(args, str):
-        try:
-            args = json.loads(args)
-        except Exception:
-            args = {}
-    if not isinstance(args, dict):
-        args = {}
+    name, args = _tool_call_name_and_args(call)
     if not name:
         return None
     try:
@@ -208,6 +199,69 @@ def _latest_human_index(messages: list) -> int:
         if getattr(messages[idx], "type", "") in {"human", "user"}:
             return idx
     return -1
+
+
+def _messages_since_latest_human(messages: list) -> list:
+    start = _latest_human_index(messages) + 1
+    return list(messages[start:])
+
+
+def _normalize_rel_path(value: str) -> str:
+    return str(value or "").strip().lstrip("./").lower()
+
+
+def _tool_call_name_and_args(call) -> tuple[str | None, dict]:
+    if isinstance(call, dict):
+        name = call.get("name")
+        args = call.get("args")
+    else:
+        name = getattr(call, "name", None)
+        args = getattr(call, "args", None)
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except Exception:
+            args = {}
+    if not isinstance(args, dict):
+        args = {}
+    return name, args
+
+
+def _turn_has_schema_reference_read(messages: list) -> bool:
+    expected = _normalize_rel_path(SCHEMA_PREFLIGHT_PATH)
+    for message in _messages_since_latest_human(messages):
+        if getattr(message, "type", "") != "ai":
+            continue
+        for call in (getattr(message, "tool_calls", None) or []):
+            name, args = _tool_call_name_and_args(call)
+            if name != "read_file":
+                continue
+            path_value = _normalize_rel_path(str(args.get("path", "")))
+            if path_value.endswith(expected):
+                return True
+    return False
+
+
+def _turn_used_any_tools(messages: list, names: set[str]) -> bool:
+    for message in _messages_since_latest_human(messages):
+        if getattr(message, "type", "") != "ai":
+            continue
+        for call in (getattr(message, "tool_calls", None) or []):
+            name, _ = _tool_call_name_and_args(call)
+            if name in names:
+                return True
+    return False
+
+
+def _answer_rewrite_attempts(messages: list) -> int:
+    attempts = 0
+    for message in _messages_since_latest_human(messages):
+        if getattr(message, "type", "") != "system":
+            continue
+        msg_id = str(getattr(message, "id", "") or "")
+        if msg_id.startswith(ANSWER_REWRITE_MSG_ID_PREFIX):
+            attempts += 1
+    return attempts
 
 
 def _tool_error_retry_attempts(messages: list) -> int:
@@ -570,8 +624,8 @@ def load_context(state: AgentV2State, config: RunnableConfig) -> dict:
     }
 
 
-def route_after_plan(state: AgentV2State) -> Literal["direct_answer", "agent"]:
-    return "direct_answer" if state.get("route") == "direct" else "agent"
+def route_after_plan(state: AgentV2State) -> Literal["direct_answer", "schema_preflight"]:
+    return "direct_answer" if state.get("route") == "direct" else "schema_preflight"
 
 
 def direct_answer_node(state: AgentV2State, config: RunnableConfig):
@@ -579,6 +633,35 @@ def direct_answer_node(state: AgentV2State, config: RunnableConfig):
     llm = get_llm_model()
     response = llm.invoke(_messages_for_model(state))
     return {"messages": [response]}
+
+
+def schema_preflight_node(state: AgentV2State, config: RunnableConfig):
+    _ = config
+    messages = state.get("messages", [])
+    if not state.get("needs_db"):
+        return {"needs_schema_preflight": False}
+    if _turn_has_schema_reference_read(messages):
+        return {"needs_schema_preflight": False}
+
+    return {
+        "needs_schema_preflight": True,
+        "messages": [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "id": f"schema-preflight-{uuid4().hex}",
+                        "name": "read_file",
+                        "args": {"path": SCHEMA_PREFLIGHT_PATH},
+                    }
+                ],
+            )
+        ],
+    }
+
+
+def route_after_schema_preflight(state: AgentV2State) -> Literal["tools", "agent"]:
+    return "tools" if state.get("needs_schema_preflight") else "agent"
 
 
 def agent_node(state: AgentV2State, config: RunnableConfig):
@@ -594,7 +677,7 @@ def agent_node(state: AgentV2State, config: RunnableConfig):
     return {"messages": [response]}
 
 
-def should_continue(state: AgentV2State) -> Literal["tools", "retry_after_tool_error", "__end__"]:
+def should_continue(state: AgentV2State) -> Literal["tools", "retry_after_tool_error", "validate_answer", "__end__"]:
     messages = state["messages"]
     if not messages:
         return "__end__"
@@ -615,7 +698,9 @@ def should_continue(state: AgentV2State) -> Literal["tools", "retry_after_tool_e
         attempts = _tool_error_retry_attempts(messages)
         if attempts < _max_tool_error_retries():
             return "retry_after_tool_error"
-    return "__end__"
+    if failed_call:
+        return "__end__"
+    return "validate_answer"
 
 
 def retry_after_tool_error_node(state: AgentV2State, config: RunnableConfig):
@@ -644,6 +729,54 @@ def retry_after_tool_error_node(state: AgentV2State, config: RunnableConfig):
     }
 
 
+def validate_answer_node(state: AgentV2State, config: RunnableConfig):
+    _ = config
+    messages = state.get("messages", [])
+    if not messages:
+        return {"needs_answer_rewrite": False}
+    last_message = messages[-1]
+    if getattr(last_message, "type", "") != "ai":
+        return {"needs_answer_rewrite": False}
+    if getattr(last_message, "tool_calls", None):
+        return {"needs_answer_rewrite": False}
+    if not _turn_used_any_tools(messages, {"execute_sql", "execute_python"}):
+        return {"needs_answer_rewrite": False}
+
+    text_value = _message_content_as_text(last_message).lower()
+    required_markers = [
+        "method",
+        "schema/data assumption",
+        "data-type",
+        "check",
+        "limitation",
+    ]
+    has_all = all(marker in text_value for marker in required_markers)
+    if has_all:
+        return {"needs_answer_rewrite": False}
+
+    attempts = _answer_rewrite_attempts(messages)
+    if attempts >= 1:
+        return {"needs_answer_rewrite": False}
+
+    return {
+        "needs_answer_rewrite": True,
+        "messages": [
+            SystemMessage(
+                content=(
+                    "Revise the previous answer to include explicit sections with short headings: "
+                    "Method Used, Schema/Data Assumptions, Data-Type Handling, Checks Performed, Limitations. "
+                    "Keep it concise and evidence-based."
+                ),
+                id=f"{ANSWER_REWRITE_MSG_ID_PREFIX}{attempts + 1}",
+            )
+        ],
+    }
+
+
+def route_after_validate_answer(state: AgentV2State) -> Literal["agent", "__end__"]:
+    return "agent" if state.get("needs_answer_rewrite") else "__end__"
+
+
 def build_graph():
     tool_node = ToolNode(ALL_TOOLS)
 
@@ -655,9 +788,11 @@ def build_graph():
     workflow.add_node("plan_request", plan_request)
     workflow.add_node("load_context", load_context)
     workflow.add_node("direct_answer", direct_answer_node)
+    workflow.add_node("schema_preflight", schema_preflight_node)
     workflow.add_node("agent", agent_node)
     workflow.add_node("tools", tool_node)
     workflow.add_node("retry_after_tool_error", retry_after_tool_error_node)
+    workflow.add_node("validate_answer", validate_answer_node)
 
     workflow.add_edge(START, "ensure_system_prompt")
     workflow.add_edge("ensure_system_prompt", "classify_intent")
@@ -667,9 +802,11 @@ def build_graph():
     workflow.add_edge("plan_request", "load_context")
     workflow.add_conditional_edges("load_context", route_after_plan)
     workflow.add_edge("direct_answer", END)
+    workflow.add_conditional_edges("schema_preflight", route_after_schema_preflight)
     workflow.add_conditional_edges("agent", should_continue)
     workflow.add_edge("tools", "agent")
     workflow.add_edge("retry_after_tool_error", "agent")
+    workflow.add_conditional_edges("validate_answer", route_after_validate_answer)
 
     return workflow
 

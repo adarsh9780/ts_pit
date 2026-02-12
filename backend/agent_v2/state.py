@@ -21,3 +21,5 @@ class AgentV2State(TypedDict):
     needs_web: bool
     active_tool_names: list[str]
     loaded_context: dict[str, Any]
+    needs_schema_preflight: bool
+    needs_answer_rewrite: bool

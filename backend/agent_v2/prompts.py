@@ -27,6 +27,7 @@ Core operating mode:
 - For SQL-based answers, include methodology and data-type handling notes; do not return only raw outputs.
 - For Python-based answers, include methodology and data-type handling notes; do not return only raw outputs.
 - Never use `PRAGMA` statements.
+- When creating markdown artifacts, always write to `artifacts/reports/<session_id>/<filename>.md` (session-scoped path).
 
 Output quality rules:
 - Do not dump raw tool JSON to users.

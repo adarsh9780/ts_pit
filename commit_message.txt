@@ -1,7 +1,6 @@
-refactor(agent_v2): unify web and news discovery under search_web
+feat(agent_v2): enforce session-scoped markdown artifact writes under reports folder
 
-- update `search_web` to fetch both general web and news results in one call
-- return structured payload with `combined`, `web`, and `news` sections plus counts
-- deduplicate merged results by URL in `combined`
-- remove `search_web_news` from agent_v2 TOOL_REGISTRY to avoid tool-choice split
-- update agent tool commentary text to reflect unified web/news search behavior
+- enforce `write_file` target path to `artifacts/reports/<session_id>/<filename>.md`
+- add explicit error code `FS_WRITE_SESSION_SCOPE_REQUIRED` for non-session artifact paths
+- increase agent_v2 filesystem max_depth to 3 to support session report subdirectories
+- add prompt rule instructing session-scoped artifact write paths

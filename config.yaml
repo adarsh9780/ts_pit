@@ -269,8 +269,9 @@ agent_v2:
       - artifacts
     # Max nesting depth from each allowed root:
     # 0 => only files directly in root
-    # 1 => allow one level below root (default)
-    max_depth: 1
+    # 1 => allow one level below root
+    # 3 => supports artifacts/reports/<session_id>/...
+    max_depth: 3
     read_extensions:
       - .md
       - .txt
