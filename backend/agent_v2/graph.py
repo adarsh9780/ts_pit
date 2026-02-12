@@ -184,7 +184,8 @@ def _is_empty_success_payload(payload: dict) -> bool:
     for key in ("row_count", "item_count", "url_count", "combined_count", "web_count", "news_count"):
         if key in meta:
             try:
-                return int(meta.get(key)) == 0
+                if int(meta.get(key)) == 0:
+                    return True
             except Exception:
                 pass
 
@@ -192,7 +193,8 @@ def _is_empty_success_payload(payload: dict) -> bool:
     if data is None:
         return True
     if isinstance(data, (list, tuple, set)):
-        return len(data) == 0
+        if len(data) == 0:
+            return True
     if isinstance(data, dict):
         if not data:
             return True
@@ -208,7 +210,44 @@ def _is_empty_success_payload(payload: dict) -> bool:
             return True
     if isinstance(data, str):
         return data.strip() == ""
+    if isinstance(data, list) and data and _looks_like_zero_aggregate_sql_payload(payload):
+        return True
     return False
+
+
+def _is_zero_like_scalar(value) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, bool):
+        return value is False
+    if isinstance(value, (int, float)):
+        return float(value) == 0.0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        return normalized in {"", "0", "0.0", "0.00", "null", "none"}
+    return False
+
+
+def _looks_like_zero_aggregate_sql_payload(payload: dict) -> bool:
+    """
+    Detect aggregate-style SQL responses that return only zero-like values.
+    This catches COUNT/SUM style rows like [{"n": 0}] that often indicate an
+    over-filtered query and should be retried once before concluding no data.
+    """
+    meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+    query = str(meta.get("executed_query") or "").lower()
+    if not query:
+        return False
+    if not any(fn in query for fn in ("count(", "sum(", "avg(", "min(", "max(")):
+        return False
+
+    data = payload.get("data")
+    if not isinstance(data, list) or len(data) != 1:
+        return False
+    row = data[0]
+    if not isinstance(row, dict) or not row:
+        return False
+    return all(_is_zero_like_scalar(v) for v in row.values())
 
 
 def _latest_empty_success_tool_call(messages: list) -> dict | None:
@@ -386,24 +425,43 @@ def _sanitize_tool_sequence(messages: list) -> list:
     This prevents API contract violations when context trimming cuts message boundaries.
     """
     sanitized: list = []
+    pending_ai = None
     pending_tool_ids: set[str] = set()
+    pending_tool_messages: list = []
     for message in messages:
         msg_type = getattr(message, "type", "")
         if msg_type == "ai":
-            pending_tool_ids = _ai_tool_call_ids(message)
-            sanitized.append(message)
+            # Drop prior dangling assistant(tool_calls) blocks.
+            pending_ai = None
+            pending_tool_ids = set()
+            pending_tool_messages = []
+
+            tool_ids = _ai_tool_call_ids(message)
+            if tool_ids:
+                pending_ai = message
+                pending_tool_ids = set(tool_ids)
+            else:
+                sanitized.append(message)
             continue
         if msg_type == "tool":
             tool_call_id = getattr(message, "tool_call_id", None)
-            if not pending_tool_ids or not tool_call_id:
+            if not pending_ai or not pending_tool_ids or not tool_call_id:
                 continue
             tool_call_id = str(tool_call_id)
             if tool_call_id not in pending_tool_ids:
                 continue
-            sanitized.append(message)
+            pending_tool_messages.append(message)
             pending_tool_ids.discard(tool_call_id)
+            if not pending_tool_ids:
+                sanitized.append(pending_ai)
+                sanitized.extend(pending_tool_messages)
+                pending_ai = None
+                pending_tool_messages = []
             continue
+        # Non-tool message breaks a pending tool-call block; drop that block.
+        pending_ai = None
         pending_tool_ids = set()
+        pending_tool_messages = []
         sanitized.append(message)
     return sanitized
 

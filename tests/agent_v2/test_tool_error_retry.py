@@ -207,6 +207,40 @@ class ToolErrorRetryTests(unittest.TestCase):
             decision = self.graph.should_continue(state)
         self.assertEqual(decision, "retry_after_tool_error")
 
+    def test_should_continue_retries_after_zero_aggregate_sql_result(self):
+        state = {
+            "messages": [
+                HumanMessage(content="count alerts on date"),
+                AIMessage(content="", tool_calls=[{"id": "c1", "name": "execute_sql", "args": {"query": "SELECT COUNT(*) AS total_alerts FROM alerts WHERE alert_date='2025-09-01'"}}]),
+                ToolMessage(
+                    content="{\"ok\": true, \"data\": [{\"total_alerts\": 0}], \"meta\": {\"row_count\": 1, \"executed_query\": \"SELECT COUNT(*) AS total_alerts FROM alerts WHERE alert_date='2025-09-01'\"}}",
+                    tool_call_id="c1",
+                ),
+                AIMessage(content="No alerts found."),
+            ]
+        }
+        cfg = type("Cfg", (), {"get_agent_v2_retry_config": lambda self: {"max_tool_error_retries": 2}})()
+        with patch.object(self.graph, "get_config", return_value=cfg):
+            decision = self.graph.should_continue(state)
+        self.assertEqual(decision, "retry_after_tool_error")
+
+    def test_messages_for_model_drops_dangling_assistant_tool_calls(self):
+        state = {
+            "messages": [
+                SystemMessage(content="base", id="agent-v2-system-prompt"),
+                HumanMessage(content="question"),
+                AIMessage(content="", tool_calls=[{"id": "c1", "name": "execute_sql", "args": {"query": "SELECT 1"}}]),
+                HumanMessage(content="follow-up"),
+                AIMessage(content="answer"),
+            ]
+        }
+        msgs = self.graph._messages_for_model(state)
+        tool_call_msgs = [
+            m for m in msgs
+            if getattr(m, "type", "") == "ai" and getattr(m, "tool_calls", None)
+        ]
+        self.assertEqual(len(tool_call_msgs), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
