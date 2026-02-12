@@ -262,18 +262,51 @@ Status: {ctx.status or "N/A"}
                 return None
         return None
 
-    def _tool_commentary(tool_name: str) -> str:
+    def _tool_commentary(tool_name: str, tool_input=None) -> str:
+        parsed_input = None
+        if isinstance(tool_input, dict):
+            parsed_input = tool_input
+        elif isinstance(tool_input, str):
+            try:
+                maybe = json.loads(tool_input)
+                if isinstance(maybe, dict):
+                    parsed_input = maybe
+            except Exception:
+                parsed_input = None
+
+        if tool_name == "read_file":
+            path_value = (parsed_input or {}).get("path")
+            if path_value:
+                return f"I need to inspect `{path_value}` to confirm schema/method details before proceeding."
+            return "I need to inspect a reference document before proceeding."
+
+        if tool_name == "execute_sql":
+            query = str((parsed_input or {}).get("query") or "").strip()
+            if query:
+                tables = re.findall(r"\b(?:from|join)\s+([A-Za-z_][\w.]*)", query, flags=re.IGNORECASE)
+                table_text = ", ".join(dict.fromkeys(tables)) if tables else "the relevant tables"
+                return (
+                    f"I need to gather the requested fields from {table_text}. "
+                    "I will run a read-only SQL query with mapped column names and type-aware filters."
+                )
+            return "I need to retrieve structured data with a read-only SQL query."
+
+        if tool_name == "execute_python":
+            code = str((parsed_input or {}).get("code") or "").strip()
+            if code:
+                return (
+                    "I need to compute derived metrics from the retrieved dataset. "
+                    "I will run a bounded Python script and validate input types first."
+                )
+            return "I need to run a bounded Python computation on the collected inputs."
+
         comments = {
             "get_article_by_id": "I will load the target article details first.",
-            "get_schema": "I will verify table/column mappings before querying.",
-            "execute_sql": "I will run a read-only SQL query to gather the required data.",
-            "get_python_capabilities": "I will check Python runtime capabilities before computing.",
-            "execute_python": "I will run a bounded Python calculation using the retrieved inputs.",
+            "get_python_capabilities": "I will verify runtime limits and available Python capabilities before computing.",
             "analyze_current_alert": "I will run deterministic alert analysis for the current alert.",
-            "get_current_alert_news": "I will fetch in-window news for the current alert.",
             "generate_current_alert_report": "I will generate the report artifact now.",
-            "list_files": "I will list available knowledge files relevant to this task.",
-            "read_file": "I will read the selected file for methodology details.",
+            "list_files": "I will enumerate available reference files relevant to this request.",
+            "write_file": "I will save the generated markdown artifact to the session report folder.",
             "search_web": "I will search web and news sources for supporting external context.",
             "scrape_websites": "I will scrape the selected URLs for detailed evidence.",
         }
@@ -307,7 +340,7 @@ Status: {ctx.status or "N/A"}
                     tool_started_at[tool_name] = time.time()
                     tool_input = event.get("data", {}).get("input")
                     yield (
-                        f"data: {json.dumps({'type': 'tool_start', 'tool': tool_name, 'input': _safe_preview(tool_input), 'commentary': _tool_commentary(tool_name)})}\n\n"
+                        f"data: {json.dumps({'type': 'tool_start', 'tool': tool_name, 'input': _safe_preview(tool_input), 'commentary': _tool_commentary(tool_name, tool_input)})}\n\n"
                     )
 
                 elif kind == "on_tool_end":

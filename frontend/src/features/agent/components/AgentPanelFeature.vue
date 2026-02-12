@@ -47,6 +47,34 @@ const prettyToolData = (value) => {
     return String(value);
   }
 };
+const isCodeTool = (name) => ['execute_sql', 'execute_python'].includes(name);
+const parseToolInput = (tool) => {
+  if (!tool?.input) return null;
+  try {
+    const parsed = JSON.parse(tool.input);
+    if (parsed && typeof parsed === 'object') return parsed;
+    return null;
+  } catch {
+    return null;
+  }
+};
+const toolCode = (tool) => {
+  const input = parseToolInput(tool);
+  if (!input) return '';
+  if (tool?.name === 'execute_sql') return String(input.query || '');
+  if (tool?.name === 'execute_python') return String(input.code || '');
+  return '';
+};
+const codeLabel = (tool) => (tool?.name === 'execute_sql' ? 'SQL Code' : 'Python Code');
+const copyToolCode = async (tool) => {
+  const code = toolCode(tool);
+  if (!code) return;
+  try {
+    await navigator.clipboard.writeText(code);
+  } catch {
+    // no-op
+  }
+};
 const messageSegments = (msg) => {
   if (msg?.segments?.length) return msg.segments;
   const segments = [];
@@ -170,14 +198,15 @@ const {
                     <div class="tool-section-title">Action</div>
                     <div class="tool-commentary">{{ segment.tool.commentary }}</div>
                   </div>
-                  <div v-if="segment.tool.input" class="tool-section">
-                    <div class="tool-section-title">Input</div>
-                    <pre class="tool-pre">{{ prettyToolData(segment.tool.input) }}</pre>
+
+                  <div v-if="isCodeTool(segment.tool.name) && toolCode(segment.tool)" class="tool-section">
+                    <div class="tool-code-header">
+                      <div class="tool-section-title">{{ codeLabel(segment.tool) }}</div>
+                      <button class="copy-code-btn" @click="copyToolCode(segment.tool)">Copy</button>
+                    </div>
+                    <pre class="tool-code">{{ toolCode(segment.tool) }}</pre>
                   </div>
-                  <div v-if="segment.tool.output" class="tool-section">
-                    <div class="tool-section-title">Output</div>
-                    <pre class="tool-pre">{{ prettyToolData(segment.tool.output) }}</pre>
-                  </div>
+
                   <div v-if="segment.tool.errorCode || segment.tool.errorMessage" class="tool-section tool-error">
                     <div class="tool-section-title">Error</div>
                     <div v-if="segment.tool.errorCode" class="tool-error-line">Code: {{ segment.tool.errorCode }}</div>
@@ -518,6 +547,44 @@ const {
   color: #e2e8f0;
   font-size: 11px;
   line-height: 1.4;
+  font-family: 'SF Mono', Monaco, Consolas, monospace;
+}
+
+.tool-code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.copy-code-btn {
+  border: 1px solid var(--color-border);
+  background: #0b1220;
+  color: #cbd5e1;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.copy-code-btn:hover {
+  background: #111b30;
+}
+
+.tool-code {
+  margin: 0;
+  max-width: 100%;
+  max-height: 220px;
+  overflow-x: auto;
+  overflow-y: auto;
+  white-space: pre;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid #1f2a44;
+  background: linear-gradient(180deg, #0d1526 0%, #0b1220 100%);
+  color: #e2e8f0;
+  font-size: 11px;
+  line-height: 1.45;
   font-family: 'SF Mono', Monaco, Consolas, monospace;
 }
 

@@ -1,5 +1,9 @@
-fix(agent_v2): use short provider-style tool_call ids for injected preflight calls
+feat(agent-ui): code-focused SQL/Python tool cards + context-aware tool action summaries
 
-- change schema preflight injected tool_call id format to `call_<12 hex>`
-- avoid OpenAI validation failure: max tool_call id length is 40 chars
-- add test assertions for id prefix and length in schema preflight test
+- update tool commentary generation in agent stream router to be input-aware
+  - execute_sql: references query intent and table usage
+  - read_file: references selected path
+  - execute_python: references bounded computation/type validation intent
+- for SQL/Python tool traces, show only read-only code block with Copy button
+- hide generic input/output blocks for non-code tools; keep Action + Error sections
+- style SQL/Python code display as editor-like read-only panel
