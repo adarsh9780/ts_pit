@@ -26,12 +26,15 @@ def get_prices(
     start_date: str = Query(None),
     end_date: str = Query(None),
 ):
+    effective_period = period or "1y"
     if start_date and end_date:
         start_date_str, actual_ticker = fetch_and_cache_prices(
             ticker, "1y", start_date, end_date
         )
     else:
-        start_date_str, actual_ticker = fetch_and_cache_prices(ticker, period or "1y")
+        start_date_str, actual_ticker = fetch_and_cache_prices(
+            ticker, effective_period
+        )
 
     table_name = config.get_table_name("prices")
     prices_table = get_table(table_name)
@@ -89,7 +92,7 @@ def get_prices(
                     etf_ticker, "1y", start_date, end_date, is_etf=True
                 )
             else:
-                fetch_and_cache_prices(etf_ticker, period, is_etf=True)
+                fetch_and_cache_prices(etf_ticker, effective_period, is_etf=True)
 
             stmt_etf = (
                 select(*price_select_cols)

@@ -32,8 +32,13 @@ init_logger()
 
 
 def _load_agent_workflow():
-    mode = config.get_agent_mode()
-    module_name = ".agent.graph" if mode == "v1" else ".agent_v2.graph"
+    mode = config.get_agent_version()
+    mode_to_module = {
+        "v1": ".agent.graph",
+        "v2": ".agent_v2.graph",
+        "v3": ".agent_v3.graph",
+    }
+    module_name = mode_to_module.get(mode, ".agent_v2.graph")
     try:
         module = import_module(module_name, package=__package__)
     except Exception as e:
@@ -73,8 +78,8 @@ async def lifespan(app: FastAPI):
     logprint("Initializing LLM model...")
     app.state.llm = get_llm_model()
 
-    if config.get_agent_mode() == "v2":
-        py_exec_cfg = config.get_agent_v2_safe_py_runner_config()
+    if config.get_agent_version() in {"v2", "v3"}:
+        py_exec_cfg = config.get_agent_safe_py_runner_config()
         if py_exec_cfg.get("enabled", False):
             py_exec_path = ensure_python_runtime(py_exec_cfg)
             logprint(

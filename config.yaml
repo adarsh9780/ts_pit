@@ -248,15 +248,15 @@ proxy:
   # This disables SSL verification for external tools (DuckDuckGo, Scraper)
   ssl_verify: true
 
-# Agent Runtime Selection
-# =======================
-# Switch between existing agent runtime implementations.
-# - v1: current production graph (backend/agent)
-# - v2: experimental graph entrypoint (backend/agent_v2)
+# Agent Configuration
+# ===================
+# Unified agent configuration. Set `version` to switch runtime.
+# - v1: original graph (backend/agent)
+# - v2: experimental graph (backend/agent_v2)
+# - v3: clean-slate graph (backend/agent_v3)
 agent:
-  mode: "v2"
+  version: "v3"
 
-agent_v2:
   retries:
     # Number of autonomous retry turns after a tool returns {"ok": false}.
     # 0 disables retry-after-error behavior.
@@ -287,7 +287,7 @@ agent_v2:
     max_read_bytes: 1048576
 
   safe_py_runner:
-    enabled: true
+    enabled: false
     timeout_seconds: 30
     memory_limit_mb: 256
     max_output_kb: 128
@@ -333,7 +333,12 @@ logging:
   # Rotating log file pattern (Loguru format placeholders are supported).
   file_pattern: "app_{time:YYYYMMDD}.jsonl"
   # Default log level; can be overridden with LOG_LEVEL env var.
-  level: "INFO"
+  # This acts as the default for both console and file if specific levels aren't set.
+  level: "ERROR"
+  
+  # Optional: Fine-grained control overrides 'level' above
+  # console_level: "INFO"    # Level for console output
+  # file_level: "ERROR"      # Level for file output
   rotation: "10 MB"
   retention: "14 days"
   compression: "zip"

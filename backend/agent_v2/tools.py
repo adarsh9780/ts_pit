@@ -100,7 +100,9 @@ def _logical_to_physical_column_map_for_query(query: str) -> dict[str, str]:
 
     candidates: dict[str, set[str]] = {}
     for table_key in table_keys:
-        for logical, physical in _table_logical_to_physical_column_map(table_key).items():
+        for logical, physical in _table_logical_to_physical_column_map(
+            table_key
+        ).items():
             candidates.setdefault(logical, set()).add(physical)
 
     resolved: dict[str, str] = {}
@@ -157,7 +159,17 @@ def _load_schema_text() -> str:
 
 DB_SCHEMA = _load_schema_text()
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-TEXT_FALLBACK_EXTENSIONS = {".md", ".txt", ".csv", ".json", ".yaml", ".yml", ".log", ".sql", ".py"}
+TEXT_FALLBACK_EXTENSIONS = {
+    ".md",
+    ".txt",
+    ".csv",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".log",
+    ".sql",
+    ".py",
+}
 
 
 def list_schema_tables() -> list[dict[str, Any]]:
@@ -304,7 +316,7 @@ execute_sql.__doc__ = execute_sql.__doc__.format(db_schema=DB_SCHEMA)
 
 
 def _fs_cfg() -> dict[str, Any]:
-    return get_config().get_agent_v2_filesystem_config()
+    return get_config().get_agent_filesystem_config()
 
 
 def _allowed_roots() -> list[Path]:
@@ -392,20 +404,28 @@ def list_files(path: str = "artifacts") -> str:
     """
     base = _resolve_allowed_path(path, must_exist=True)
     if base is None or not base.exists():
-        return _error(f"Path not found or not allowed: {path}", code="FS_PATH_NOT_ALLOWED")
+        return _error(
+            f"Path not found or not allowed: {path}", code="FS_PATH_NOT_ALLOWED"
+        )
     if not base.is_dir():
         return _error(f"Path is not a directory: {path}", code="FS_NOT_DIRECTORY")
 
     max_depth = int(_fs_cfg().get("max_depth", 1))
     rows: list[dict[str, Any]] = []
     try:
-        for item in sorted(base.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+        for item in sorted(
+            base.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())
+        ):
             depth = None
             root_label = None
             for root in _allowed_roots():
                 try:
                     depth = _path_depth_from_root(item.resolve(), root)
-                    root_label = str(root.relative_to(PROJECT_ROOT)) if str(root).startswith(str(PROJECT_ROOT)) else str(root)
+                    root_label = (
+                        str(root.relative_to(PROJECT_ROOT))
+                        if str(root).startswith(str(PROJECT_ROOT))
+                        else str(root)
+                    )
                     break
                 except Exception:
                     continue
@@ -433,11 +453,16 @@ def read_file(path: str) -> str:
     """
     target = _resolve_allowed_path(path, must_exist=True)
     if target is None or not target.is_file():
-        return _error(f"File not found or not allowed: {path}", code="FS_READ_NOT_ALLOWED")
+        return _error(
+            f"File not found or not allowed: {path}", code="FS_READ_NOT_ALLOWED"
+        )
 
     ext = target.suffix.lower()
     if ext not in _allowed_read_extensions():
-        return _error(f"File extension not allowed for read: {ext}", code="FS_READ_EXTENSION_BLOCKED")
+        return _error(
+            f"File extension not allowed for read: {ext}",
+            code="FS_READ_EXTENSION_BLOCKED",
+        )
 
     max_bytes = int(_fs_cfg().get("max_read_bytes", 1024 * 1024))
     try:
@@ -468,7 +493,10 @@ def write_file(path: str, content: str) -> str:
 
     ext = target.suffix.lower()
     if ext not in _allowed_write_extensions():
-        return _error(f"File extension not allowed for write: {ext}", code="FS_WRITE_EXTENSION_BLOCKED")
+        return _error(
+            f"File extension not allowed for write: {ext}",
+            code="FS_WRITE_EXTENSION_BLOCKED",
+        )
     if not _is_session_scoped_artifact_write_path(target):
         return _error(
             "Writes must be under artifacts/reports/<session_id>/<filename>.md",
@@ -478,7 +506,12 @@ def write_file(path: str, content: str) -> str:
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(str(content), encoding="utf-8")
-        return _ok({"path": str(target.relative_to(PROJECT_ROOT)), "bytes_written": len(str(content).encode("utf-8"))})
+        return _ok(
+            {
+                "path": str(target.relative_to(PROJECT_ROOT)),
+                "bytes_written": len(str(content).encode("utf-8")),
+            }
+        )
     except Exception as e:
         return _error(f"Failed to write file: {e}", code="FS_WRITE_ERROR")
 
@@ -514,9 +547,11 @@ def get_article_by_id(article_id: str) -> str:
         matched_value = None
         for value in probe_values:
             for candidate_col in id_candidates:
-                stmt = select(*[cast(c, Text).label(c.name) for c in articles.columns]).where(
-                    cast(articles.c[candidate_col], Text) == str(value)
-                ).limit(1)
+                stmt = (
+                    select(*[cast(c, Text).label(c.name) for c in articles.columns])
+                    .where(cast(articles.c[candidate_col], Text) == str(value))
+                    .limit(1)
+                )
                 with engine.connect() as conn:
                     found = conn.execute(stmt).mappings().first()
                 if found:
@@ -535,13 +570,17 @@ def get_article_by_id(article_id: str) -> str:
         body_present = isinstance(body_value, str) and body_value.strip() != ""
 
         data = {
-            "id": remapped.get("id") or remapped.get("article_id") or remapped.get("art_id"),
+            "id": remapped.get("id")
+            or remapped.get("article_id")
+            or remapped.get("art_id"),
             "title": remapped.get("title"),
             "created_date": remapped.get("created_date"),
             "theme": remapped.get("theme"),
             "sentiment": remapped.get("sentiment"),
             "summary": remapped.get("summary"),
-            "url": remapped.get("url") or remapped.get("article_url") or remapped.get("link"),
+            "url": remapped.get("url")
+            or remapped.get("article_url")
+            or remapped.get("link"),
             "isin": remapped.get("isin"),
             "impact_score": remapped.get("impact_score"),
             "impact_label": remapped.get("impact_label"),
@@ -556,7 +595,9 @@ def get_article_by_id(article_id: str) -> str:
             matched_id_value=matched_value,
         )
     except Exception as e:
-        return _error(f"Error fetching article by id: {str(e)}", code="ARTICLE_FETCH_ERROR")
+        return _error(
+            f"Error fetching article by id: {str(e)}", code="ARTICLE_FETCH_ERROR"
+        )
 
 
 @tool
@@ -573,7 +614,9 @@ def analyze_current_alert(alert_id: str) -> str:
             conn=conn, config=get_config(), alert_id=alert_id, llm=llm
         )
         if not analysis.get("ok"):
-            return _error(analysis.get("error", "Analysis failed"), code="ANALYSIS_ERROR")
+            return _error(
+                analysis.get("error", "Analysis failed"), code="ANALYSIS_ERROR"
+            )
 
         return _ok(
             {
@@ -613,7 +656,9 @@ def generate_current_alert_report(
             include_web_news=include_web_news,
         )
         if not result.get("ok"):
-            return _error(result.get("error", "Report generation failed"), code="REPORT_ERROR")
+            return _error(
+                result.get("error", "Report generation failed"), code="REPORT_ERROR"
+            )
         return _ok(result, message="Report generated")
     except Exception as e:
         return _error(f"Error generating report: {str(e)}", code="REPORT_ERROR")
@@ -631,7 +676,7 @@ def execute_python(code: str, input_data_json: str = "{}") -> str:
     - Assign final output to variable `result`.
     - Optional prints are captured in stdout.
     """
-    cfg = get_config().get_agent_v2_safe_py_runner_config()
+    cfg = get_config().get_agent_safe_py_runner_config()
     if not cfg.get("enabled", False):
         return _error(
             "execute_python is disabled. Enable agent_v2.safe_py_runner.enabled in config.yaml.",
@@ -672,7 +717,9 @@ def execute_python(code: str, input_data_json: str = "{}") -> str:
         extra_globals={
             "input_data_json": json.dumps(input_data),
             "input_data_dict": input_data,
-            "input_rows": input_data.get("rows", []) if isinstance(input_data, dict) else [],
+            "input_rows": input_data.get("rows", [])
+            if isinstance(input_data, dict)
+            else [],
         },
     )
     try:
@@ -689,7 +736,9 @@ def execute_python(code: str, input_data_json: str = "{}") -> str:
 
     if not result.ok:
         error_text = result.error or "Python execution failed"
-        if ("is not allowed" in error_text or "blocked by policy" in error_text) and "Import '" in error_text:
+        if (
+            "is not allowed" in error_text or "blocked by policy" in error_text
+        ) and "Import '" in error_text:
             error_text = (
                 f"{error_text}. Add this module to "
                 "agent_v2.safe_py_runner.blocked_imports (or remove it there) in config.yaml."
@@ -727,11 +776,17 @@ def get_python_capabilities() -> str:
     - available/allowed imports
     - execution limits
     """
-    cfg = get_config().get_agent_v2_safe_py_runner_config()
+    cfg = get_config().get_agent_safe_py_runner_config()
     enabled = bool(cfg.get("enabled", False))
-    required_imports = [str(x).strip() for x in cfg.get("required_imports", []) if str(x).strip()]
-    blocked_imports = [str(x).strip() for x in cfg.get("blocked_imports", []) if str(x).strip()]
-    blocked_builtins = [str(x).strip() for x in cfg.get("blocked_builtins", []) if str(x).strip()]
+    required_imports = [
+        str(x).strip() for x in cfg.get("required_imports", []) if str(x).strip()
+    ]
+    blocked_imports = [
+        str(x).strip() for x in cfg.get("blocked_imports", []) if str(x).strip()
+    ]
+    blocked_builtins = [
+        str(x).strip() for x in cfg.get("blocked_builtins", []) if str(x).strip()
+    ]
 
     data = {
         "enabled": enabled,
@@ -801,9 +856,15 @@ async def search_web_news(
                     return ""
                 html = await response.text()
                 soup = BeautifulSoup(html, "html.parser")
-                for elem in soup(["script", "style", "nav", "header", "footer", "aside", "form"]):
+                for elem in soup(
+                    ["script", "style", "nav", "header", "footer", "aside", "form"]
+                ):
                     elem.extract()
-                text_blob = " ".join(line.strip() for line in soup.get_text().splitlines() if line.strip())
+                text_blob = " ".join(
+                    line.strip()
+                    for line in soup.get_text().splitlines()
+                    if line.strip()
+                )
                 return text_blob[:max_content_chars]
         except Exception:
             return ""
@@ -862,7 +923,9 @@ async def search_web_news(
             )
         return _ok(final_results, query=query, row_count=len(final_results))
     except Exception as e:
-        return _error(f"Error searching web news: {str(e)}", code="WEB_NEWS_ERROR", query=query)
+        return _error(
+            f"Error searching web news: {str(e)}", code="WEB_NEWS_ERROR", query=query
+        )
 
 
 @tool
@@ -946,7 +1009,9 @@ async def search_web(query: str, max_results: int = 5) -> str:
             news_count=len(news_results),
         )
     except Exception as e:
-        return _error(f"Error searching web: {str(e)}", code="WEB_SEARCH_ERROR", query=query)
+        return _error(
+            f"Error searching web: {str(e)}", code="WEB_SEARCH_ERROR", query=query
+        )
 
 
 @tool
@@ -978,7 +1043,9 @@ async def scrape_websites(urls: list[str]) -> str:
                     return url, f"[Error: HTTP {response.status}]"
                 html = await response.text()
                 soup = BeautifulSoup(html, "html.parser")
-                for element in soup(["script", "style", "nav", "header", "footer", "aside"]):
+                for element in soup(
+                    ["script", "style", "nav", "header", "footer", "aside"]
+                ):
                     element.extract()
                 text_blob = "\n".join(
                     chunk.strip()

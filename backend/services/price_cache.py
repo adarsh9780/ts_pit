@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from datetime import date, datetime
+
 from sqlalchemy import Text, and_, cast, func, inspect, select, update
+from sqlalchemy.sql.sqltypes import Date
 
 from ..config import get_config
 from ..db import get_engine
@@ -9,6 +12,25 @@ from .db_helpers import get_table
 
 config = get_config()
 engine = get_engine()
+
+
+def _coerce_price_date(value, expects_date: bool):
+    """Normalize price date values to DB-compatible python objects."""
+    if not expects_date:
+        return value
+
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if isinstance(value, datetime):
+        return value.date()
+    if hasattr(value, "to_pydatetime"):
+        try:
+            return value.to_pydatetime().date()
+        except Exception:
+            pass
+    if isinstance(value, str):
+        return datetime.fromisoformat(value).date()
+    raise TypeError(f"Unsupported date value type for DATE column: {type(value)!r}")
 
 
 def _price_cols():
@@ -101,12 +123,14 @@ def clear_ticker_prices(cursor, ticker: str):
 def upsert_price_rows(cursor, ticker: str, hist, industry: str):
     c = _price_cols()
     prices = get_table(c["table"])
+    expects_date = isinstance(prices.c[c["date"]].type, Date)
     data_to_insert: list[dict[str, object]] = []
     for _, r in hist.iterrows():
+        normalized_date = _coerce_price_date(r["Date"], expects_date)
         data_to_insert.append(
             {
                 c["ticker"]: ticker,
-                c["date"]: r["Date"],
+                c["date"]: normalized_date,
                 c["open"]: r["Open"],
                 c["high"]: r["High"],
                 c["low"]: r["Low"],

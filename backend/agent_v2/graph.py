@@ -446,7 +446,7 @@ def _diagnostic_exists_since_last_tool(messages: list) -> bool:
 
 
 def _max_tool_error_retries() -> int:
-    cfg = get_config().get_agent_v2_retry_config()
+    cfg = get_config().get_agent_retry_config()
     try:
         return max(0, int(cfg.get("max_tool_error_retries", 1)))
     except Exception:
@@ -461,7 +461,16 @@ def _conversation_messages(state: AgentV2State, include_tool: bool = False) -> l
 
 def _ai_tool_call_ids(message) -> set[str]:
     ids: set[str] = set()
-    for call in getattr(message, "tool_calls", None) or []:
+    # Check standard tool_calls and invalid_tool_calls
+    raw_calls = list(getattr(message, "tool_calls", None) or [])
+    raw_calls.extend(getattr(message, "invalid_tool_calls", None) or [])
+
+    # Check for legacy/raw tool calls in additional_kwargs
+    additional = getattr(message, "additional_kwargs", None) or {}
+    if "tool_calls" in additional and isinstance(additional["tool_calls"], list):
+        raw_calls.extend(additional["tool_calls"])
+
+    for call in raw_calls:
         if isinstance(call, dict):
             call_id = call.get("id")
         else:
@@ -519,13 +528,19 @@ def _sanitize_tool_sequence(messages: list) -> list:
 
 
 def _recent_dialogue(messages: list, window: int = RECENT_MESSAGES_WINDOW) -> list:
-    if len(messages) <= window:
-        return _sanitize_tool_sequence(list(messages))
+    # 1. Determine naive start index based on window
+    start_idx = max(0, len(messages) - window)
 
-    start_idx = len(messages) - window
-    # Do not start the slice at a tool message; pull left to include its parent AI tool_calls message.
-    while start_idx > 0 and getattr(messages[start_idx], "type", "") == "tool":
-        start_idx -= 1
+    # 2. Ensure we start on a Human message (user turn) to avoid orphaned AI responses.
+    #    Use a while loop to advance start_idx until we find a human/user message.
+    while start_idx < len(messages):
+        m = messages[start_idx]
+        m_type = getattr(m, "type", "")
+        if m_type in {"human", "user"}:
+            break
+        start_idx += 1
+
+    # 3. Sanitize the subsequence to ensure tool call integrity
     return _sanitize_tool_sequence(list(messages[start_idx:]))
 
 
@@ -824,7 +839,7 @@ def load_context(state: AgentV2State, config: RunnableConfig) -> dict:
 
     # Automatically expose Python runtime capabilities from config so the model
     # knows what libraries/imports are actually allowed.
-    py_cfg = get_config().get_agent_v2_safe_py_runner_config()
+    py_cfg = get_config().get_agent_safe_py_runner_config()
     py_enabled = bool(py_cfg.get("enabled", False))
     if py_enabled:
         blocked_imports = [

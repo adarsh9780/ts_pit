@@ -322,15 +322,15 @@ export function useAgentChat(alertIdRef) {
     try {
       const alertContext = alertInfo.value
         ? {
-            id: alertInfo.value.id,
-            ticker: alertInfo.value.ticker,
-            isin: alertInfo.value.isin,
-            start_date: alertInfo.value.start_date,
-            end_date: alertInfo.value.end_date,
-            instrument_name: alertInfo.value.instrument_name,
-            trade_type: alertInfo.value.trade_type,
-            status: alertInfo.value.status,
-          }
+          id: alertInfo.value.id,
+          ticker: alertInfo.value.ticker,
+          isin: alertInfo.value.isin,
+          start_date: alertInfo.value.start_date,
+          end_date: alertInfo.value.end_date,
+          instrument_name: alertInfo.value.instrument_name,
+          trade_type: alertInfo.value.trade_type,
+          status: alertInfo.value.status,
+        }
         : null;
 
       const response = await fetch(getAgentChatUrl(), {
@@ -349,17 +349,29 @@ export function useAgentChat(alertIdRef) {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
 
+      console.log('Starting stream read loop');
+      let buffer = '';
+
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          console.log('Stream done');
+          break;
+        }
 
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n\n');
+        const text = decoder.decode(value, { stream: true });
+        console.log('Received chunk:', text.length, 'chars');
+        buffer += text;
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop() || '';
+
+        console.log('Processing lines:', lines.length, 'Buffer remainder:', buffer.length);
 
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
           try {
             const data = JSON.parse(line.slice(6));
+            console.log('Parsed data type:', data.type);
 
             if (data.type === 'token') {
               const msg = messages.value[agentMsgIndex];
@@ -410,7 +422,10 @@ export function useAgentChat(alertIdRef) {
             }
 
             await scrollToBottom();
-          } catch {
+            // Force UI update
+            await nextTick();
+          } catch (e) {
+            console.error('JSON parse error:', e, 'Line:', line);
             // ignore partial chunk JSON parse failures
           }
         }

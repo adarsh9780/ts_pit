@@ -26,6 +26,51 @@ START_BOUND = "2025-10-01"
 END_BOUND = "2026-01-31"
 
 
+def ensure_alert_analysis_table(cursor):
+    """Ensure startup-required alert_analysis table exists with required columns."""
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS "alert_analysis" (
+            "id" INTEGER PRIMARY KEY AUTOINCREMENT,
+            "alert_id" TEXT NOT NULL,
+            "generated_at" TEXT NOT NULL,
+            "source" TEXT NOT NULL DEFAULT 'dummy_seed',
+            "narrative_theme" TEXT,
+            "narrative_summary" TEXT,
+            "bullish_events" TEXT,
+            "bearish_events" TEXT,
+            "neutral_events" TEXT,
+            "recommendation" TEXT,
+            "recommendation_reason" TEXT
+        )
+        """
+    )
+    cursor.execute(
+        'CREATE INDEX IF NOT EXISTS "idx_alert_analysis_alert_id_generated_at" '
+        'ON "alert_analysis" ("alert_id", "generated_at" DESC)'
+    )
+
+    # Keep old databases compatible by adding any missing columns.
+    cursor.execute('PRAGMA table_info("alert_analysis")')
+    existing = {row[1] for row in cursor.fetchall()}
+    for column_name in [
+        "alert_id",
+        "generated_at",
+        "source",
+        "narrative_theme",
+        "narrative_summary",
+        "bullish_events",
+        "bearish_events",
+        "neutral_events",
+        "recommendation",
+        "recommendation_reason",
+    ]:
+        if column_name not in existing:
+            cursor.execute(
+                f'ALTER TABLE "alert_analysis" ADD COLUMN "{column_name}" TEXT'
+            )
+
+
 def load_config(config_path):
     try:
         with open(config_path, "r") as f:
@@ -118,6 +163,10 @@ def main():
         cursor.execute(f"CREATE TABLE {t_info['name']} ({', '.join(col_defs)})")
         print(f"{Fore.GREEN}[✓] Schema Created: {t_info['name']} (PK Set)")
 
+    # Runtime requires this table even though it is not config-driven.
+    ensure_alert_analysis_table(cursor)
+    print(f"{Fore.GREEN}[✓] Schema Created: alert_analysis")
+
     # 2. Market Data Processing
     tickers = ["AAPL", "TSLA", "MSFT", "NVDA", "JPM"]
     if any(k in selected_keys for k in ["prices", "prices_hourly"]):
@@ -175,6 +224,25 @@ def main():
                     alt["columns"][
                         "narrative_summary"
                     ]: f"Detected movement in {ticker}.",
+                },
+            )
+
+            insert_dynamic(
+                cursor,
+                "alert_analysis",
+                {
+                    "alert_id": str(i),
+                    "generated_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                    "source": "dummy_seed",
+                    "narrative_theme": random.choice(
+                        ["Regulatory scrutiny", "Earnings surprise", "Sector rotation"]
+                    ),
+                    "narrative_summary": f"Dummy analysis summary for alert {i}.",
+                    "bullish_events": fake.sentence(nb_words=8),
+                    "bearish_events": fake.sentence(nb_words=8),
+                    "neutral_events": fake.sentence(nb_words=8),
+                    "recommendation": random.choice(["ESCALATE_L2", "NEEDS_REVIEW"]),
+                    "recommendation_reason": fake.sentence(nb_words=10),
                 },
             )
 

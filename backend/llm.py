@@ -26,6 +26,9 @@ except ImportError:
                 "AzureOpenAIModel logic not provided by user yet."
             )
 
+        def with_structured_output(self, schema):
+            return self
+
 
 # Import LangChain's init_chat_model for Gemini
 try:

@@ -1,11 +1,17 @@
-feat(agent_v2): zero-duplicate validation flow via route_after_tools
+fix(prices): coerce yfinance date strings for DATE columns in price upsert
 
-Refactored graph wiring to intercept empty/failed tool outputs *before* the agent sees them.
+Root cause:
+- `prices.date` is typed as `DATE` in some DB schemas, but `upsert_price_rows` inserted ISO strings from yfinance (`YYYY-MM-DD`).
+- SQLite DATE binding requires Python `date` objects, which caused:
+  `TypeError: SQLite Date type only accepts Python date objects as input.`
 
-Previously, the agent would see an empty result, generate a "No data" text output, THEN `should_continue` would route to diagnosis, causing a second "No data" response after the retry (and potentially looping).
+Changes:
+- Added date normalization in `backend/services/price_cache.py`:
+  - Detect when target `prices.date` column type is SQLAlchemy `Date`.
+  - Coerce incoming values to Python `date` (`datetime`, pandas timestamp-like, ISO string supported).
+  - Keep existing behavior unchanged for non-Date columns.
+- Added regression test `tests/services/test_price_cache.py` to verify ISO string dates are inserted successfully into a `DATE` column.
 
-New `route_after_tools` conditional edge detects the need for diagnosis immediately after tool execution. If diagnosis is needed (and retries remain), it routes to `diagnose_empty_result`, injects the guidance, and THEN the agent runs. This ensures the agent has the diagnostic context for its *first* response attempt in that cycle, eliminating the "No data" text duplication entirely.
-
-Also cleaned up graph wiring to remove duplicate edge definitions.
-Updated tests to verify `route_after_tools` logic.
-All 50 tests passing.
+Validation:
+- `uv run -m unittest tests/services/test_price_cache.py` (pass)
+- `uv run -m unittest tests/api/test_agent_streaming.py tests/api/test_market_prices.py tests/services/test_price_cache.py` (pass)

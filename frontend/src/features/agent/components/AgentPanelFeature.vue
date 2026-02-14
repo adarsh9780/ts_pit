@@ -432,6 +432,8 @@ const {
   border-radius: 8px;
   font-size: var(--font-size-sm);
   line-height: 1.4;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .message.user {
@@ -610,7 +612,8 @@ const {
   max-height: 220px;
   overflow-x: auto;
   overflow-y: auto;
-  white-space: pre;
+  white-space: pre-wrap;
+  word-break: break-word; /* Ensure long identifiers wrap */
   padding: 10px;
   border-radius: 6px;
   border: 1px solid #1f2a44;
@@ -660,6 +663,8 @@ const {
 .tool-error-line {
   font-size: 12px;
   color: #991b1b;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 @keyframes pulse {

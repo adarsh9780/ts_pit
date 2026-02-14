@@ -36,6 +36,8 @@ def _get_logging_settings() -> dict[str, Any]:
         "dir": _resolve_log_dir(str(cfg.get("dir", "~/.ts_pit/logs"))),
         "file_pattern": str(cfg.get("file_pattern", "app_{time:YYYYMMDD}.jsonl")),
         "level": level,
+        "console_level": str(cfg.get("console_level", level)),
+        "file_level": str(cfg.get("file_level", level)),
         "rotation": str(cfg.get("rotation", "10 MB")),
         "retention": str(cfg.get("retention", "14 days")),
         "compression": str(cfg.get("compression", "zip")),
@@ -61,10 +63,10 @@ def init_logger() -> None:
         _logger.add(
             sys.stdout,
             colorize=True,
-            backtrace=False,
-            diagnose=False,
+            backtrace=True,
+            diagnose=True,
             enqueue=True,
-            level=settings["level"],
+            level=settings["console_level"],
             filter=lambda record: record["extra"].get("to_console", True),
             format=(
                 "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
@@ -80,10 +82,12 @@ def init_logger() -> None:
             rotation=settings["rotation"],
             retention=settings["retention"],
             compression=settings["compression"],
-            level=settings["level"],
+            level=settings["file_level"],
             enqueue=True,
             filter=lambda record: record["extra"].get("to_file", True),
             serialize=True,
+            backtrace=True,
+            diagnose=True,
         )
 
         _configured = True
@@ -102,6 +106,7 @@ def logprint(
 
     message = " ".join(str(a) for a in args)
     bind_kwargs = dict(**extra)
+    exception = bind_kwargs.pop("exception", None)
     if "request_id" not in bind_kwargs:
         bind_kwargs["request_id"] = "-"
     if to_console is not None:
@@ -110,7 +115,9 @@ def logprint(
         bind_kwargs["to_file"] = bool(to_file)
     bind_kwargs.pop("caller_depth", None)
 
-    _logger.opt(depth=max(1, int(caller_depth))).bind(**bind_kwargs).log(level.upper(), message)
+    _logger.opt(depth=max(1, int(caller_depth)), exception=exception).bind(
+        **bind_kwargs
+    ).log(level.upper(), message)
 
 
 def patch_print() -> None:

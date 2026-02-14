@@ -28,7 +28,9 @@ def _looks_like_code_submission(text_value: str) -> bool:
 
     if re.search(r"\bselect\b[\s\S]{0,240}\bfrom\b", lowered):
         return True
-    if re.search(r"^\s*(with|select|insert|update|delete|create|drop|alter)\b", lowered):
+    if re.search(
+        r"^\s*(with|select|insert|update|delete|create|drop|alter)\b", lowered
+    ):
         return True
 
     py_patterns = [
@@ -41,7 +43,15 @@ def _looks_like_code_submission(text_value: str) -> bool:
         r"^\s*if\s+.+:",
         r"^\s*print\s*\(",
     ]
-    return any(re.search(pattern, txt, flags=re.IGNORECASE | re.MULTILINE) for pattern in py_patterns)
+    return any(
+        re.search(pattern, txt, flags=re.IGNORECASE | re.MULTILINE)
+        for pattern in py_patterns
+    )
+
+
+def _should_stream_model_chunk(event: dict) -> bool:
+    node_name = event.get("metadata", {}).get("langgraph_node")
+    return node_name in {"agent", "direct_answer"}
 
 
 class AlertContext(BaseModel):
@@ -195,7 +205,9 @@ async def get_chat_history(
                 normalized_events.append(
                     {
                         "kind": "assistant",
-                        "content": assistant_content.strip() if isinstance(assistant_content, str) else "",
+                        "content": assistant_content.strip()
+                        if isinstance(assistant_content, str)
+                        else "",
                         "tools": tool_calls,
                     }
                 )
@@ -267,7 +279,9 @@ async def get_chat_history(
 
                 for tool in event.get("tools", []):
                     turn_tool_seq += 1
-                    tool_id = str(tool.get("id") or f"{tool.get('name', 'tool')}-{turn_tool_seq}")
+                    tool_id = str(
+                        tool.get("id") or f"{tool.get('name', 'tool')}-{turn_tool_seq}"
+                    )
                     if tool_id in turn_tools_map:
                         continue
                     turn_tools_map[tool_id] = tool
@@ -296,7 +310,12 @@ async def get_chat_history(
         }
 
     except Exception as e:
-        logprint("Failed to fetch chat history", level="ERROR", session_id=session_id, error=str(e))
+        logprint(
+            "Failed to fetch chat history",
+            level="ERROR",
+            session_id=session_id,
+            exception=e,
+        )
         return {
             "messages": [],
             "pagination": {
@@ -333,10 +352,21 @@ async def delete_chat_history(session_id: str, request: Request):
                     pass
             await conn.commit()
 
-        return {"status": "deleted", "session_id": session_id, "deleted_rows": deleted_count}
+        return {
+            "status": "deleted",
+            "session_id": session_id,
+            "deleted_rows": deleted_count,
+        }
     except Exception as e:
-        logprint("Failed to delete chat history", level="ERROR", session_id=session_id, error=str(e))
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        logprint(
+            "Failed to delete chat history",
+            level="ERROR",
+            session_id=session_id,
+            exception=e,
+        )
+        return JSONResponse(
+            status_code=500, content={"status": "error", "message": str(e)}
+        )
 
 
 @router.post("/agent/chat")
@@ -351,7 +381,9 @@ async def chat_agent(request: Request, body: ChatRequest):
             yield f"data: {json.dumps({'type': 'token', 'content': refusal})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
-        return StreamingResponse(rejection_event_generator(), media_type="text/event-stream")
+        return StreamingResponse(
+            rejection_event_generator(), media_type="text/event-stream"
+        )
 
     agent = request.app.state.agent
     run_config = {"configurable": {"thread_id": body.session_id}}
@@ -447,8 +479,14 @@ Status: {ctx.status or "N/A"}
         if tool_name == "execute_sql":
             query = str((parsed_input or {}).get("query") or "").strip()
             if query:
-                tables = re.findall(r"\b(?:from|join)\s+([A-Za-z_][\w.]*)", query, flags=re.IGNORECASE)
-                table_text = ", ".join(dict.fromkeys(tables)) if tables else "the relevant tables"
+                tables = re.findall(
+                    r"\b(?:from|join)\s+([A-Za-z_][\w.]*)", query, flags=re.IGNORECASE
+                )
+                table_text = (
+                    ", ".join(dict.fromkeys(tables))
+                    if tables
+                    else "the relevant tables"
+                )
                 return (
                     f"I need to gather the requested fields from {table_text}. "
                     "I will run a read-only SQL query with mapped column names and type-aware filters."
@@ -479,10 +517,12 @@ Status: {ctx.status or "N/A"}
     async def event_generator():
         tool_started_at: dict[str, float] = {}
         try:
-            async for event in agent.astream_events(input_state, run_config, version="v1"):
+            async for event in agent.astream_events(
+                input_state, run_config, version="v1"
+            ):
                 kind = event["event"]
                 if kind == "on_chat_model_stream":
-                    if event.get("metadata", {}).get("langgraph_node") != "agent":
+                    if not _should_stream_model_chunk(event):
                         continue
 
                     chunk = event["data"]["chunk"]
@@ -519,7 +559,10 @@ Status: {ctx.status or "N/A"}
                     error_code = None
                     error_message = None
                     parsed_output = _parse_tool_json_payload(tool_output)
-                    if isinstance(parsed_output, dict) and parsed_output.get("ok") is False:
+                    if (
+                        isinstance(parsed_output, dict)
+                        and parsed_output.get("ok") is False
+                    ):
                         ok = False
                         err = parsed_output.get("error") or {}
                         if isinstance(err, dict):
@@ -528,16 +571,15 @@ Status: {ctx.status or "N/A"}
                         else:
                             error_message = str(err)
                         logprint(
-                            "Tool execution returned error payload",
+                            f"Tool execution returned error payload: {error_message}",
                             level="ERROR",
                             session_id=body.session_id,
                             tool=tool_name,
                             error_code=error_code,
                             error_message=error_message,
                         )
-                    if (
-                        tool_name == "generate_current_alert_report"
-                        and isinstance(tool_output, str)
+                    if tool_name == "generate_current_alert_report" and isinstance(
+                        tool_output, str
                     ):
                         try:
                             parsed = json.loads(tool_output)
@@ -554,7 +596,12 @@ Status: {ctx.status or "N/A"}
 
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
         except Exception as e:
-            logprint("Agent stream error", level="ERROR", session_id=body.session_id, error=str(e))
+            logprint(
+                "Agent stream error",
+                level="ERROR",
+                session_id=body.session_id,
+                exception=e,
+            )
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")

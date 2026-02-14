@@ -202,18 +202,27 @@ class Config:
             return defaults
         merged = dict(defaults)
         merged.update(cfg)
+
+        # Fallback logic: if specific levels aren't set, use the global level
+        if "console_level" not in merged:
+            merged["console_level"] = merged.get("level", "INFO")
+        if "file_level" not in merged:
+            merged["file_level"] = merged.get("level", "INFO")
+
         return merged
 
-    def get_agent_mode(self) -> str:
-        """Get configured agent runtime mode."""
+    def get_agent_version(self) -> str:
+        """Get configured agent runtime version."""
         agent_cfg = self._config.get("agent", {})
-        mode = str(agent_cfg.get("mode", "v1")).strip().lower()
-        if mode not in {"v1", "v2"}:
-            raise ValueError("Invalid agent.mode in config.yaml. Expected one of: v1, v2")
-        return mode
+        version = str(agent_cfg.get("version", "v1")).strip().lower()
+        if version not in {"v1", "v2", "v3"}:
+            raise ValueError(
+                "Invalid agent.version in config.yaml. Expected one of: v1, v2, v3"
+            )
+        return version
 
-    def get_agent_v2_safe_py_runner_config(self) -> Dict[str, Any]:
-        """Get safe_py_runner policy config for agent v2."""
+    def get_agent_safe_py_runner_config(self) -> Dict[str, Any]:
+        """Get safe_py_runner policy config for agent."""
         default_venv_path = (
             "~/ds/.virtualenvs/safe_py_runner/.venv/Scripts/python.exe"
             if os.name == "nt"
@@ -251,15 +260,15 @@ class Config:
                 "breakpoint",
             ],
         }
-        cfg = self._config.get("agent_v2", {}).get("safe_py_runner", {})
+        cfg = self._config.get("agent", {}).get("safe_py_runner", {})
         if not isinstance(cfg, dict):
             return defaults
         merged = dict(defaults)
         merged.update(cfg)
         return merged
 
-    def get_agent_v2_filesystem_config(self) -> Dict[str, Any]:
-        """Get filesystem access policy for agent v2 generic file tools."""
+    def get_agent_filesystem_config(self) -> Dict[str, Any]:
+        """Get filesystem access policy for agent file tools."""
         defaults: Dict[str, Any] = {
             "allowed_dirs": ["artifacts"],
             "max_depth": 1,
@@ -277,25 +286,27 @@ class Config:
             "write_extensions": [".md"],
             "max_read_bytes": 1024 * 1024,
         }
-        cfg = self._config.get("agent_v2", {}).get("filesystem", {})
+        cfg = self._config.get("agent", {}).get("filesystem", {})
         if not isinstance(cfg, dict):
             return defaults
         merged = dict(defaults)
         merged.update(cfg)
         return merged
 
-    def get_agent_v2_retry_config(self) -> Dict[str, Any]:
-        """Get retry policy for agent v2 autonomous tool-error correction."""
+    def get_agent_retry_config(self) -> Dict[str, Any]:
+        """Get retry policy for agent autonomous tool-error correction."""
         defaults: Dict[str, Any] = {
             "max_tool_error_retries": 1,
         }
-        cfg = self._config.get("agent_v2", {}).get("retries", {})
+        cfg = self._config.get("agent", {}).get("retries", {})
         if not isinstance(cfg, dict):
             return defaults
         merged = dict(defaults)
         merged.update(cfg)
         try:
-            merged["max_tool_error_retries"] = max(0, int(merged.get("max_tool_error_retries", 1)))
+            merged["max_tool_error_retries"] = max(
+                0, int(merged.get("max_tool_error_retries", 1))
+            )
         except Exception:
             merged["max_tool_error_retries"] = defaults["max_tool_error_retries"]
         return merged

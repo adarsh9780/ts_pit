@@ -66,12 +66,12 @@ def insert_alert_analysis(
         "recommendation_reason": recommendation_reason,
     }
     with engine.begin() as sa_conn:
-        sa_conn.execute(
-            analysis.insert().values(payload)
-        )
+        sa_conn.execute(analysis.insert().values(payload))
 
 
-def fetch_latest_analysis_map(conn=None, alert_ids: list[str] | None = None) -> dict[str, dict[str, Any]]:
+def fetch_latest_analysis_map(
+    conn=None, alert_ids: list[str] | None = None
+) -> dict[str, dict[str, Any]]:
     alert_ids = alert_ids or []
     if not alert_ids:
         return {}
@@ -83,7 +83,6 @@ def fetch_latest_analysis_map(conn=None, alert_ids: list[str] | None = None) -> 
     analysis = get_table(ANALYSIS_TABLE)
     stmt = (
         select(
-            cast(analysis.c.id, Text).label("id"),
             cast(analysis.c.alert_id, Text).label("alert_id"),
             cast(analysis.c.generated_at, Text).label("generated_at"),
             cast(analysis.c.source, Text).label("source"),
@@ -95,8 +94,10 @@ def fetch_latest_analysis_map(conn=None, alert_ids: list[str] | None = None) -> 
             cast(analysis.c.recommendation, Text).label("recommendation"),
             cast(analysis.c.recommendation_reason, Text).label("recommendation_reason"),
         )
-        .where(cast(analysis.c.alert_id, Text).in_(bindparam("alert_ids", expanding=True)))
-        .order_by(cast(analysis.c.alert_id, Text).asc(), desc(analysis.c.generated_at), desc(analysis.c.id))
+        .where(
+            cast(analysis.c.alert_id, Text).in_(bindparam("alert_ids", expanding=True))
+        )
+        .order_by(cast(analysis.c.alert_id, Text).asc(), desc(analysis.c.generated_at))
     )
     with engine.connect() as sa_conn:
         rows = sa_conn.execute(stmt, {"alert_ids": norm_ids}).mappings().all()

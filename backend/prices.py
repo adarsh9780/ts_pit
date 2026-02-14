@@ -71,6 +71,12 @@ def fetch_and_cache_prices(
                 industry = fetch_industry(ticker, is_etf)
                 upsert_price_rows(cursor, ticker, hist, industry)
         except Exception as e:
-            logprint("Price fetch/cache failed", level="ERROR", ticker=ticker, error=str(e))
+            logprint(
+                f"Price fetch/cache failed for ticker={ticker} period={period}",
+                level="ERROR",
+                ticker=ticker,
+                period=period,
+                exception=e,
+            )
 
     return start_str, ticker

@@ -31,7 +31,7 @@ class ToolErrorRetryTests(unittest.TestCase):
         cfg = type(
             "Cfg",
             (),
-            {"get_agent_v2_retry_config": lambda self: {"max_tool_error_retries": 2}},
+            {"get_agent_retry_config": lambda self: {"max_tool_error_retries": 2}},
         )()
         with patch.object(self.graph, "get_config", return_value=cfg):
             decision = self.graph.should_continue(state)
@@ -57,7 +57,7 @@ class ToolErrorRetryTests(unittest.TestCase):
         cfg = type(
             "Cfg",
             (),
-            {"get_agent_v2_retry_config": lambda self: {"max_tool_error_retries": 1}},
+            {"get_agent_retry_config": lambda self: {"max_tool_error_retries": 1}},
         )()
         with patch.object(self.graph, "get_config", return_value=cfg):
             decision = self.graph.should_continue(state)
@@ -122,7 +122,7 @@ class ToolErrorRetryTests(unittest.TestCase):
         cfg = type(
             "Cfg",
             (),
-            {"get_agent_v2_retry_config": lambda self: {"max_tool_error_retries": 3}},
+            {"get_agent_retry_config": lambda self: {"max_tool_error_retries": 3}},
         )()
         with patch.object(self.graph, "get_config", return_value=cfg):
             decision = self.graph.should_continue(state)
@@ -162,7 +162,7 @@ class ToolErrorRetryTests(unittest.TestCase):
         cfg = type(
             "Cfg",
             (),
-            {"get_agent_v2_retry_config": lambda self: {"max_tool_error_retries": 3}},
+            {"get_agent_retry_config": lambda self: {"max_tool_error_retries": 3}},
         )()
         with patch.object(self.graph, "get_config", return_value=cfg):
             decision = self.graph.should_continue(state)
@@ -238,7 +238,7 @@ class ToolErrorRetryTests(unittest.TestCase):
         cfg = type(
             "Cfg",
             (),
-            {"get_agent_v2_retry_config": lambda self: {"max_tool_error_retries": 2}},
+            {"get_agent_retry_config": lambda self: {"max_tool_error_retries": 2}},
         )()
         with patch.object(self.graph, "get_config", return_value=cfg):
             decision = self.graph.should_continue(state)
@@ -271,7 +271,7 @@ class ToolErrorRetryTests(unittest.TestCase):
         cfg = type(
             "Cfg",
             (),
-            {"get_agent_v2_retry_config": lambda self: {"max_tool_error_retries": 3}},
+            {"get_agent_retry_config": lambda self: {"max_tool_error_retries": 3}},
         )()
         with patch.object(self.graph, "get_config", return_value=cfg):
             decision = self.graph.should_continue(state)
@@ -315,7 +315,7 @@ class ToolErrorRetryTests(unittest.TestCase):
         cfg = type(
             "Cfg",
             (),
-            {"get_agent_v2_retry_config": lambda self: {"max_tool_error_retries": 3}},
+            {"get_agent_retry_config": lambda self: {"max_tool_error_retries": 3}},
         )()
         with patch.object(self.graph, "get_config", return_value=cfg):
             decision = self.graph.should_continue(state)
@@ -342,7 +342,7 @@ class ToolErrorRetryTests(unittest.TestCase):
         cfg = type(
             "Cfg",
             (),
-            {"get_agent_v2_retry_config": lambda self: {"max_tool_error_retries": 2}},
+            {"get_agent_retry_config": lambda self: {"max_tool_error_retries": 2}},
         )()
         with patch.object(self.graph, "get_config", return_value=cfg):
             decision = self.graph.should_continue(state)
@@ -375,7 +375,7 @@ class ToolErrorRetryTests(unittest.TestCase):
         cfg = type(
             "Cfg",
             (),
-            {"get_agent_v2_retry_config": lambda self: {"max_tool_error_retries": 2}},
+            {"get_agent_retry_config": lambda self: {"max_tool_error_retries": 2}},
         )()
         with patch.object(self.graph, "get_config", return_value=cfg):
             decision = self.graph.should_continue(state)
@@ -486,7 +486,7 @@ class ToolErrorRetryTests(unittest.TestCase):
         cfg = type(
             "Cfg",
             (),
-            {"get_agent_v2_retry_config": lambda self: {"max_tool_error_retries": 3}},
+            {"get_agent_retry_config": lambda self: {"max_tool_error_retries": 3}},
         )()
         with patch.object(self.graph, "get_config", return_value=cfg):
             decision = self.graph.should_continue(state)
@@ -528,7 +528,7 @@ class ToolErrorRetryTests(unittest.TestCase):
         cfg = type(
             "Cfg",
             (),
-            {"get_agent_v2_retry_config": lambda self: {"max_tool_error_retries": 3}},
+            {"get_agent_retry_config": lambda self: {"max_tool_error_retries": 3}},
         )()
         with patch.object(self.graph, "get_config", return_value=cfg):
             decision = self.graph.should_continue(state)
@@ -827,7 +827,7 @@ class ToolErrorRetryTests(unittest.TestCase):
         cfg = type(
             "Cfg",
             (),
-            {"get_agent_v2_retry_config": lambda self: {"max_tool_error_retries": 2}},
+            {"get_agent_retry_config": lambda self: {"max_tool_error_retries": 2}},
         )()
         with patch.object(self.graph, "get_config", return_value=cfg):
             decision = self.graph.should_continue(state)
@@ -861,7 +861,7 @@ class ToolErrorRetryTests(unittest.TestCase):
         cfg = type(
             "Cfg",
             (),
-            {"get_agent_v2_retry_config": lambda self: {"max_tool_error_retries": 3}},
+            {"get_agent_retry_config": lambda self: {"max_tool_error_retries": 3}},
         )()
         with patch.object(self.graph, "get_config", return_value=cfg):
             decision = self.graph.should_continue(state)
@@ -1071,7 +1071,7 @@ class ToolErrorRetryTests(unittest.TestCase):
         cfg = type(
             "Cfg",
             (),
-            {"get_agent_v2_retry_config": lambda self: {"max_tool_error_retries": 3}},
+            {"get_agent_retry_config": lambda self: {"max_tool_error_retries": 3}},
         )()
         with patch.object(self.graph, "get_config", return_value=cfg):
             decision = self.graph.should_continue(state)
@@ -1135,7 +1135,7 @@ class ToolErrorRetryTests(unittest.TestCase):
         cfg = type(
             "Cfg",
             (),
-            {"get_agent_v2_retry_config": lambda self: {"max_tool_error_retries": 3}},
+            {"get_agent_retry_config": lambda self: {"max_tool_error_retries": 3}},
         )()
         with patch.object(self.graph, "get_config", return_value=cfg):
             decision = self.graph.should_continue(state)
@@ -1224,7 +1224,7 @@ class ToolErrorRetryTests(unittest.TestCase):
         cfg = type(
             "Cfg",
             (),
-            {"get_agent_v2_retry_config": lambda self: {"max_tool_error_retries": 0}},
+            {"get_agent_retry_config": lambda self: {"max_tool_error_retries": 0}},
         )()
         with patch.object(self.graph, "get_config", return_value=cfg):
             state = {
