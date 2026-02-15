@@ -1,40 +1,18 @@
-fix(agent_v3): stabilize planner schema and enforce turn-safe execution
+fix(agent_v3): make planner structured output Azure-strict compatible
 
-Addresses recurring v3 failures on Azure strict response_format validation,
-turn-state leakage between user prompts, and SQL correction loop instability.
+Prevents repeated `Invalid schema for response_format 'Plan'` failures on
+corporate VDI (Azure OpenAI strict JSON-schema validation).
 
-Key changes:
-- planning.py
-  - Split planner output schema from runtime StepState
-  - Add minimal PlannerStep model for structured output compatibility
-  - Convert PlannerStep -> StepState post-parse
-  - Enforce schema preflight insertion before SQL steps
-- graph.py
-  - Reset step/run state when user question changes
-  - Add bounded correction and replan guards to avoid recursion loops
-  - Keep responder focused on user question + step artifacts
-- execution.py
-  - Generate tool args at execution time (fresh context)
-  - Normalize execute_sql arg shapes (kwargs.query -> query)
-  - Store tool outputs in JSON for deterministic final synthesis
-  - Use async tool invocation when available
-- correction.py
-  - Add deterministic SQL correction path using DB_SCHEMA_REFERENCE.yaml
-  - Restrict SQL rewrites to non-quoted segments (prevent quote corruption)
-  - Add deterministic arg correction for missing execute_sql query field
-  - Remove unsafe fuzzy missing-column fallback
-- tools.py (v3)
-  - Keep one public web tool (search + news + scrape)
-  - Add deterministic logical alias overrides for date/id variants
-  - Align SQL error hints to logical-first SQL authoring
-- tools.py (v2)
-  - Consolidate LLM-facing web capability to single search_web tool
-  - Keep legacy wrappers for compatibility, remove scrape_websites from registry
-- prompts
-  - Add logical-first SQL guidance to planner/execution prompts
+Changes:
+- backend/agent_v3/planning.py
+  - switch planner step argument field from dynamic object to string field:
+    `tool_args_json`
+  - parse `tool_args_json` into dict server-side before building StepState
+  - add `json` import and robust fallback on parse errors
+- backend/agent_v3/prompts/planner.yaml
+  - instruct planner to emit args in `tool_args_json` as valid JSON string
 
-Result:
-- Fixes Azure 400 response_format schema failures
-- Prevents stale previous-turn outputs on new prompts
-- Reduces recursive correction/replan loops
-- Improves SQL correction reliability for logical date/id aliases
+Why:
+- Azure strict mode rejects free-form object schemas used in structured output.
+- Encoding tool args as JSON string keeps planner schema strict-safe while
+  preserving dynamic tool arguments at runtime.

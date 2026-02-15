@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 
 from backend.agent_v3.state import AgentV3State, StepState
 from backend.llm import get_llm_model
@@ -24,7 +25,7 @@ class PlannerStep(BaseModel):
     id: str = ""
     instruction: str
     tool: str
-    tool_args: dict[str, Any] | None = None
+    tool_args_json: str = "{}"
 
 
 class Plan(BaseModel):
@@ -59,12 +60,18 @@ def _to_runtime_steps(planner_steps: list[PlannerStep]) -> list[StepState]:
     runtime_steps: list[StepState] = []
     for i, step in enumerate(planner_steps, start=1):
         step_id = str(step.id or "").strip() or str(i)
+        try:
+            parsed_args = json.loads(step.tool_args_json or "{}")
+            if not isinstance(parsed_args, dict):
+                parsed_args = {}
+        except Exception:
+            parsed_args = {}
         runtime_steps.append(
             StepState(
                 id=step_id,
                 instruction=step.instruction,
                 tool=step.tool,
-                tool_args=step.tool_args,
+                tool_args=parsed_args,
             )
         )
     return runtime_steps

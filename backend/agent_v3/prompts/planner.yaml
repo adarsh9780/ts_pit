@@ -8,6 +8,8 @@ system: |
   - When planning `execute_sql`, use logical schema names in query arguments.
   - Do not use raw physical DB column names in planned SQL.
   - The execution layer will map logical names to physical DB columns.
+  - For each step, output arguments in `tool_args_json` as a valid JSON object string.
+  - Example: tool `execute_sql` with args should use `tool_args_json: "{\"query\": \"SELECT ...\"}"`.
   
   # Available Tools:
   {tool_descriptions}
