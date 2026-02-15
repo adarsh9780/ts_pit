@@ -1,18 +1,21 @@
-fix(agent_v3): make planner structured output Azure-strict compatible
+fix(agent_v3): resolve planner prompt KeyError for missing query variable
 
-Prevents repeated `Invalid schema for response_format 'Plan'` failures on
-corporate VDI (Azure OpenAI strict JSON-schema validation).
+Fixes VDI planner crash:
+- KeyError: Input to ChatPromptTemplate is missing variables {'query'}
+
+Root cause:
+- planner prompt contained JSON example with unescaped braces, which LangChain
+  interpreted as template variables (e.g. {"query": ...}).
 
 Changes:
-- backend/agent_v3/planning.py
-  - switch planner step argument field from dynamic object to string field:
-    `tool_args_json`
-  - parse `tool_args_json` into dict server-side before building StepState
-  - add `json` import and robust fallback on parse errors
 - backend/agent_v3/prompts/planner.yaml
-  - instruct planner to emit args in `tool_args_json` as valid JSON string
+  - escape JSON example braces with double braces
+  - add explicit `User request: {query}` section
+- backend/agent_v3/planning.py
+  - compute latest user query once
+  - pass `query` into prompt_template.invoke(...)
+  - reuse computed query when storing last_planned_user_question
 
-Why:
-- Azure strict mode rejects free-form object schemas used in structured output.
-- Encoding tool args as JSON string keeps planner schema strict-safe while
-  preserving dynamic tool arguments at runtime.
+Result:
+- planner prompt rendering succeeds on VDI and local
+- no missing-template-variable failure in planner node

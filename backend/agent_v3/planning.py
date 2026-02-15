@@ -108,8 +108,13 @@ def planner(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
     prompt_template = load_chat_prompt("planner")
 
     existing_messages = state.messages if hasattr(state, "messages") else state.messages
+    user_query = _latest_user_question(existing_messages)
     messages = prompt_template.invoke(
-        {"messages": existing_messages, "tool_descriptions": tool_descriptions}
+        {
+            "query": user_query,
+            "messages": existing_messages,
+            "tool_descriptions": tool_descriptions,
+        }
     )
 
     plan = model.invoke(messages)
@@ -128,5 +133,5 @@ def planner(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
         "should_replan": False,
         "replan_attempts": state.replan_attempts,
         "terminal_error": None,
-        "last_planned_user_question": _latest_user_question(existing_messages),
+        "last_planned_user_question": user_query,
     }
