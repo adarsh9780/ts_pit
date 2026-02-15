@@ -33,7 +33,7 @@ class ToolCallArgs(BaseModel):
 
 
 class ProposedToolArgs(BaseModel):
-    tool_args: dict[str, Any] = Field(default_factory=dict)
+    tool_args_json: str = "{}"
     reason: str | None = None
 
 
@@ -56,6 +56,16 @@ def _normalize_tool_args(tool_name: str, tool_args: dict[str, Any] | None) -> di
                 normalized["query"] = kw_query
                 normalized.pop("kwargs", None)
     return normalized
+
+
+def _parse_tool_args_json(raw: str) -> dict[str, Any]:
+    try:
+        parsed = json.loads(raw or "{}")
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+    return {}
 
 
 def _attempt_signature(tool_name: str, tool_args: dict[str, object]) -> str:
@@ -123,8 +133,9 @@ async def executioner(state: AgentV3State, config: RunnableConfig) -> dict:
             tool_description=tool.description,
             current_tool_args=step.tool_args,
         )
-        if proposed.tool_args:
-            step.tool_args = proposed.tool_args
+        proposed_args = _parse_tool_args_json(proposed.tool_args_json)
+        if proposed_args:
+            step.tool_args = proposed_args
 
     step.tool_args = _normalize_tool_args(tool_name, step.tool_args)
     tool_args = step.tool_args

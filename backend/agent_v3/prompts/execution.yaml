@@ -22,5 +22,6 @@ system: |
   - Do not invent alternate date field semantics (e.g., avoid switching from alert generation date intent to summary generation timestamp).
 
   Output contract:
-  - `tool_args`: corrected argument object for the same tool.
+  - `tool_args_json`: corrected argument object encoded as a JSON string.
+    Example: `{"query":"SELECT ..."}`
   - `reason`: short explanation of what changed and why.

@@ -16,7 +16,7 @@ from backend.llm import get_llm_model
 
 
 class CorrectedArgs(BaseModel):
-    tool_args: dict[str, Any] = Field(default_factory=dict)
+    tool_args_json: str = "{}"
     reason: str | None = None
 
 
@@ -209,6 +209,16 @@ def _deterministic_sql_args_correction(
     return None
 
 
+def _parse_tool_args_json(raw: str) -> dict[str, Any]:
+    try:
+        parsed = json.loads(raw or "{}")
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+    return {}
+
+
 def code_correction(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
     _ = config
     idx = (
@@ -312,10 +322,11 @@ def code_correction(state: AgentV3State, config: RunnableConfig) -> dict[str, An
 
     model = get_llm_model().with_structured_output(CorrectedArgs)
     corrected = cast(CorrectedArgs, model.invoke(prompt))
-    if not corrected.tool_args:
+    corrected_args = _parse_tool_args_json(corrected.tool_args_json)
+    if not corrected_args:
         return {"should_replan": True}
 
-    if corrected.tool_args == old_args:
+    if corrected_args == old_args:
         return {
             "should_replan": True,
             "terminal_error": (
@@ -324,7 +335,7 @@ def code_correction(state: AgentV3State, config: RunnableConfig) -> dict[str, An
         }
     prev_error_code = step.last_error_code
     prev_error_message = step.error
-    step.tool_args = corrected.tool_args
+    step.tool_args = corrected_args
     step.status = "pending"
     step.correction_attempts += 1
     step.error = None
@@ -337,7 +348,7 @@ def code_correction(state: AgentV3State, config: RunnableConfig) -> dict[str, An
             error_code=prev_error_code,
             error_message=prev_error_message,
             old_args=old_args,
-            new_args=corrected.tool_args,
+            new_args=corrected_args,
             reason=corrected.reason,
         )
     )
