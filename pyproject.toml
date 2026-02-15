@@ -30,3 +30,8 @@ dependencies = [
 
 [tool.uv.sources]
 safe-py-runner = { path = "libs/safe_py_runner", editable = true }
+
+[dependency-groups]
+dev = [
+    "langgraph-cli[inmem]>=0.4.12",
+]

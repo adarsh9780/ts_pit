@@ -1,17 +1,4 @@
-fix(prices): coerce yfinance date strings for DATE columns in price upsert
+Add Excalidraw diagram for agent_v3 and create langgraph configuration
 
-Root cause:
-- `prices.date` is typed as `DATE` in some DB schemas, but `upsert_price_rows` inserted ISO strings from yfinance (`YYYY-MM-DD`).
-- SQLite DATE binding requires Python `date` objects, which caused:
-  `TypeError: SQLite Date type only accepts Python date objects as input.`
-
-Changes:
-- Added date normalization in `backend/services/price_cache.py`:
-  - Detect when target `prices.date` column type is SQLAlchemy `Date`.
-  - Coerce incoming values to Python `date` (`datetime`, pandas timestamp-like, ISO string supported).
-  - Keep existing behavior unchanged for non-Date columns.
-- Added regression test `tests/services/test_price_cache.py` to verify ISO string dates are inserted successfully into a `DATE` column.
-
-Validation:
-- `uv run -m unittest tests/services/test_price_cache.py` (pass)
-- `uv run -m unittest tests/api/test_agent_streaming.py tests/api/test_market_prices.py tests/services/test_price_cache.py` (pass)
+- Added a new Excalidraw file `agent_v3.excalidraw` containing a visual representation of the agent workflow.
+- Created `langgraph.json` to define dependencies and graph configuration for the agent workflow.

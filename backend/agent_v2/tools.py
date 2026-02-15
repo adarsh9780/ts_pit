@@ -804,198 +804,182 @@ def get_python_capabilities() -> str:
     return _ok(data)
 
 
-@tool
-async def search_web_news(
-    query: str, max_results: int = 5, start_date: str = None, end_date: str = None
-) -> str:
-    """
-    Search the internet for recent news and summarize top results.
-    """
-    import asyncio
+def _prepare_search_query(query: str, start_date: str | None) -> str:
     from datetime import datetime
 
-    import aiohttp
-    from bs4 import BeautifulSoup
+    search_query = query
+    if not start_date:
+        return search_query
+    try:
+        dt = datetime.strptime(start_date, "%Y-%m-%d")
+        month_year = dt.strftime("%B %Y")
+        if month_year.lower() not in query.lower():
+            search_query = f"{query} {month_year}"
+    except Exception:
+        pass
+    return search_query
+
+
+def _run_ddgs_search(search_query: str, max_results: int) -> tuple[list[dict], list[dict]]:
     from ddgs import DDGS
 
-    from ..llm import get_llm_model
+    proxy_config = get_config().get_proxy_config()
+    kwargs: dict[str, Any] = {"verify": proxy_config.get("ssl_verify", True)}
+    proxy_url = proxy_config.get("https") or proxy_config.get("http")
+    if proxy_url:
+        kwargs["proxy"] = proxy_url
+    with DDGS(**kwargs) as ddgs:
+        web_hits = list(ddgs.text(search_query, max_results=max_results))
+        news_hits = list(ddgs.news(search_query, max_results=max_results))
+        return web_hits, news_hits
 
-    max_results = min(max_results, 10)
-    max_content_chars = 3000
-    timeout_seconds = 8
 
-    search_query = query
-    if start_date:
-        try:
-            dt = datetime.strptime(start_date, "%Y-%m-%d")
-            month_year = dt.strftime("%B %Y")
-            if month_year not in query:
-                search_query = f"{query} {month_year}"
-        except Exception:
-            pass
-
-    def _search():
-        proxy_config = get_config().get_proxy_config()
-        kwargs: dict[str, Any] = {"verify": proxy_config.get("ssl_verify", True)}
-        proxy_url = proxy_config.get("https") or proxy_config.get("http")
-        if proxy_url:
-            kwargs["proxy"] = proxy_url
-        with DDGS(**kwargs) as ddgs:
-            results = list(ddgs.news(search_query, max_results=max_results * 2))
-            return results[:max_results]
-
-    async def _fetch_content(session: aiohttp.ClientSession, url: str) -> str:
-        try:
-            headers = {"User-Agent": "Mozilla/5.0"}
-            async with session.get(
-                url,
-                timeout=aiohttp.ClientTimeout(total=timeout_seconds),
-                headers=headers,
-            ) as response:
-                if response.status != 200:
-                    return ""
-                html = await response.text()
-                soup = BeautifulSoup(html, "html.parser")
-                for elem in soup(
-                    ["script", "style", "nav", "header", "footer", "aside", "form"]
-                ):
-                    elem.extract()
-                text_blob = " ".join(
-                    line.strip()
-                    for line in soup.get_text().splitlines()
-                    if line.strip()
-                )
-                return text_blob[:max_content_chars]
-        except Exception:
-            return ""
-
-    def _batch_summarize(articles: list[dict], contents: list[str]) -> list[str]:
-        llm = get_llm_model()
-        parts = [
-            "Summarize each article in 2-3 sentences. Return numbered summaries only.\n"
-        ]
-        for i, (article, content) in enumerate(zip(articles, contents), 1):
-            title = article.get("title", "Unknown")
-            body = content or article.get("body", "No content available")
-            parts.append(f"\n---\nArticle {i}: {title}\n{body[:1500]}\n")
-        try:
-            response = llm.invoke("".join(parts))
-            raw = response.content.strip()
-            summaries: list[str] = []
-            current = ""
-            for line in raw.split("\n"):
-                clean = line.strip()
-                if clean and clean[0].isdigit() and "." in clean[:3]:
-                    if current:
-                        summaries.append(current.strip())
-                    current = clean.split(".", 1)[1].strip()
-                elif current:
-                    current += " " + clean
-            if current:
-                summaries.append(current.strip())
-            while len(summaries) < len(articles):
-                summaries.append("Summary not available.")
-            return summaries[: len(articles)]
-        except Exception:
-            return ["Summary generation failed." for _ in articles]
-
-    try:
-        results = await asyncio.to_thread(_search)
-        if not results:
-            return _ok([], message=f"No web news found for: {query}", query=query)
-
-        async with aiohttp.ClientSession(trust_env=True) as session:
-            urls = [r.get("url", "") for r in results]
-            tasks = [_fetch_content(session, url) for url in urls]
-            contents = await asyncio.gather(*tasks)
-
-        summaries = await asyncio.to_thread(_batch_summarize, results, contents)
-        final_results = []
-        for r, summary in zip(results, summaries):
-            final_results.append(
-                {
-                    "title": r.get("title", "No Title"),
-                    "source": r.get("source", "Unknown"),
-                    "date": r.get("date", "Unknown"),
-                    "url": r.get("url", ""),
-                    "summary": summary,
-                }
-            )
-        return _ok(final_results, query=query, row_count=len(final_results))
-    except Exception as e:
-        return _error(
-            f"Error searching web news: {str(e)}", code="WEB_NEWS_ERROR", query=query
+def _normalize_web_hits(items: list[dict]) -> list[dict]:
+    normalized: list[dict] = []
+    for item in items:
+        normalized.append(
+            {
+                "title": item.get("title", "No title"),
+                "url": item.get("href", ""),
+                "snippet": item.get("body", ""),
+                "source": item.get("source", "web"),
+                "date": "",
+                "kind": "web",
+            }
         )
+    return normalized
+
+
+def _normalize_news_hits(items: list[dict]) -> list[dict]:
+    normalized: list[dict] = []
+    for item in items:
+        normalized.append(
+            {
+                "title": item.get("title", "No title"),
+                "url": item.get("url", ""),
+                "snippet": item.get("body", ""),
+                "source": item.get("source", "news"),
+                "date": item.get("date", ""),
+                "kind": "news",
+            }
+        )
+    return normalized
+
+
+def _dedupe_results(web_results: list[dict], news_results: list[dict]) -> list[dict]:
+    seen_urls: set[str] = set()
+    combined_results: list[dict] = []
+    for item in web_results + news_results:
+        url = str(item.get("url") or "").strip()
+        key = url.lower()
+        if not key or key in seen_urls:
+            continue
+        seen_urls.add(key)
+        combined_results.append(item)
+    return combined_results
+
+
+async def _fetch_page_content(
+    session, url: str, timeout_seconds: int, max_chars_per_url: int
+) -> str:
+    import aiohttp
+    from bs4 import BeautifulSoup
+
+    if not url:
+        return ""
+    try:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        async with session.get(
+            url,
+            timeout=aiohttp.ClientTimeout(total=timeout_seconds),
+            headers=headers,
+        ) as response:
+            if response.status != 200:
+                return ""
+            html = await response.text()
+            soup = BeautifulSoup(html, "html.parser")
+            for element in soup(
+                ["script", "style", "nav", "header", "footer", "aside", "form"]
+            ):
+                element.extract()
+            text_blob = " ".join(
+                line.strip() for line in soup.get_text().splitlines() if line.strip()
+            )
+            return text_blob[:max_chars_per_url]
+    except Exception:
+        return ""
+
+
+async def _scrape_combined_results(
+    combined_results: list[dict],
+    scrape_limit: int,
+    timeout_seconds: int,
+    max_chars_per_url: int,
+) -> dict[str, str]:
+    import aiohttp
+    import asyncio
+
+    to_scrape = combined_results[:scrape_limit]
+    urls = [str(item.get("url") or "") for item in to_scrape]
+    ssl_verify = get_config().get_proxy_config().get("ssl_verify", True)
+    connector = aiohttp.TCPConnector(ssl=ssl_verify)
+    async with aiohttp.ClientSession(trust_env=True, connector=connector) as session:
+        contents = await asyncio.gather(
+            *[
+                _fetch_page_content(session, url, timeout_seconds, max_chars_per_url)
+                for url in urls
+            ]
+        )
+    return {url: content for url, content in zip(urls, contents)}
+
+
+def _attach_scraped_content(combined_results: list[dict], content_by_url: dict[str, str]) -> None:
+    for item in combined_results:
+        url = str(item.get("url") or "")
+        content = content_by_url.get(url, "")
+        item["content"] = content
+        item["content_available"] = bool(content)
+        item["extract"] = content[:500] if content else ""
 
 
 @tool
-async def search_web(query: str, max_results: int = 5) -> str:
+async def search_web(
+    query: str,
+    max_results: int = 5,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> str:
     """
-    Unified web search: returns both general web and news results.
+    Search both general web and news, then scrape extracted URLs in one call.
 
     Returns:
-    - combined: deduplicated merged results
-    - web: general web results
-    - news: news results
+    - combined: deduplicated items with scraped text excerpts
+    - web: web-only items
+    - news: news-only items
     """
     import asyncio
 
-    from ddgs import DDGS
-
-    max_results = min(max_results, 10)
-
-    def _search():
-        proxy_config = get_config().get_proxy_config()
-        kwargs: dict[str, Any] = {"verify": proxy_config.get("ssl_verify", True)}
-        proxy_url = proxy_config.get("https") or proxy_config.get("http")
-        if proxy_url:
-            kwargs["proxy"] = proxy_url
-        with DDGS(**kwargs) as ddgs:
-            web_hits = list(ddgs.text(query, max_results=max_results))
-            news_hits = list(ddgs.news(query, max_results=max_results))
-            return web_hits, news_hits
+    capped_results = min(max_results, 10)
+    scrape_limit = min(capped_results * 2, 12)
+    timeout_seconds = 10
+    max_chars_per_url = 2500
+    search_query = _prepare_search_query(query, start_date)
 
     try:
-        web_hits, news_hits = await asyncio.to_thread(_search)
-        if not web_hits and not news_hits:
+        web_hits, news_hits = await asyncio.to_thread(
+            _run_ddgs_search, search_query, capped_results
+        )
+        web_results = _normalize_web_hits(web_hits)
+        news_results = _normalize_news_hits(news_hits)
+
+        if not web_results and not news_results:
             return _ok([], message=f"No web results found for: {query}", query=query)
 
-        web_results = []
-        for item in web_hits:
-            web_results.append(
-                {
-                    "title": item.get("title", "No title"),
-                    "url": item.get("href", ""),
-                    "snippet": item.get("body", ""),
-                    "source": item.get("source", "web"),
-                    "kind": "web",
-                }
-            )
-
-        news_results = []
-        for item in news_hits:
-            news_results.append(
-                {
-                    "title": item.get("title", "No title"),
-                    "url": item.get("url", ""),
-                    "snippet": item.get("body", ""),
-                    "source": item.get("source", "news"),
-                    "date": item.get("date", ""),
-                    "kind": "news",
-                }
-            )
-
-        seen_urls: set[str] = set()
-        combined_results = []
-        for item in web_results + news_results:
-            url = str(item.get("url") or "").strip()
-            key = url.lower()
-            if not key:
-                continue
-            if key in seen_urls:
-                continue
-            seen_urls.add(key)
-            combined_results.append(item)
+        combined_results = _dedupe_results(web_results, news_results)
+        content_by_url = await _scrape_combined_results(
+            combined_results, scrape_limit, timeout_seconds, max_chars_per_url
+        )
+        _attach_scraped_content(combined_results, content_by_url)
 
         return _ok(
             {
@@ -1004,9 +988,13 @@ async def search_web(query: str, max_results: int = 5) -> str:
                 "news": news_results,
             },
             query=query,
+            start_date=start_date,
+            end_date=end_date,
             combined_count=len(combined_results),
             web_count=len(web_results),
             news_count=len(news_results),
+            scraped_count=len(content_by_url),
+            scrape_limit=scrape_limit,
         )
     except Exception as e:
         return _error(
@@ -1014,63 +1002,28 @@ async def search_web(query: str, max_results: int = 5) -> str:
         )
 
 
-@tool
+async def search_web_news(
+    query: str, max_results: int = 5, start_date: str = None, end_date: str = None
+) -> str:
+    """
+    Backward-compatible wrapper.
+    """
+    return await search_web(
+        query=query,
+        max_results=max_results,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
 async def scrape_websites(urls: list[str]) -> str:
     """
-    Fetch and extract readable text from multiple URLs concurrently.
+    Backward-compatible wrapper over unified web search+scrape.
     """
-    import asyncio
-
-    import aiohttp
-    from bs4 import BeautifulSoup
-
     if not urls:
         return _error("No URLs provided.", code="INVALID_INPUT")
-
-    max_chars_per_url = 2000
-    timeout_seconds = 10
-    url_list = urls[:10]
-
-    async def fetch_one(session: aiohttp.ClientSession, url: str) -> tuple[str, str]:
-        try:
-            headers = {"User-Agent": "Mozilla/5.0"}
-            async with session.get(
-                url,
-                timeout=aiohttp.ClientTimeout(total=timeout_seconds),
-                headers=headers,
-            ) as response:
-                if response.status != 200:
-                    return url, f"[Error: HTTP {response.status}]"
-                html = await response.text()
-                soup = BeautifulSoup(html, "html.parser")
-                for element in soup(
-                    ["script", "style", "nav", "header", "footer", "aside"]
-                ):
-                    element.extract()
-                text_blob = "\n".join(
-                    chunk.strip()
-                    for line in soup.get_text().splitlines()
-                    for chunk in line.split("  ")
-                    if chunk.strip()
-                )
-                if len(text_blob) > max_chars_per_url:
-                    text_blob = text_blob[:max_chars_per_url] + "... (truncated)"
-                return url, text_blob
-        except asyncio.TimeoutError:
-            return url, "[Error: Request timed out]"
-        except Exception as e:
-            return url, f"[Error: {str(e)}]"
-
-    ssl_verify = get_config().get_proxy_config().get("ssl_verify", True)
-    connector = aiohttp.TCPConnector(ssl=ssl_verify)
-    async with aiohttp.ClientSession(trust_env=True, connector=connector) as session:
-        tasks = [fetch_one(session, url) for url in url_list]
-        results = await asyncio.gather(*tasks)
-
-    formatted = []
-    for i, (url, content) in enumerate(results, 1):
-        formatted.append({"index": i, "url": url, "content": content})
-    return _ok(formatted, url_count=len(results))
+    query = " ".join(urls[:5])
+    return await search_web(query=query, max_results=min(len(urls), 10))
 
 
 TOOL_REGISTRY = {
@@ -1084,5 +1037,4 @@ TOOL_REGISTRY = {
     "analyze_current_alert": analyze_current_alert,
     "search_web": search_web,
     "generate_current_alert_report": generate_current_alert_report,
-    "scrape_websites": scrape_websites,
 }
