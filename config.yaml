@@ -255,7 +255,7 @@ proxy:
 # - v2: experimental graph (backend/agent_v2)
 # - v3: clean-slate graph (backend/agent_v3)
 agent:
-  version: "v2"
+  version: "v3"
 
   retries:
     # Number of autonomous retry turns after a tool returns {"ok": false}.

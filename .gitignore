@@ -40,5 +40,4 @@ artifacts/reports/*
 backend/agent/db_schema.yaml
 backend/agent_v2/db_schema.yamlcommit_message.txt
 .cursorrules
-backend/agent_v3
 .langgraph_api/*

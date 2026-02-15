@@ -1,4 +1,29 @@
-Add Excalidraw diagram for agent_v3 and create langgraph configuration
+feat(agent): add agent_v3 with planning-execution-correction architecture
 
-- Added a new Excalidraw file `agent_v3.excalidraw` containing a visual representation of the agent workflow.
-- Created `langgraph.json` to define dependencies and graph configuration for the agent workflow.
+Introduces a new agent architecture that separates planning from execution,
+enabling structured step-by-step task completion with built-in error recovery.
+
+Key changes:
+- Add master-controller pattern with explicit planning phase
+- Implement StepState model for granular execution tracking
+- Add deterministic SQL correction with schema-aware column mapping
+- Externalize prompts to YAML files for easier maintenance
+- Support bounded execution with configurable retry limits
+
+Architecture:
+  START → ensure_system_prompt → master → (planner|executioner|correction|respond) → END
+
+New modules:
+- planning.py: Generates structured execution plans from user requests
+- execution.py: Executes individual steps with tool argument generation
+- correction.py: Handles error recovery with deterministic + LLM fallback
+- state.py: Defines AgentV3State and StepState with Pydantic models
+- prompts/: Externalized YAML prompt templates
+
+Improvements over agent_v2:
+- Step-granular state enables resume/retry capabilities
+- Modular design (320 lines vs 1300+ in v2)
+- Bounded execution prevents runaway LLM calls
+- Structured correction history for debugging
+
+Breaking changes: None (new module, v2 remains available)
