@@ -23,5 +23,5 @@ system: |
 
   Output contract:
   - `tool_args_json`: corrected argument object encoded as a JSON string.
-    Example: `{"query":"SELECT ..."}`
+    Example: `{{"query":"SELECT ..."}}`
   - `reason`: short explanation of what changed and why.

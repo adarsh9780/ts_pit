@@ -1,21 +1,21 @@
-fix(agent_v3): make execution/correction structured outputs Azure-strict safe
+fix(agent_v3): harden prompt variable handling across planner/execution/correction
 
-Fixes VDI runtime error:
-- Invalid schema for response_format 'ProposedToolArgs'
-- Azure strict mode rejects free-form object fields in structured output models.
+Resolves recurring runtime failures caused by prompt template variable mismatches
+on VDI/Azure strict flows.
 
 Changes:
-- backend/agent_v3/execution.py
-  - ProposedToolArgs now uses `tool_args_json: str` (instead of dict tool_args)
-  - add JSON parser helper `_parse_tool_args_json`
-  - parse model output into dict server-side before tool execution
-- backend/agent_v3/correction.py
-  - CorrectedArgs now uses `tool_args_json: str`
-  - add JSON parser helper `_parse_tool_args_json`
-  - parse model output into dict server-side before applying corrections
 - backend/agent_v3/prompts/execution.yaml
-  - update output contract to require `tool_args_json` JSON string
+  - escape JSON example braces to avoid accidental `{query}` template variable
+- backend/agent_v3/execution.py
+  - pass `query` defensively in execution prompt invocation payload
+- backend/agent_v3/correction.py
+  - pass `query` defensively in correction prompt invocation payload
+
+Why:
+- Unescaped JSON in prompt text can be interpreted as template placeholders by
+  ChatPromptTemplate, causing KeyError at runtime.
+- Defensive prompt payloads prevent graph crashes if template vars drift.
 
 Result:
-- removes Azure strict response_format schema errors in executioner/correction nodes
-- preserves dynamic tool args with deterministic server-side parsing
+- Planner/execution/correction prompt rendering is robust against accidental
+  prompt-variable regressions.

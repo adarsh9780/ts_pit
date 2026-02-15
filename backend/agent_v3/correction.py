@@ -310,6 +310,7 @@ def code_correction(state: AgentV3State, config: RunnableConfig) -> dict[str, An
     prompt_template = load_chat_prompt("execution")
     prompt = prompt_template.invoke(
         {
+            "query": step.instruction,
             "messages": state.messages,
             "instruction": step.instruction,
             "tool_name": step.tool,

@@ -88,6 +88,7 @@ def _propose_tool_args(
     prompt_template = load_chat_prompt("execution")
     prompt = prompt_template.invoke(
         {
+            "query": instruction,
             "messages": state.messages,
             "instruction": instruction,
             "tool_name": tool_name,
