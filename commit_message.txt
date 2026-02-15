@@ -1,29 +1,40 @@
-feat(agent): add agent_v3 with planning-execution-correction architecture
+fix(agent_v3): stabilize planner schema and enforce turn-safe execution
 
-Introduces a new agent architecture that separates planning from execution,
-enabling structured step-by-step task completion with built-in error recovery.
+Addresses recurring v3 failures on Azure strict response_format validation,
+turn-state leakage between user prompts, and SQL correction loop instability.
 
 Key changes:
-- Add master-controller pattern with explicit planning phase
-- Implement StepState model for granular execution tracking
-- Add deterministic SQL correction with schema-aware column mapping
-- Externalize prompts to YAML files for easier maintenance
-- Support bounded execution with configurable retry limits
+- planning.py
+  - Split planner output schema from runtime StepState
+  - Add minimal PlannerStep model for structured output compatibility
+  - Convert PlannerStep -> StepState post-parse
+  - Enforce schema preflight insertion before SQL steps
+- graph.py
+  - Reset step/run state when user question changes
+  - Add bounded correction and replan guards to avoid recursion loops
+  - Keep responder focused on user question + step artifacts
+- execution.py
+  - Generate tool args at execution time (fresh context)
+  - Normalize execute_sql arg shapes (kwargs.query -> query)
+  - Store tool outputs in JSON for deterministic final synthesis
+  - Use async tool invocation when available
+- correction.py
+  - Add deterministic SQL correction path using DB_SCHEMA_REFERENCE.yaml
+  - Restrict SQL rewrites to non-quoted segments (prevent quote corruption)
+  - Add deterministic arg correction for missing execute_sql query field
+  - Remove unsafe fuzzy missing-column fallback
+- tools.py (v3)
+  - Keep one public web tool (search + news + scrape)
+  - Add deterministic logical alias overrides for date/id variants
+  - Align SQL error hints to logical-first SQL authoring
+- tools.py (v2)
+  - Consolidate LLM-facing web capability to single search_web tool
+  - Keep legacy wrappers for compatibility, remove scrape_websites from registry
+- prompts
+  - Add logical-first SQL guidance to planner/execution prompts
 
-Architecture:
-  START → ensure_system_prompt → master → (planner|executioner|correction|respond) → END
-
-New modules:
-- planning.py: Generates structured execution plans from user requests
-- execution.py: Executes individual steps with tool argument generation
-- correction.py: Handles error recovery with deterministic + LLM fallback
-- state.py: Defines AgentV3State and StepState with Pydantic models
-- prompts/: Externalized YAML prompt templates
-
-Improvements over agent_v2:
-- Step-granular state enables resume/retry capabilities
-- Modular design (320 lines vs 1300+ in v2)
-- Bounded execution prevents runaway LLM calls
-- Structured correction history for debugging
-
-Breaking changes: None (new module, v2 remains available)
+Result:
+- Fixes Azure 400 response_format schema failures
+- Prevents stale previous-turn outputs on new prompts
+- Reduces recursive correction/replan loops
+- Improves SQL correction reliability for logical date/id aliases

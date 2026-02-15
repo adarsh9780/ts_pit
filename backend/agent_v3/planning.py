@@ -8,7 +8,7 @@ from backend.agent_v3.prompts import load_chat_prompt
 
 from langchain_core.runnables import RunnableConfig
 from langchain_core.messages import AIMessage
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Any, cast
 
 SCHEMA_PREFLIGHT_PATH = "artifacts/DB_SCHEMA_REFERENCE.yaml"
@@ -20,8 +20,15 @@ tool_descriptions = "\n".join(
 )
 
 
+class PlannerStep(BaseModel):
+    id: str = ""
+    instruction: str
+    tool: str
+    tool_args: dict[str, Any] | None = None
+
+
 class Plan(BaseModel):
-    steps: list[StepState]
+    steps: list[PlannerStep] = Field(default_factory=list)
 
 
 def _latest_user_question(messages: list[Any]) -> str:
@@ -46,6 +53,21 @@ def _latest_user_question(messages: list[Any]) -> str:
                 return parts[1].strip()
         return text
     return ""
+
+
+def _to_runtime_steps(planner_steps: list[PlannerStep]) -> list[StepState]:
+    runtime_steps: list[StepState] = []
+    for i, step in enumerate(planner_steps, start=1):
+        step_id = str(step.id or "").strip() or str(i)
+        runtime_steps.append(
+            StepState(
+                id=step_id,
+                instruction=step.instruction,
+                tool=step.tool,
+                tool_args=step.tool_args,
+            )
+        )
+    return runtime_steps
 
 
 def _ensure_schema_preflight(steps: list[StepState]) -> list[StepState]:
@@ -85,7 +107,7 @@ def planner(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
 
     plan = model.invoke(messages)
     plan = cast(Plan, plan)
-    planned_steps = _ensure_schema_preflight(plan.steps)
+    planned_steps = _ensure_schema_preflight(_to_runtime_steps(plan.steps))
 
     plan_text = "**Plan:**\n" + "\n".join(
         f"{i + 1}. {step.instruction}" for i, step in enumerate(planned_steps)
