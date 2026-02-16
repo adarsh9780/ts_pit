@@ -37,6 +37,12 @@ export function useAgentChat(alertIdRef) {
   const deleteDialogTitle = ref('Delete Conversation History');
   const deleteDialogShowButtons = ref(true);
   const isDeleting = ref(false);
+  const contextDebug = ref({
+    active: false,
+    tokenEstimate: null,
+    summaryVersion: null,
+    summarizationTriggered: false,
+  });
 
   let abortController = null;
   let toolSeq = 0;
@@ -316,6 +322,12 @@ export function useAgentChat(alertIdRef) {
 
     const agentMsgIndex = messages.value.length;
     messages.value.push({ role: 'agent', content: '', tools: [], segments: [] });
+    contextDebug.value = {
+      active: false,
+      tokenEstimate: null,
+      summaryVersion: null,
+      summarizationTriggered: false,
+    };
 
     abortController = new AbortController();
 
@@ -421,6 +433,17 @@ export function useAgentChat(alertIdRef) {
               msg.content += reportLine;
               showArtifactsMenu.value = true;
               await fetchArtifacts();
+            } else if (data.type === 'context_debug') {
+              contextDebug.value = {
+                active: Boolean(data.active),
+                tokenEstimate: Number.isInteger(data.token_estimate)
+                  ? data.token_estimate
+                  : null,
+                summaryVersion: Number.isInteger(data.summary_version)
+                  ? data.summary_version
+                  : null,
+                summarizationTriggered: Boolean(data.summarization_triggered),
+              };
             }
 
             await scrollToBottom();
@@ -512,6 +535,7 @@ export function useAgentChat(alertIdRef) {
     deleteDialogTitle,
     deleteDialogShowButtons,
     isDeleting,
+    contextDebug,
     renderError: null,
     clearChat,
     showDeleteConfirmation,

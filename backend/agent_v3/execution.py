@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from backend.agent_v3.prompts import load_chat_prompt
 from backend.agent_v3.state import AgentV3State, CorrectionAttempt
 from backend.agent_v3.tools import TOOL_REGISTRY
+from backend.agent_v3.utilis import build_prompt_messages
 from backend.config import get_config
 from backend.llm import get_llm_model
 
@@ -50,6 +51,7 @@ TABLE_ALIAS_OVERRIDES: dict[str, dict[str, str]] = {
 retry_cfg = get_config().get_agent_retry_config()
 MAX_RETRIES = int(retry_cfg.get("max_tool_error_retries", 1))
 MAX_EXECUTION_ATTEMPTS = MAX_RETRIES + 1
+EXECUTION_RECENT_WINDOW = 16
 
 
 tool_descriptions = "\n".join(
@@ -324,7 +326,11 @@ def _propose_execution(
     prompt = prompt_template.invoke(
         {
             "query": instruction,
-            "messages": state.messages,
+            "messages": build_prompt_messages(
+                state.messages,
+                conversation_summary=state.conversation_summary,
+                recent_window=EXECUTION_RECENT_WINDOW,
+            ),
             "instruction": instruction,
             "goal": goal,
             "success_criteria": success_criteria,
@@ -332,6 +338,7 @@ def _propose_execution(
             "tool_descriptions": tool_descriptions,
             "completed_step_outputs": json.dumps(_completed_outputs(state), default=str),
             "current_alert": state.current_alert.model_dump_json(),
+            "conversation_summary": state.conversation_summary or "(none)",
             "current_tool_name": current_tool_name,
             "current_tool_args": json.dumps(current_tool_args, default=str),
             "error_code": error_code,

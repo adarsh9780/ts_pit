@@ -13,6 +13,7 @@ system: |
   - Constraints (JSON array): {constraints}
 
   Runtime context:
+  - Prior conversation summary: {conversation_summary}
   - Current alert context (JSON): {current_alert}
   - Completed step outputs (JSON): {completed_step_outputs}
 

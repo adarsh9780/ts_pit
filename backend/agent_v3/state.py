@@ -69,6 +69,10 @@ class AgentV3State(BaseModel):
     plan_requires_execution_reason: str | None = None
     plan_id: str | None = None
     plan_version: int = Field(default=0, ge=0)
+    conversation_summary: str | None = None
+    summary_version: int = Field(default=0, ge=0)
+    last_summarized_message_index: int = Field(default=0, ge=0)
+    token_estimate: int = Field(default=0, ge=0)
 
 
 class AgentInputSchema(BaseModel):

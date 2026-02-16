@@ -29,3 +29,23 @@ def _has_system_message(
             if expected_norm is None or current == expected_norm:
                 return True
     return False
+
+
+def build_prompt_messages(
+    messages: list[AnyMessage],
+    *,
+    conversation_summary: str | None = None,
+    recent_window: int = 16,
+) -> list[AnyMessage]:
+    recent = list(messages[-max(1, recent_window) :]) if messages else []
+    summary = str(conversation_summary or "").strip()
+    if not summary:
+        return recent
+    summary_msg = SystemMessage(
+        content=(
+            "[CONVERSATION SUMMARY]\n"
+            "Use this as compact memory from older turns.\n"
+            f"{summary}"
+        )
+    )
+    return [summary_msg] + recent

@@ -322,3 +322,88 @@ Changes:
 
 Impact:
 - `Python Code` now appears more consistently for successful tool calls.
+
+---
+
+feat(agent_v3 memory): add token-budget context manager with conversation summary memory
+
+Summary:
+- Added a pre-master `context_manager` node to track conversation token size and
+  compress older turns into a persistent summary when context grows too large.
+- Trigger threshold is 50k tokens; summary is merged and stored in state.
+
+State changes:
+- backend/agent_v3/state.py
+  - add `conversation_summary`
+  - add `summary_version`
+  - add `last_summarized_message_index`
+  - add `token_estimate`
+
+Graph/orchestration changes:
+- backend/agent_v3/graph.py
+  - add `context_manager` node
+  - wire flow: `START -> ensure_system_prompt -> context_manager -> master`
+  - add token estimation (tiktoken with heuristic fallback)
+  - add summary generation prompt for old-message chunks while preserving recent
+    message window
+
+Prompt-context changes:
+- backend/agent_v3/utilis.py
+  - add `build_prompt_messages(...)` helper to inject summary + recent window
+- backend/agent_v3/planning.py
+  - planner now receives summary-aware prompt messages
+  - pass `conversation_summary` variable into planner prompt
+- backend/agent_v3/execution.py
+  - executioner now receives summary-aware prompt messages
+  - pass `conversation_summary` variable into execution prompt
+- backend/agent_v3/prompts/planner.yaml
+  - include `Prior conversation summary` context slot
+- backend/agent_v3/prompts/execution.yaml
+  - include `Prior conversation summary` context slot
+
+Dependencies:
+- pyproject.toml
+  - add `tiktoken>=0.9.0`
+
+Validation:
+- `python3 -m py_compile backend/agent_v3/state.py backend/agent_v3/utilis.py backend/agent_v3/planning.py backend/agent_v3/execution.py backend/agent_v3/graph.py` passed
+
+---
+
+feat(debug telemetry): expose context-memory token summary status in stream + UI
+
+Goal:
+- Surface context-manager memory telemetry (token estimate + summary status)
+  without breaking other agent versions.
+
+Backend changes:
+- backend/api/routers/agent.py
+  - add `_extract_context_debug_payload(...)` parser for `context_manager` chain-end output
+  - emit SSE event `type: context_debug` with:
+    - `active`
+    - `token_estimate`
+    - `summary_version`
+    - `summarization_triggered`
+  - event is emitted only when context-manager payload is present
+
+Frontend changes:
+- frontend/src/features/agent/composables/useAgentChat.js
+  - add `contextDebug` reactive state
+  - parse `context_debug` SSE events
+  - reset debug state at start of each ask
+- frontend/src/features/agent/components/AgentPanelFeature.vue
+  - add small debug strip under header showing:
+    - active/inactive
+    - token estimate (or null)
+    - summary version (or null)
+    - triggered yes/no
+
+Compatibility behavior:
+- If another agent version does not emit `context_debug`, UI remains:
+  - `active = false`
+  - `tokenEstimate = null`
+  - `summaryVersion = null`
+  - `summarizationTriggered = false`
+
+Validation:
+- `python3 -m py_compile backend/api/routers/agent.py` passed

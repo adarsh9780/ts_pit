@@ -5,6 +5,7 @@ from uuid import uuid4
 from backend.agent_v3.state import AgentV3State, StepState
 from backend.agent_v3.prompts import load_chat_prompt
 from backend.agent_v3.tools import TOOL_REGISTRY
+from backend.agent_v3.utilis import build_prompt_messages
 from backend.llm import get_llm_model
 
 from langchain_core.runnables import RunnableConfig
@@ -69,6 +70,7 @@ ARTIFACT_KNOWLEDGE = (
 TOOL_DESCRIPTIONS = "\n".join(
     f"- {name}: {tool.description}" for name, tool in TOOL_REGISTRY.items()
 )
+PLANNER_RECENT_WINDOW = 16
 
 SQL_INTENT_KEYWORDS = {
     "sql",
@@ -295,13 +297,18 @@ def planner(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
     messages = prompt_template.invoke(
         {
             "query": user_query,
-            "messages": state.messages,
+            "messages": build_prompt_messages(
+                state.messages,
+                conversation_summary=state.conversation_summary,
+                recent_window=PLANNER_RECENT_WINDOW,
+            ),
             "current_alert": state.current_alert.model_dump_json(),
             "completed_steps": completed,
             "pending_steps": pending,
             "failed_steps": failed,
             "tool_descriptions": TOOL_DESCRIPTIONS,
             "artifact_knowledge": ARTIFACT_KNOWLEDGE,
+            "conversation_summary": state.conversation_summary or "(none)",
         }
     )
 

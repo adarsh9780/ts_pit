@@ -11,9 +11,18 @@ from backend.agent_v3.state import AgentV3State, AgentInputSchema
 from backend.agent_v3.planning import planner
 from backend.agent_v3.prompts import load_chat_prompt
 from backend.agent_v3.execution import executioner
+from backend.agent_v3.utilis import build_prompt_messages
 from backend.llm import get_llm_model
 
 MAX_REPLAN_ATTEMPTS = 1
+SUMMARY_TRIGGER_TOKENS = 50_000
+SUMMARY_RECENT_MESSAGE_WINDOW = 16
+SUMMARY_TEXT_LIMIT = 2500
+
+try:
+    import tiktoken  # type: ignore
+except Exception:  # pragma: no cover - optional dependency runtime
+    tiktoken = None  # type: ignore
 
 
 def _content_to_text(content: Any) -> str:
@@ -30,6 +39,49 @@ def _content_to_text(content: Any) -> str:
                     parts.append(text)
         return "\n".join(parts)
     return ""
+
+
+def _message_role(message: AnyMessage) -> str:
+    msg_type = str(getattr(message, "type", "")).lower()
+    if msg_type in {"human", "user"}:
+        return "user"
+    if msg_type in {"ai", "assistant"}:
+        return "assistant"
+    if msg_type == "system":
+        return "system"
+    return msg_type or "message"
+
+
+def _messages_to_transcript(messages: list[AnyMessage]) -> str:
+    lines: list[str] = []
+    for message in messages:
+        text = _content_to_text(getattr(message, "content", "")).strip()
+        if not text:
+            continue
+        lines.append(f"{_message_role(message)}: {text}")
+    return "\n".join(lines)
+
+
+def _estimate_tokens(text: str) -> int:
+    txt = str(text or "")
+    if not txt:
+        return 0
+    if tiktoken is not None:
+        try:
+            enc = tiktoken.encoding_for_model("gpt-4o-mini")
+        except Exception:
+            enc = tiktoken.get_encoding("cl100k_base")
+        return len(enc.encode(txt))
+    # fallback heuristic
+    return max(1, len(txt) // 4)
+
+
+def _estimate_history_tokens(state: AgentV3State) -> int:
+    transcript = _messages_to_transcript(state.messages)
+    summary = str(state.conversation_summary or "").strip()
+    if summary:
+        transcript = f"[summary]\n{summary}\n\n{transcript}"
+    return _estimate_tokens(transcript)
 
 
 def _has_system_message(
@@ -157,6 +209,66 @@ def ensure_system_prompt(state: AgentV3State, config: RunnableConfig) -> dict[st
     return {"messages": [system_prompt]}
 
 
+def context_manager(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
+    _ = config
+    token_estimate = _estimate_history_tokens(state)
+    updates: dict[str, Any] = {"token_estimate": token_estimate}
+    if token_estimate < SUMMARY_TRIGGER_TOKENS:
+        return updates
+
+    cutoff = max(0, len(state.messages) - SUMMARY_RECENT_MESSAGE_WINDOW)
+    start = min(max(0, state.last_summarized_message_index), cutoff)
+    if cutoff <= start:
+        return updates
+
+    chunk = state.messages[start:cutoff]
+    chunk_transcript = _messages_to_transcript(chunk)
+    if not chunk_transcript.strip():
+        updates["last_summarized_message_index"] = cutoff
+        return updates
+
+    llm = get_llm_model()
+    ai_msg = llm.invoke(
+        [
+            SystemMessage(
+                content=(
+                    "You are a conversation memory compressor for an agent graph.\n"
+                    "Write a compact, factual memory with these sections:\n"
+                    "1) User Objectives\n2) Retrieved Facts\n3) Decisions/Outcomes\n"
+                    "4) Open Items\n"
+                    "Do not include chain-of-thought. Keep critical entities exact "
+                    "(alert ids, tickers, dates, quantities). Keep it concise."
+                )
+            ),
+            HumanMessage(
+                content=(
+                    f"Existing summary:\n{state.conversation_summary or '(none)'}\n\n"
+                    "New conversation chunk to merge:\n"
+                    f"{chunk_transcript}\n\n"
+                    f"Return updated summary under {SUMMARY_TEXT_LIMIT} characters."
+                )
+            ),
+        ]
+    )
+    summary_text = _content_to_text(getattr(ai_msg, "content", "")).strip()
+    if summary_text:
+        if len(summary_text) > SUMMARY_TEXT_LIMIT:
+            summary_text = summary_text[:SUMMARY_TEXT_LIMIT].rstrip() + "..."
+        updates["conversation_summary"] = summary_text
+        updates["summary_version"] = state.summary_version + 1
+    updates["last_summarized_message_index"] = cutoff
+    updates["token_estimate"] = _estimate_tokens(
+        _messages_to_transcript(
+            build_prompt_messages(
+                state.messages,
+                conversation_summary=summary_text or state.conversation_summary,
+                recent_window=SUMMARY_RECENT_MESSAGE_WINDOW,
+            )
+        )
+    )
+    return updates
+
+
 def master(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
     _ = config
     latest_question = _latest_user_question(state.messages)
@@ -258,13 +370,15 @@ def router(state: AgentV3State) -> str:
 def build_graph():
     workflow = StateGraph(state_schema=AgentV3State, input_schema=AgentInputSchema)
     workflow.add_node("ensure_system_prompt", ensure_system_prompt)
+    workflow.add_node("context_manager", context_manager)
     workflow.add_node("master", master)
     workflow.add_node("planner", planner)
     workflow.add_node("respond", respond)
     workflow.add_node("executioner", executioner)
 
     workflow.add_edge(START, "ensure_system_prompt")
-    workflow.add_edge("ensure_system_prompt", "master")
+    workflow.add_edge("ensure_system_prompt", "context_manager")
+    workflow.add_edge("context_manager", "master")
     workflow.add_conditional_edges(
         "master",
         router,

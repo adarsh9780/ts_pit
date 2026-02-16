@@ -150,6 +150,7 @@ const {
   deleteDialogTitle,
   deleteDialogShowButtons,
   isDeleting,
+  contextDebug,
   clearChat,
   showDeleteConfirmation,
   cancelDelete,
@@ -185,6 +186,15 @@ const {
         </button>
         <button @click="$emit('close')" class="close-btn">×</button>
       </div>
+    </div>
+    <div class="context-debug-strip">
+      <span>
+        Context memory:
+        <strong>{{ contextDebug.active ? 'active' : 'inactive' }}</strong>
+      </span>
+      <span>Tokens: {{ contextDebug.tokenEstimate ?? 'null' }}</span>
+      <span>Summary v: {{ contextDebug.summaryVersion ?? 'null' }}</span>
+      <span>Triggered: {{ contextDebug.summarizationTriggered ? 'yes' : 'no' }}</span>
     </div>
 
     <div class="messages-area" ref="messagesContainer">
@@ -365,6 +375,18 @@ const {
   align-items: center;
   background: var(--color-surface-hover);
   padding-left: 12px;
+}
+
+.context-debug-strip {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 11px;
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+  overflow-x: auto;
 }
 
 .panel-header h3 {

@@ -98,6 +98,38 @@ def _extract_fallback_ai_text(event: dict) -> str:
     return ""
 
 
+def _extract_context_debug_payload(event: dict) -> dict | None:
+    output = event.get("data", {}).get("output")
+    if not isinstance(output, dict):
+        return None
+
+    payload = output
+    nested = output.get("context_manager")
+    if isinstance(nested, dict):
+        payload = nested
+
+    if "token_estimate" not in payload and "summary_version" not in payload:
+        return None
+
+    token_estimate = payload.get("token_estimate")
+    summary_version = payload.get("summary_version")
+    summarization_triggered = any(
+        key in payload
+        for key in (
+            "conversation_summary",
+            "summary_version",
+            "last_summarized_message_index",
+        )
+    )
+    return {
+        "type": "context_debug",
+        "active": True,
+        "token_estimate": token_estimate if isinstance(token_estimate, int) else None,
+        "summary_version": summary_version if isinstance(summary_version, int) else None,
+        "summarization_triggered": bool(summarization_triggered),
+    }
+
+
 def _extract_tool_calls(msg) -> list[dict]:
     raw_calls = getattr(msg, "tool_calls", None)
     if not raw_calls:
@@ -634,6 +666,10 @@ Status: {ctx.status or "N/A"}
 
                 elif kind == "on_chain_end":
                     node_name = event.get("metadata", {}).get("langgraph_node")
+                    if node_name == "context_manager":
+                        debug_payload = _extract_context_debug_payload(event)
+                        if debug_payload is not None:
+                            yield f"data: {json.dumps(debug_payload)}\n\n"
                     if node_name not in FALLBACK_MODEL_OUTPUT_NODES:
                         continue
                     if streamed_text:

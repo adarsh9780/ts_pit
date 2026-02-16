@@ -31,6 +31,7 @@ system: |
 
   Context:
   - User request: {query}
+  - Prior conversation summary: {conversation_summary}
   - Current alert context (JSON): {current_alert}
   - Completed steps (JSON): {completed_steps}
   - Pending steps (JSON): {pending_steps}
