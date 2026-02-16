@@ -92,7 +92,7 @@ def _extract_fallback_ai_text(event: dict) -> str:
     """
     output = event.get("data", {}).get("output")
     node_name = event.get("metadata", {}).get("langgraph_node")
-    allow_ephemeral = node_name == "planner"
+    allow_ephemeral = node_name in {"planner", "respond", "answer_rewriter"}
 
     if output is None:
         return ""
