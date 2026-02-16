@@ -130,14 +130,9 @@ const messageSegments = (msg) => {
 const messageVisibleSegments = (msg) => messageSegments(msg).filter((segment) => !['draft', 'tool', 'planner'].includes(segment?.type));
 const messagePlannerSegment = (msg) => messageSegments(msg).find((segment) => segment.type === 'planner');
 const messageToolSegments = (msg) => messageSegments(msg).filter((segment) => segment.type === 'tool');
-const messageDraftSegments = (msg) => messageSegments(msg).filter((segment) => segment.type === 'draft');
 const setPlanCollapsed = (msg, value) => {
   if (!msg || msg.role !== 'agent') return;
   msg.planCollapsed = Boolean(value);
-};
-const setDraftCollapsed = (msg, value) => {
-  if (!msg || msg.role !== 'agent') return;
-  msg.draftCollapsed = Boolean(value);
 };
 const renderPlanMarkdown = (rawContent) => {
   const raw = String(rawContent || '').trim();
@@ -338,28 +333,11 @@ const {
             </div>
           </div>
 
-          <div v-if="messageDraftSegments(msg).length" class="ephemeral-wrap">
-            <details
-              class="ephemeral-group"
-              :open="!msg.draftCollapsed"
-              @toggle="setDraftCollapsed(msg, !$event.target.open)"
-            >
-              <summary class="ephemeral-summary">
-                Draft updates ({{ messageDraftSegments(msg).length }})
-              </summary>
-              <div class="ephemeral-body">
-                <div
-                  v-for="(segment, segIndex) in messageDraftSegments(msg)"
-                  :key="`draft-${index}-${segIndex}`"
-                  class="draft-ribbon"
-                >
-                  <span class="draft-label">
-                    {{ segment.node === 'answer_rewriter' ? 'Draft rewrite' : segment.node === 'answer_validator' ? 'Validator note' : 'Draft update' }}
-                  </span>
-                  <span class="draft-content">{{ segment.content }}</span>
-                </div>
-              </div>
-            </details>
+          <div
+            v-if="msg.isFormattingFinal && !messageVisibleSegments(msg).length"
+            class="formatting-hint"
+          >
+            Formatting final output...
           </div>
         </div>
       </div>
@@ -655,43 +633,6 @@ const {
   border-radius: 6px;
 }
 
-.draft-ribbon {
-  border: 1px dashed rgba(15, 23, 42, 0.2);
-  background: rgba(15, 23, 42, 0.04);
-  color: var(--color-text-muted);
-  border-radius: 8px;
-  padding: 6px 8px;
-  font-size: 11px;
-  line-height: 1.35;
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-}
-
-.draft-label {
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--color-text-subtle);
-  white-space: nowrap;
-}
-
-.draft-content {
-  color: var(--color-text-muted);
-  overflow-wrap: anywhere;
-}
-
-.planner-ribbon {
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  background: rgba(15, 23, 42, 0.06);
-  border-radius: 8px;
-  padding: 6px 8px;
-  font-size: 12px;
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-}
-
 .tool-trace {
   border: 1px solid var(--color-border);
   border-radius: 6px;
@@ -773,6 +714,16 @@ const {
   display: grid;
   place-items: center;
   font-weight: 700;
+}
+
+.formatting-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--color-text-subtle);
+  border: 1px dashed rgba(15, 23, 42, 0.2);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: rgba(15, 23, 42, 0.03);
 }
 
 .tool-section-title {

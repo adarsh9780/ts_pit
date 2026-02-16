@@ -65,19 +65,6 @@ export function useAgentChat(alertIdRef) {
     return plannerSegment;
   };
 
-  const upsertDraftSegment = (msg, node, content) => {
-    if (!msg.segments) msg.segments = [];
-    const existingIndex = msg.segments.findIndex(
-      (seg) => seg.type === 'draft' && seg.node === node
-    );
-    const draft = { type: 'draft', node, content };
-    if (existingIndex >= 0) {
-      msg.segments.splice(existingIndex, 1, draft);
-      return;
-    }
-    msg.segments.push(draft);
-  };
-
   const hasEphemeralSegments = (msg) => (
     Boolean(msg?.segments?.some((seg) => ['planner', 'draft', 'tool'].includes(seg.type)))
   );
@@ -91,7 +78,6 @@ export function useAgentChat(alertIdRef) {
     if (!hasEphemeralSegments(msg)) return;
     if (!hasFinalText(msg)) return;
     msg.planCollapsed = true;
-    msg.draftCollapsed = true;
   };
 
   const generateGreeting = (info) => {
@@ -365,7 +351,7 @@ export function useAgentChat(alertIdRef) {
       tools: [],
       segments: [],
       planCollapsed: false,
-      draftCollapsed: false,
+      isFormattingFinal: false,
     });
     contextDebug.value = {
       active: false,
@@ -440,17 +426,12 @@ export function useAgentChat(alertIdRef) {
                 const segment = ensurePlannerSegment(msg);
                 segment.content += tokenContent;
               } else if (node === 'respond' || node === 'answer_rewriter') {
-                const existingDraft = msg.segments?.find(
-                  (seg) => seg.type === 'draft' && seg.node === node
-                );
-                const nextDraftContent = `${existingDraft?.content || ''}${tokenContent}`.trimStart();
-                upsertDraftSegment(msg, node, nextDraftContent);
+                msg.isFormattingFinal = true;
+                const segment = ensureTextSegment(msg);
+                segment.content += tokenContent;
+                msg.content += tokenContent;
               } else if (node === 'answer_validator') {
-                const existingDraft = msg.segments?.find(
-                  (seg) => seg.type === 'draft' && seg.node === node
-                );
-                const nextDraftContent = `${existingDraft?.content || ''}${tokenContent}`.trimStart();
-                upsertDraftSegment(msg, node, nextDraftContent);
+                // hidden unless debug stream enabled at backend
               } else {
                 const segment = ensureTextSegment(msg);
                 segment.content += tokenContent;
@@ -510,11 +491,13 @@ export function useAgentChat(alertIdRef) {
               };
             } else if (data.type === 'draft_update') {
               const msg = messages.value[agentMsgIndex];
-              const content = String(data.content || '').trim();
-              const node = String(data.node || 'respond');
-              if (content) upsertDraftSegment(msg, node, content);
+              const node = String(data.node || '');
+              if (node === 'respond' || node === 'answer_rewriter') {
+                msg.isFormattingFinal = true;
+              }
             } else if (data.type === 'done') {
               const msg = messages.value[agentMsgIndex];
+              msg.isFormattingFinal = false;
               autoCollapseEphemeralIfFinalReady(msg);
             }
 
@@ -538,6 +521,7 @@ export function useAgentChat(alertIdRef) {
         messages.value[agentMsgIndex].content
       );
       autoCollapseEphemeralIfFinalReady(messages.value[agentMsgIndex]);
+      messages.value[agentMsgIndex].isFormattingFinal = false;
       isLoading.value = false;
       abortController = null;
       await scrollToBottom();

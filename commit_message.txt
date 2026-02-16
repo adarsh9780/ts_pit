@@ -1,11 +1,7 @@
-feat(agent-ui): improve agent v3 working-details UX and streaming behavior
+fix(agent-ui): hide draft output and stream final response directly
 
-- move context debug status from top strip to bottom composer ring with hover details
-- restore v3 node streaming for planner/respond/answer_rewriter and include node metadata in token SSE events
-- use per-node fallback suppression so final outputs are not dropped when planner streams first
-- split working details into clearer sections:
-  - Plan: dedicated collapsible section rendered as readable markdown (parsed from planner JSON when possible)
-  - Tools: shown in normal flow with existing traces and statuses
-  - Draft updates: separate collapsible section for respond/rewriter ephemeral text
-- auto-collapse Plan and Draft updates once final answer is ready
-- keep answer_validator hidden unless debug stream is enabled
+- stop rendering respond/rewriter draft content in UI
+- stream respond/answer_rewriter tokens directly into the final assistant text so users see final output without refresh
+- replace draft section with lightweight "Formatting final output..." hint while final text is being prepared
+- keep validator internals hidden (except debug) and remove redundant draft UI plumbing
+- backend no longer emits respond/rewriter draft_update events

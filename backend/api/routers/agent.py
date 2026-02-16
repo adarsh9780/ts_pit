@@ -750,21 +750,6 @@ Status: {ctx.status or "N/A"}
                             yield f"data: {json.dumps(debug_payload)}\n\n"
                     if node_name not in FALLBACK_MODEL_OUTPUT_NODES:
                         continue
-                    if node_name in {"respond", "answer_rewriter"}:
-                        draft_text = (_extract_ephemeral_ai_text(event) or "").strip()
-                        if draft_text:
-                            yield (
-                                "data: "
-                                + json.dumps(
-                                    {
-                                        "type": "draft_update",
-                                        "node": node_name,
-                                        "content": draft_text,
-                                    }
-                                )
-                                + "\n\n"
-                            )
-                        continue
                     if node_name == "answer_validator" and debug_stream:
                         validator_text = (_extract_ephemeral_ai_text(event) or "").strip()
                         if validator_text:
