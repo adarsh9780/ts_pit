@@ -779,6 +779,7 @@ Status: {ctx.status or "N/A"}
                                 "type": "token",
                                 "content": fallback_text,
                                 "node": node_name,
+                                "is_fallback": True,
                             }
                         )
                         + "\n\n"

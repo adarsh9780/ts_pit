@@ -424,18 +424,28 @@ export function useAgentChat(alertIdRef) {
               const node = String(data.node || '').trim();
               const msg = messages.value[agentMsgIndex];
               const tokenContent = String(data.content || '');
+              const isFallback = Boolean(data.is_fallback);
               if (node === 'planner') {
                 const segment = ensurePlannerSegment(msg);
+                if (isFallback && segment.content.trim() === tokenContent.trim()) {
+                  continue;
+                }
                 segment.content += tokenContent;
               } else if (node === 'respond' || node === 'answer_rewriter') {
                 msg.isFormattingFinal = true;
                 const segment = ensureTextSegment(msg);
+                if (isFallback && segment.content.trim() === tokenContent.trim()) {
+                  continue;
+                }
                 segment.content += tokenContent;
                 msg.content += tokenContent;
               } else if (node === 'answer_validator') {
                 // hidden unless debug stream enabled at backend
               } else {
                 const segment = ensureTextSegment(msg);
+                if (isFallback && segment.content.trim() === tokenContent.trim()) {
+                  continue;
+                }
                 segment.content += tokenContent;
                 msg.content += tokenContent;
               }

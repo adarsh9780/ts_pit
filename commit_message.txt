@@ -1,5 +1,5 @@
-fix(agent-ui): correct context usage percentage by using real token budget
+fix(agent-stream): prevent duplicate final output from fallback replay
 
-- replace hardcoded ring denominator (4,000) with context token budget (default 50,000)
-- include token_budget in backend context_debug events
-- display tooltip as used/total tokens (e.g., 2700 / 50000)
+- mark fallback token events with is_fallback flag
+- dedupe fallback tokens in frontend when streamed text already matches
+- preserve fallback behavior for non-streaming nodes so missing final answers are still filled
