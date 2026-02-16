@@ -1,14 +1,3 @@
-fix(agent_v3): stop planner recursion and restore planner visibility in stream fallback
-
-- preserve `replan_attempts` in planner output instead of resetting to 0 each run
-  - fixes master retry-cap bypass that could trigger infinite plan/replan loops
-  - addresses `GraphRecursionError: Recursion limit of 25 reached`
-- allow planner ephemeral output to be surfaced by SSE fallback extraction
-  - keeps internal validator/rewriter ephemeral messages hidden
-- no changes to tool execution semantics
-
----
-
 feat(agent-ui): surface draft updates as muted ribbons and keep validator hidden by default
 
 - SSE: emit `draft_update` events for ephemeral outputs from `respond` and `answer_rewriter`
@@ -16,3 +5,13 @@ feat(agent-ui): surface draft updates as muted ribbons and keep validator hidden
 - keep planner output visible via fallback path
 - frontend: handle `draft_update` in `useAgentChat` and store as `segment.type='draft'`
 - frontend: render draft segments as muted ribbons in `AgentPanelFeature.vue`
+
+feat(agent-ui): move context debug to composer ring, collapse ephemeral traces, and restore v3 streaming
+
+- move top context debug strip into a bottom circular progress ring beside send/stop
+- show hover tooltip with context memory, token estimate, and summarization trigger state
+- group ephemeral segments (planner, draft updates, tools) under collapsible "Working details"
+- auto-collapse ephemeral details once a final assistant answer is present
+- stream planner/respond/answer_rewriter model chunks from backend with node metadata
+- include node name in token events and use per-node fallback suppression to avoid missing final outputs
+- keep answer_validator hidden by default (only emitted as draft update in debug mode)

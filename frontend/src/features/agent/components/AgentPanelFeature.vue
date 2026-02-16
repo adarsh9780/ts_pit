@@ -127,6 +127,26 @@ const messageSegments = (msg) => {
   }
   return segments;
 };
+const isEphemeralSegment = (segment) => ['draft', 'tool', 'planner'].includes(segment?.type);
+const messageVisibleSegments = (msg) => messageSegments(msg).filter((segment) => !isEphemeralSegment(segment));
+const messageEphemeralSegments = (msg) => messageSegments(msg).filter((segment) => isEphemeralSegment(segment));
+const setEphemeralCollapsed = (msg, value) => {
+  if (!msg || msg.role !== 'agent') return;
+  msg.ephemeralCollapsed = Boolean(value);
+};
+const contextTokenMax = 4000;
+const contextProgressPercent = (ctx) => {
+  const raw = Number(ctx?.tokenEstimate ?? 0);
+  if (!Number.isFinite(raw) || raw <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round((raw / contextTokenMax) * 100)));
+};
+const contextRingStyle = (ctx) => {
+  const pct = contextProgressPercent(ctx);
+  const color = ctx?.summarizationTriggered ? '#ef4444' : '#0f172a';
+  return {
+    background: `conic-gradient(${color} ${pct}%, #dbe3ef ${pct}% 100%)`,
+  };
+};
 
 const props = defineProps({ alertId: String });
 defineEmits(['close']);
@@ -187,16 +207,6 @@ const {
         <button @click="$emit('close')" class="close-btn">×</button>
       </div>
     </div>
-    <div class="context-debug-strip">
-      <span>
-        Context memory:
-        <strong>{{ contextDebug.active ? 'active' : 'inactive' }}</strong>
-      </span>
-      <span>Tokens: {{ contextDebug.tokenEstimate ?? 'null' }}</span>
-      <span>Summary v: {{ contextDebug.summaryVersion ?? 'null' }}</span>
-      <span>Triggered: {{ contextDebug.summarizationTriggered ? 'yes' : 'no' }}</span>
-    </div>
-
     <div class="messages-area" ref="messagesContainer">
       <div v-if="hasMoreHistory || historyLoading" class="history-more-wrap">
         <button class="history-more-btn" @click="loadMoreHistory" :disabled="historyLoading">
@@ -221,59 +231,80 @@ const {
         </template>
 
         <div v-else class="message-content">
-          <div v-for="(segment, segIndex) in messageSegments(msg)" :key="`seg-${index}-${segIndex}`">
+          <div v-for="(segment, segIndex) in messageVisibleSegments(msg)" :key="`seg-${index}-${segIndex}`">
             <div
               v-if="segment.type === 'text' && segment.content"
               :key="`md-${index}-${segIndex}-${segment.content.length}`"
               class="text markdown-content"
               v-html="renderMarkdown(segment.content)"
             ></div>
-            <div v-else-if="segment.type === 'draft' && segment.content" class="draft-ribbon">
-              <span class="draft-label">
-                {{ segment.node === 'answer_rewriter' ? 'Draft rewrite' : segment.node === 'answer_validator' ? 'Validator note' : 'Draft update' }}
-              </span>
-              <span class="draft-content">{{ segment.content }}</span>
-            </div>
+          </div>
 
-            <div v-else-if="segment.type === 'tool'" class="tools-container">
-              <details
-                class="tool-trace"
-                :open="segment.tool.status === 'error'"
-              >
-                <summary class="tool-summary">
-                  <span class="tool-main">
-                    <span class="status-dot" :class="segment.tool.status"></span>
-                    <span class="tool-name">{{ formatToolLabel(segment.tool.name) }}</span>
-                  </span>
-                  <span class="tool-meta">
-                    <span class="tool-status">{{ segment.tool.status }}</span>
-                    <span v-if="formatDuration(segment.tool.durationMs)" class="tool-duration">
-                      {{ formatDuration(segment.tool.durationMs) }}
+          <div v-if="messageEphemeralSegments(msg).length" class="ephemeral-wrap">
+            <details
+              class="ephemeral-group"
+              :open="!msg.ephemeralCollapsed"
+              @toggle="setEphemeralCollapsed(msg, !$event.target.open)"
+            >
+              <summary class="ephemeral-summary">
+                Working details ({{ messageEphemeralSegments(msg).length }})
+              </summary>
+              <div class="ephemeral-body">
+                <div
+                  v-for="(segment, segIndex) in messageEphemeralSegments(msg)"
+                  :key="`ephemeral-${index}-${segIndex}`"
+                >
+                  <div v-if="segment.type === 'planner' && segment.content" class="planner-ribbon">
+                    <span class="draft-label">Plan</span>
+                    <span class="draft-content">{{ segment.content }}</span>
+                  </div>
+
+                  <div v-else-if="segment.type === 'draft' && segment.content" class="draft-ribbon">
+                    <span class="draft-label">
+                      {{ segment.node === 'answer_rewriter' ? 'Draft rewrite' : segment.node === 'answer_validator' ? 'Validator note' : 'Draft update' }}
                     </span>
-                  </span>
-                </summary>
-                <div class="tool-body">
-                  <div v-if="segment.tool.commentary" class="tool-section">
-                    <div class="tool-section-title">Action</div>
-                    <div class="tool-commentary">{{ segment.tool.commentary }}</div>
+                    <span class="draft-content">{{ segment.content }}</span>
                   </div>
 
-                  <div v-if="isCodeTool(segment.tool.name) && toolCode(segment.tool)" class="tool-section">
-                    <div class="tool-code-header">
-                      <div class="tool-section-title">{{ codeLabel(segment.tool) }}</div>
-                      <button class="copy-code-btn" @click="copyToolCode(segment.tool)">Copy</button>
-                    </div>
-                    <pre class="tool-code" v-html="highlightCode(segment.tool)"></pre>
-                  </div>
+                  <div v-else-if="segment.type === 'tool'" class="tools-container">
+                    <details class="tool-trace" :open="segment.tool.status === 'error'">
+                      <summary class="tool-summary">
+                        <span class="tool-main">
+                          <span class="status-dot" :class="segment.tool.status"></span>
+                          <span class="tool-name">{{ formatToolLabel(segment.tool.name) }}</span>
+                        </span>
+                        <span class="tool-meta">
+                          <span class="tool-status">{{ segment.tool.status }}</span>
+                          <span v-if="formatDuration(segment.tool.durationMs)" class="tool-duration">
+                            {{ formatDuration(segment.tool.durationMs) }}
+                          </span>
+                        </span>
+                      </summary>
+                      <div class="tool-body">
+                        <div v-if="segment.tool.commentary" class="tool-section">
+                          <div class="tool-section-title">Action</div>
+                          <div class="tool-commentary">{{ segment.tool.commentary }}</div>
+                        </div>
 
-                  <div v-if="segment.tool.errorCode || segment.tool.errorMessage" class="tool-section tool-error">
-                    <div class="tool-section-title">Error</div>
-                    <div v-if="segment.tool.errorCode" class="tool-error-line">Code: {{ segment.tool.errorCode }}</div>
-                    <div v-if="segment.tool.errorMessage" class="tool-error-line">Message: {{ segment.tool.errorMessage }}</div>
+                        <div v-if="isCodeTool(segment.tool.name) && toolCode(segment.tool)" class="tool-section">
+                          <div class="tool-code-header">
+                            <div class="tool-section-title">{{ codeLabel(segment.tool) }}</div>
+                            <button class="copy-code-btn" @click="copyToolCode(segment.tool)">Copy</button>
+                          </div>
+                          <pre class="tool-code" v-html="highlightCode(segment.tool)"></pre>
+                        </div>
+
+                        <div v-if="segment.tool.errorCode || segment.tool.errorMessage" class="tool-section tool-error">
+                          <div class="tool-section-title">Error</div>
+                          <div v-if="segment.tool.errorCode" class="tool-error-line">Code: {{ segment.tool.errorCode }}</div>
+                          <div v-if="segment.tool.errorMessage" class="tool-error-line">Message: {{ segment.tool.errorMessage }}</div>
+                        </div>
+                      </div>
+                    </details>
                   </div>
                 </div>
-              </details>
-            </div>
+              </div>
+            </details>
           </div>
         </div>
       </div>
@@ -330,6 +361,11 @@ const {
         <button v-else @click="stopGeneration" class="send-circle-btn stop-btn" title="Stop">
           <span class="stop-icon">■</span>
         </button>
+        <div class="context-ring-wrap" :title="`Context memory: ${contextDebug.active ? 'active' : 'inactive'}\nTokens: ${contextDebug.tokenEstimate ?? 'null'}\nTriggered: ${contextDebug.summarizationTriggered ? 'yes' : 'no'}`">
+          <div class="context-ring" :style="contextRingStyle(contextDebug)">
+            <div class="context-ring-inner">{{ contextProgressPercent(contextDebug) }}%</div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -381,18 +417,6 @@ const {
   align-items: center;
   background: var(--color-surface-hover);
   padding-left: 12px;
-}
-
-.context-debug-strip {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--color-border);
-  font-size: 11px;
-  color: var(--color-text-muted);
-  background: var(--color-surface);
-  overflow-x: auto;
 }
 
 .panel-header h3 {
@@ -536,8 +560,38 @@ const {
   gap: 6px;
 }
 
+.ephemeral-wrap {
+  margin-top: 8px;
+}
+
+.ephemeral-group {
+  border: 1px dashed rgba(15, 23, 42, 0.25);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.03);
+}
+
+.ephemeral-summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 11px;
+  color: var(--color-text-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 7px 10px;
+}
+
+.ephemeral-summary::-webkit-details-marker {
+  display: none;
+}
+
+.ephemeral-body {
+  border-top: 1px dashed rgba(15, 23, 42, 0.2);
+  padding: 8px;
+  display: grid;
+  gap: 8px;
+}
+
 .draft-ribbon {
-  margin-top: 6px;
   border: 1px dashed rgba(15, 23, 42, 0.2);
   background: rgba(15, 23, 42, 0.04);
   color: var(--color-text-muted);
@@ -561,6 +615,17 @@ const {
 .draft-content {
   color: var(--color-text-muted);
   overflow-wrap: anywhere;
+}
+
+.planner-ribbon {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: rgba(15, 23, 42, 0.06);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
 }
 
 .tool-trace {
@@ -616,6 +681,34 @@ const {
   display: grid;
   gap: 8px;
   min-width: 0;
+}
+
+.context-ring-wrap {
+  margin-left: 8px;
+  display: flex;
+  align-items: center;
+}
+
+.context-ring {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  padding: 2px;
+  display: grid;
+  place-items: center;
+}
+
+.context-ring-inner {
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid var(--color-border);
+  font-size: 9px;
+  color: var(--color-text-subtle);
+  display: grid;
+  place-items: center;
+  font-weight: 700;
 }
 
 .tool-section-title {

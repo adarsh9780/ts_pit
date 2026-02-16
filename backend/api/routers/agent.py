@@ -15,7 +15,13 @@ from ...logger import logprint
 
 
 router = APIRouter(tags=["agent"])
-STREAMABLE_MODEL_NODES = {"agent", "direct_answer"}
+STREAMABLE_MODEL_NODES = {
+    "agent",
+    "direct_answer",
+    "planner",
+    "respond",
+    "answer_rewriter",
+}
 FALLBACK_MODEL_OUTPUT_NODES = {
     "agent",
     "direct_answer",
@@ -698,7 +704,7 @@ Status: {ctx.status or "N/A"}
 
     async def event_generator():
         tool_started_at: dict[str, float] = {}
-        streamed_text = False
+        streamed_nodes: set[str] = set()
         emitted_fallback_texts: set[str] = set()
         try:
             async for event in agent.astream_events(
@@ -706,6 +712,7 @@ Status: {ctx.status or "N/A"}
             ):
                 kind = event["event"]
                 if kind == "on_chat_model_stream":
+                    node_name = event.get("metadata", {}).get("langgraph_node")
                     if not _should_stream_model_chunk(event):
                         continue
 
@@ -721,8 +728,19 @@ Status: {ctx.status or "N/A"}
                         content = text_content
 
                     if content:
-                        streamed_text = True
-                        yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
+                        if isinstance(node_name, str) and node_name:
+                            streamed_nodes.add(node_name)
+                        yield (
+                            "data: "
+                            + json.dumps(
+                                {
+                                    "type": "token",
+                                    "content": content,
+                                    "node": node_name,
+                                }
+                            )
+                            + "\n\n"
+                        )
 
                 elif kind == "on_chain_end":
                     node_name = event.get("metadata", {}).get("langgraph_node")
@@ -761,13 +779,23 @@ Status: {ctx.status or "N/A"}
                                 )
                                 + "\n\n"
                             )
-                    if streamed_text:
+                    if isinstance(node_name, str) and node_name in streamed_nodes:
                         continue
                     fallback_text = (_extract_fallback_ai_text(event) or "").strip()
                     if not fallback_text or fallback_text in emitted_fallback_texts:
                         continue
                     emitted_fallback_texts.add(fallback_text)
-                    yield f"data: {json.dumps({'type': 'token', 'content': fallback_text})}\n\n"
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "type": "token",
+                                "content": fallback_text,
+                                "node": node_name,
+                            }
+                        )
+                        + "\n\n"
+                    )
 
                 elif kind == "on_tool_start":
                     tool_name = event["name"]

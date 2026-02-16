@@ -56,6 +56,15 @@ export function useAgentChat(alertIdRef) {
     return msg.segments[msg.segments.length - 1];
   };
 
+  const ensurePlannerSegment = (msg) => {
+    if (!msg.segments) msg.segments = [];
+    const existingIndex = msg.segments.findIndex((seg) => seg.type === 'planner');
+    if (existingIndex >= 0) return msg.segments[existingIndex];
+    const plannerSegment = { type: 'planner', content: '' };
+    msg.segments.push(plannerSegment);
+    return plannerSegment;
+  };
+
   const upsertDraftSegment = (msg, node, content) => {
     if (!msg.segments) msg.segments = [];
     const existingIndex = msg.segments.findIndex(
@@ -67,6 +76,21 @@ export function useAgentChat(alertIdRef) {
       return;
     }
     msg.segments.push(draft);
+  };
+
+  const hasEphemeralSegments = (msg) => (
+    Boolean(msg?.segments?.some((seg) => ['planner', 'draft', 'tool'].includes(seg.type)))
+  );
+
+  const hasFinalText = (msg) => (
+    Boolean(msg?.segments?.some((seg) => seg.type === 'text' && String(seg.content || '').trim()))
+  );
+
+  const autoCollapseEphemeralIfFinalReady = (msg) => {
+    if (!msg) return;
+    if (!hasEphemeralSegments(msg)) return;
+    if (!hasFinalText(msg)) return;
+    msg.ephemeralCollapsed = true;
   };
 
   const generateGreeting = (info) => {
@@ -334,7 +358,13 @@ export function useAgentChat(alertIdRef) {
     await captureAndUploadChartSnapshot();
 
     const agentMsgIndex = messages.value.length;
-    messages.value.push({ role: 'agent', content: '', tools: [], segments: [] });
+    messages.value.push({
+      role: 'agent',
+      content: '',
+      tools: [],
+      segments: [],
+      ephemeralCollapsed: false,
+    });
     contextDebug.value = {
       active: false,
       tokenEstimate: null,
@@ -401,10 +431,29 @@ export function useAgentChat(alertIdRef) {
             console.log('Parsed data type:', data.type);
 
             if (data.type === 'token') {
+              const node = String(data.node || '').trim();
               const msg = messages.value[agentMsgIndex];
-              const segment = ensureTextSegment(msg);
-              segment.content += data.content;
-              msg.content += data.content;
+              const tokenContent = String(data.content || '');
+              if (node === 'planner') {
+                const segment = ensurePlannerSegment(msg);
+                segment.content += tokenContent;
+              } else if (node === 'respond' || node === 'answer_rewriter') {
+                const existingDraft = msg.segments?.find(
+                  (seg) => seg.type === 'draft' && seg.node === node
+                );
+                const nextDraftContent = `${existingDraft?.content || ''}${tokenContent}`.trimStart();
+                upsertDraftSegment(msg, node, nextDraftContent);
+              } else if (node === 'answer_validator') {
+                const existingDraft = msg.segments?.find(
+                  (seg) => seg.type === 'draft' && seg.node === node
+                );
+                const nextDraftContent = `${existingDraft?.content || ''}${tokenContent}`.trimStart();
+                upsertDraftSegment(msg, node, nextDraftContent);
+              } else {
+                const segment = ensureTextSegment(msg);
+                segment.content += tokenContent;
+                msg.content += tokenContent;
+              }
             } else if (data.type === 'tool_start') {
               toolSeq += 1;
               const toolRun = {
@@ -462,6 +511,9 @@ export function useAgentChat(alertIdRef) {
               const content = String(data.content || '').trim();
               const node = String(data.node || 'respond');
               if (content) upsertDraftSegment(msg, node, content);
+            } else if (data.type === 'done') {
+              const msg = messages.value[agentMsgIndex];
+              autoCollapseEphemeralIfFinalReady(msg);
             }
 
             await scrollToBottom();
@@ -483,6 +535,7 @@ export function useAgentChat(alertIdRef) {
       messages.value[agentMsgIndex].content = absolutizeBackendLinks(
         messages.value[agentMsgIndex].content
       );
+      autoCollapseEphemeralIfFinalReady(messages.value[agentMsgIndex]);
       isLoading.value = false;
       abortController = null;
       await scrollToBottom();
@@ -566,5 +619,6 @@ export function useAgentChat(alertIdRef) {
     sendMessage,
     stopGeneration,
     startResize,
+    autoCollapseEphemeralIfFinalReady,
   };
 }
