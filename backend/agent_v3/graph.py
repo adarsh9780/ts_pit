@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import re
 from typing import Any
@@ -41,6 +42,47 @@ HARMFUL_PATTERNS = (
     "sexual content involving minors",
     "child sexual",
 )
+SHELL_COMMAND_PREFIXES = (
+    "rm ",
+    "rm\t",
+    "sudo ",
+    "chmod ",
+    "chown ",
+    "mv ",
+    "cp ",
+    "curl ",
+    "wget ",
+    "bash ",
+    "sh ",
+    "zsh ",
+    "powershell ",
+    "cmd ",
+    "del ",
+    "rmdir ",
+)
+SHELL_META_PATTERNS = (
+    "&&",
+    "||",
+    ";",
+    "|",
+    "$(",
+    "`",
+    ">",
+    "<",
+)
+INTENT_CLASSIFIER_SCHEMA: dict[str, Any] = {
+    "title": "IntentGuardDecision",
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "intent_class": {
+            "type": "string",
+            "enum": ["task", "meta_help", "blocked_user_code", "blocked_safety"],
+        },
+        "reason": {"type": "string"},
+    },
+    "required": ["intent_class", "reason"],
+}
 
 try:
     import tiktoken  # type: ignore
@@ -142,7 +184,9 @@ def _looks_like_user_code(question: str) -> bool:
         return True
     if re.search(r"\bselect\b[\s\S]{0,240}\bfrom\b", lowered):
         return True
-    if re.search(r"^\s*(def|class|import|from)\s+", text, flags=re.IGNORECASE):
+    if _looks_like_python_code(text):
+        return True
+    if _looks_like_shell_command(text):
         return True
     return False
 
@@ -158,12 +202,105 @@ def _is_code_run_question(question: str) -> bool:
     lowered = str(question or "").strip().lower()
     if any(pattern in lowered for pattern in CODE_RUN_PATTERNS):
         return True
+    if _looks_like_shell_command(question):
+        return True
     return _looks_like_user_code(question) and ("run" in lowered or "execute" in lowered)
 
 
 def _is_harmful_question(question: str) -> bool:
     lowered = str(question or "").strip().lower()
     return any(pattern in lowered for pattern in HARMFUL_PATTERNS)
+
+
+def _strip_code_fences(text: str) -> str:
+    txt = str(text or "").strip()
+    if txt.startswith("```") and txt.endswith("```"):
+        lines = txt.splitlines()
+        if len(lines) >= 3:
+            return "\n".join(lines[1:-1]).strip()
+    return txt
+
+
+def _looks_like_python_code(question: str) -> bool:
+    text = _strip_code_fences(question)
+    lowered = text.lower()
+    if re.search(r"^\s*(def|class|import|from|print|for|while|if)\b", lowered):
+        return True
+    if re.search(r"[=:()\[\]{}]", text) is None and "\n" not in text:
+        return False
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return False
+    substantial_nodes = (
+        ast.Call,
+        ast.Assign,
+        ast.AnnAssign,
+        ast.FunctionDef,
+        ast.AsyncFunctionDef,
+        ast.ClassDef,
+        ast.Import,
+        ast.ImportFrom,
+        ast.For,
+        ast.While,
+        ast.If,
+        ast.With,
+        ast.Try,
+        ast.Subscript,
+        ast.Attribute,
+        ast.BinOp,
+        ast.Compare,
+    )
+    return any(isinstance(node, substantial_nodes) for node in ast.walk(tree))
+
+
+def _looks_like_shell_command(question: str) -> bool:
+    text = _strip_code_fences(question)
+    lowered = text.lower().strip()
+    if not lowered:
+        return False
+    if any(lowered.startswith(prefix) for prefix in SHELL_COMMAND_PREFIXES):
+        return True
+    if lowered.startswith("./") or lowered.startswith("~/"):
+        return True
+    if "bash -c" in lowered or "sh -c" in lowered or "powershell -command" in lowered:
+        return True
+    if any(meta in lowered for meta in SHELL_META_PATTERNS):
+        if re.search(r"\b(rm|curl|wget|bash|sh|chmod|chown|mv|cp)\b", lowered):
+            return True
+    return False
+
+
+def _needs_llm_guard_check(question: str) -> bool:
+    lowered = str(question or "").lower()
+    if _looks_like_user_code(question):
+        return False
+    return any(token in lowered for token in ("run", "execute", "command", "script", "code"))
+
+
+def _llm_guard_intent(question: str) -> str | None:
+    model = get_llm_model().with_structured_output(INTENT_CLASSIFIER_SCHEMA)
+    raw = model.invoke(
+        [
+            SystemMessage(
+                content=(
+                    "Classify user request intent for guardrail routing.\n"
+                    "blocked_user_code: asks to run shell/python/sql code directly.\n"
+                    "blocked_safety: harmful/sexual dangerous request.\n"
+                    "meta_help: asks about capabilities/help.\n"
+                    "task: normal business/analysis task.\n"
+                    "Return strict structured output only."
+                )
+            ),
+            HumanMessage(content=f"User request:\n{question}"),
+        ]
+    )
+    if not isinstance(raw, dict):
+        return None
+    value = str(raw.get("intent_class") or "").strip()
+    if value in {"task", "meta_help", "blocked_user_code", "blocked_safety"}:
+        return value
+    return None
 
 
 def _safe_json_loads(raw: str | None) -> dict[str, Any]:
@@ -343,9 +480,19 @@ def intent_guard(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
         return {
             "intent_class": "blocked_user_code",
             "guardrail_response": (
-                "I can't run user-submitted arbitrary code directly. "
+                "I can't run user-submitted arbitrary shell/Python/SQL code directly. "
                 "Please describe the analysis goal in plain language and I will "
                 "use approved tools/workflows to help."
+            ),
+        }
+
+    if _looks_like_user_code(question):
+        return {
+            "intent_class": "blocked_user_code",
+            "guardrail_response": (
+                "I can't process submitted shell/Python/SQL code directly. "
+                "Please describe your objective in plain language and I will "
+                "help using approved analysis tools."
             ),
         }
 
@@ -362,6 +509,43 @@ def intent_guard(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
             ),
             "plan_requires_execution": False,
         }
+
+    if _needs_llm_guard_check(question):
+        try:
+            llm_intent = _llm_guard_intent(question)
+        except Exception:
+            llm_intent = None
+        if llm_intent == "blocked_safety":
+            return {
+                "intent_class": "blocked_safety",
+                "guardrail_response": (
+                    "I can't help with harmful, sexual, or dangerous requests. "
+                    "I can still help with alert analysis, SQL/data queries, and "
+                    "investigation summaries for this case."
+                ),
+            }
+        if llm_intent == "blocked_user_code":
+            return {
+                "intent_class": "blocked_user_code",
+                "guardrail_response": (
+                    "I can't run user-submitted arbitrary shell/Python/SQL code directly. "
+                    "Please describe the analysis goal in plain language and I will "
+                    "use approved tools/workflows to help."
+                ),
+            }
+        if llm_intent == "meta_help":
+            return {
+                "intent_class": "meta_help",
+                "guardrail_response": (
+                    "I can help with this alert workflow: \n"
+                    "1. Read schema/methodology artifacts.\n"
+                    "2. Retrieve backend data with SQL (preferred).\n"
+                    "3. Run bounded Python analysis when needed.\n"
+                    "4. Summarize findings and draft disposition/report text.\n"
+                    "Ask me a concrete objective and I will create/continue the plan."
+                ),
+                "plan_requires_execution": False,
+            }
 
     return {
         "intent_class": "task",

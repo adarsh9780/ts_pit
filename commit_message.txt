@@ -443,3 +443,33 @@ Flow now:
 
 Validation:
 - `python3 -m py_compile backend/agent_v3/state.py backend/agent_v3/graph.py` passed
+
+---
+
+feat(intent_guard): add deterministic shell detection + AST Python detection + ambiguous LLM fallback
+
+Goal:
+- Improve pre-master guardrails so shell-command asks and pasted code are blocked
+  deterministically, while ambiguous run/execute prompts use an LLM classifier fallback.
+
+Changes:
+- backend/agent_v3/graph.py
+  - add shell detection:
+    - command prefix rules (`rm`, `sudo`, `bash`, `curl`, etc.)
+    - shell metacharacter + command heuristics
+  - add AST-based Python code detection:
+    - parse candidate via `ast.parse`
+    - require substantial syntax nodes to avoid false positives
+  - keep SQL heuristics and fence handling
+  - add strict structured-output schema for LLM fallback classifier
+    (`IntentGuardDecision`)
+  - invoke LLM classifier only for ambiguous run/execute/script/code asks
+  - broaden guardrail messages to explicitly include shell/Python/SQL code
+
+Behavior:
+- explicit shell command requests are blocked before planner/master
+- pasted code snippets are blocked deterministically
+- uncertain run/execute asks are classified by LLM as task/meta/help/blocked
+
+Validation:
+- `python3 -m py_compile backend/agent_v3/graph.py` passed
