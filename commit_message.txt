@@ -5,3 +5,33 @@ fix(agent-ui): hide draft output and stream final response directly
 - replace draft section with lightweight "Formatting final output..." hint while final text is being prepared
 - keep validator internals hidden (except debug) and remove redundant draft UI plumbing
 - backend no longer emits respond/rewriter draft_update events
+
+---
+
+feat(context flow): split early summarization and late token-only metrics updates
+
+Goal:
+- Keep summarization before planning/execution (budget control), while exposing
+  most up-to-date token count near final response.
+
+Graph changes:
+- backend/agent_v3/graph.py
+  - add `context_metrics` node (token count only, no summarization)
+  - keep `context_manager` as early node (count + optional summarize)
+  - route response paths through `context_metrics` before `respond`:
+    - `intent_guard -> context_metrics` for direct-respond paths
+    - `master (respond) -> context_metrics`
+    - `context_metrics -> respond`
+
+Streaming debug changes:
+- backend/api/routers/agent.py
+  - emit `context_debug` SSE for both:
+    - `context_manager`
+    - `context_metrics`
+
+Behavior:
+- early node controls prompt budget and summary memory
+- late node updates latest token estimate for UI/debug without mutating summary
+
+Validation:
+- `python3 -m py_compile backend/agent_v3/graph.py backend/api/routers/agent.py` passed

@@ -400,6 +400,11 @@ def context_manager(state: AgentV3State, config: RunnableConfig) -> dict[str, An
     return updates
 
 
+def context_metrics(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
+    _ = config
+    return {"token_estimate": _estimate_history_tokens(state)}
+
+
 def intent_guard(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
     _ = config
     question = _latest_user_question(state.messages)
@@ -589,6 +594,7 @@ def build_graph():
     workflow = StateGraph(state_schema=AgentV3State, input_schema=AgentInputSchema)
     workflow.add_node("ensure_system_prompt", ensure_system_prompt)
     workflow.add_node("context_manager", context_manager)
+    workflow.add_node("context_metrics", context_metrics)
     workflow.add_node("intent_guard", intent_guard)
     workflow.add_node("master", master)
     workflow.add_node("planner", planner)
@@ -605,7 +611,7 @@ def build_graph():
         intent_router,
         {
             "master": "master",
-            "respond": "respond",
+            "respond": "context_metrics",
         },
     )
     workflow.add_conditional_edges(
@@ -613,12 +619,13 @@ def build_graph():
         router,
         {
             "planner": "planner",
-            "respond": "respond",
+            "respond": "context_metrics",
             "executioner": "executioner",
         },
     )
     workflow.add_edge("planner", "master")
     workflow.add_edge("executioner", "master")
+    workflow.add_edge("context_metrics", "respond")
     workflow.add_conditional_edges("respond", route_after_respond)
     workflow.add_conditional_edges("answer_validator", route_after_validation)
     workflow.add_edge("answer_rewriter", "answer_validator")

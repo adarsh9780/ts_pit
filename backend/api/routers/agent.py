@@ -744,7 +744,7 @@ Status: {ctx.status or "N/A"}
 
                 elif kind == "on_chain_end":
                     node_name = event.get("metadata", {}).get("langgraph_node")
-                    if node_name == "context_manager":
+                    if node_name in {"context_manager", "context_metrics"}:
                         debug_payload = _extract_context_debug_payload(event)
                         if debug_payload is not None:
                             yield f"data: {json.dumps(debug_payload)}\n\n"
