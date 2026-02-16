@@ -136,15 +136,15 @@ def master(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
     _ = config
     latest_question = _latest_user_question(state.messages)
 
-    if state.terminal_error:
-        return {"next_step": "respond"}
-
     if latest_question and latest_question != (state.last_user_question or ""):
         return {
             "next_step": "plan",
             "failed_step_index": None,
             "terminal_error": None,
         }
+
+    if state.terminal_error:
+        return {"next_step": "respond"}
 
     failed_idx = _first_failed_index(state)
     if failed_idx is not None:

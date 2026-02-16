@@ -170,3 +170,23 @@ Changes:
 Validation:
 - `python3 -m py_compile backend/agent_v3/state.py backend/agent_v3/planning.py` passed
 - `uv run python` planner prompt variable check passed
+
+---
+
+fix(agent_v3 master): prioritize new user question over stale terminal_error
+
+Fixes follow-up turns being routed straight to `respond` (skipping planner)
+when previous turn left `terminal_error` set.
+
+Changes:
+- backend/agent_v3/graph.py
+  - reorder master-node checks so new question detection runs before
+    terminal_error short-circuit
+  - keep existing behavior to clear terminal_error when routing to plan
+
+Impact:
+- follow-up questions now re-enter planner reliably
+- avoids stale failure state blocking subsequent planning/execution turns
+
+Validation:
+- `python3 -m py_compile backend/agent_v3/graph.py` passed
