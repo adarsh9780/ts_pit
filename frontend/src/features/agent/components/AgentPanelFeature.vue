@@ -53,6 +53,14 @@ const parseToolInput = (tool) => {
   try {
     const parsed = JSON.parse(tool.input);
     if (parsed && typeof parsed === 'object') return parsed;
+    if (typeof parsed === 'string') {
+      try {
+        const parsedAgain = JSON.parse(parsed);
+        if (parsedAgain && typeof parsedAgain === 'object') return parsedAgain;
+      } catch {
+        return null;
+      }
+    }
     return null;
   } catch {
     return null;
@@ -62,7 +70,9 @@ const toolCode = (tool) => {
   const input = parseToolInput(tool);
   if (!input) return '';
   if (tool?.name === 'execute_sql') return String(input.query || '');
-  if (tool?.name === 'execute_python') return String(input.code || '');
+  if (tool?.name === 'execute_python') {
+    return String(input.code || input.python_code || input.script || '');
+  }
   return '';
 };
 const codeLabel = (tool) => (tool?.name === 'execute_sql' ? 'SQL Code' : 'Python Code');

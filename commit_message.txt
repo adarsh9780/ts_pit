@@ -302,3 +302,23 @@ Impact:
 
 Validation:
 - `python3 -m py_compile backend/api/routers/agent.py` passed
+
+---
+
+fix(ui tool trace): decode double-encoded tool inputs so Python code renders on success
+
+Problem:
+- Some `tool_start.input` payloads arrive double-encoded (JSON string containing
+  JSON object text).
+- Tool panel parser decoded once and expected an object, so code block rendering
+  was skipped for successful `execute_python` calls.
+
+Changes:
+- frontend/src/features/agent/components/AgentPanelFeature.vue
+  - update `parseToolInput` to attempt a second JSON decode when first decode
+    returns a string
+  - broaden Python code key fallback in `toolCode` to support `code`,
+    `python_code`, and `script`
+
+Impact:
+- `Python Code` now appears more consistently for successful tool calls.
