@@ -7,7 +7,7 @@ from typing import Any, Literal, cast
 
 import yaml
 from langchain_core.runnables import RunnableConfig
-from pydantic import BaseModel
+from pydantic import ValidationError
 
 from backend.agent_v3.prompts import load_chat_prompt
 from backend.agent_v3.state import AgentV3State, CorrectionAttempt
@@ -58,10 +58,16 @@ tool_descriptions = "\n".join(
 )
 
 
-class ExecutionProposal(BaseModel):
-    tool_name: str
-    tool_args_json: str = "{}"
-    reason: str | None = None
+EXECUTION_PROPOSAL_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "tool_name": {"type": "string"},
+        "tool_args_json": {"type": "string"},
+        "reason": {"type": "string"},
+    },
+    "required": ["tool_name", "tool_args_json", "reason"],
+}
 
 
 def _has_no_data_retry(step: Any) -> bool:
@@ -312,7 +318,7 @@ def _propose_execution(
     error_message: str,
     allowed_tool_switch: bool,
     force_tool_name: str,
-) -> ExecutionProposal:
+) -> dict[str, Any]:
     prompt_template = load_chat_prompt("execution")
     prompt = prompt_template.invoke(
         {
@@ -333,8 +339,23 @@ def _propose_execution(
             "force_tool_name": force_tool_name,
         }
     )
-    model = get_llm_model().with_structured_output(ExecutionProposal)
-    return cast(ExecutionProposal, model.invoke(prompt))
+    model = get_llm_model().with_structured_output(EXECUTION_PROPOSAL_SCHEMA)
+    raw = model.invoke(prompt)
+    if not isinstance(raw, dict):
+        raw = {}
+    try:
+        # lightweight validation/canonicalization
+        tool_name = str(raw.get("tool_name") or "").strip()
+        tool_args_json = str(raw.get("tool_args_json") or "{}")
+        reason_raw = raw.get("reason")
+        reason = None if reason_raw is None else str(reason_raw)
+        return {
+            "tool_name": tool_name,
+            "tool_args_json": tool_args_json,
+            "reason": reason,
+        }
+    except ValidationError:
+        return {"tool_name": "", "tool_args_json": "{}", "reason": None}
 
 
 async def _invoke_tool(tool_name: str, tool_args: dict[str, Any]) -> dict[str, Any]:
@@ -405,7 +426,7 @@ async def executioner(state: AgentV3State, config: RunnableConfig) -> dict[str, 
             force_tool_name=forced_tool_name,
         )
 
-        tool_name = str(proposal.tool_name or "").strip() or forced_tool_name
+        tool_name = str(proposal.get("tool_name") or "").strip() or forced_tool_name
         if forced_tool_name and not allowed_tool_switch:
             tool_name = forced_tool_name
         if tool_name not in TOOL_REGISTRY:
@@ -415,7 +436,9 @@ async def executioner(state: AgentV3State, config: RunnableConfig) -> dict[str, 
             allowed_tool_switch = True
             continue
 
-        tool_args = _normalize_tool_args(tool_name, _parse_tool_args_json(proposal.tool_args_json))
+        tool_args = _normalize_tool_args(
+            tool_name, _parse_tool_args_json(str(proposal.get("tool_args_json") or "{}"))
+        )
         signature = _attempt_signature(tool_name, tool_args)
         signature_repeated = signature in seen_signatures
         seen_signatures.add(signature)
@@ -488,7 +511,7 @@ async def executioner(state: AgentV3State, config: RunnableConfig) -> dict[str, 
                 error_message=error_message,
                 old_args=tool_args,
                 new_args={},
-                reason=proposal.reason,
+                reason=proposal.get("reason"),
             )
         )
         step.retry_history = history

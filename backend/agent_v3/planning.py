@@ -9,7 +9,7 @@ from backend.llm import get_llm_model
 
 from langchain_core.runnables import RunnableConfig
 from langchain_core.messages import AIMessage
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from typing import Any, Literal, cast
 
 
@@ -25,6 +25,37 @@ class Plan(BaseModel):
     requires_execution: bool = True
     requires_execution_reason: str = ""
     steps: list[PlannerStep] = Field(default_factory=list)
+
+PLAN_RESPONSE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "plan_action": {
+            "type": "string",
+            "enum": ["reuse", "append", "replace"],
+        },
+        "requires_execution": {"type": "boolean"},
+        "requires_execution_reason": {"type": "string"},
+        "steps": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "instruction": {"type": "string"},
+                    "goal": {"type": "string"},
+                    "success_criteria": {"type": "string"},
+                    "constraints": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                },
+                "required": ["instruction"],
+            },
+        },
+    },
+    "required": ["plan_action", "requires_execution", "requires_execution_reason", "steps"],
+}
 
 
 SCHEMA_PRECHECK_HINT = "artifacts/DB_SCHEMA_REFERENCE.yaml"
@@ -252,7 +283,7 @@ def _merge_plan(state: AgentV3State, plan: Plan) -> tuple[list[StepState], list[
 
 def planner(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
     _ = config
-    model = get_llm_model().with_structured_output(Plan)
+    model = get_llm_model().with_structured_output(PLAN_RESPONSE_SCHEMA)
     prompt_template = load_chat_prompt("planner")
 
     user_query = _latest_user_question(state.messages)
@@ -273,7 +304,13 @@ def planner(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
         }
     )
 
-    plan = cast(Plan, model.invoke(messages))
+    raw_plan = model.invoke(messages)
+    if not isinstance(raw_plan, dict):
+        raw_plan = {}
+    try:
+        plan = Plan.model_validate(raw_plan)
+    except ValidationError:
+        plan = Plan()
 
     # Deterministic direct-answer fallback for state-only questions.
     if _is_direct_state_question(user_query):

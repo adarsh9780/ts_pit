@@ -190,3 +190,25 @@ Impact:
 
 Validation:
 - `python3 -m py_compile backend/agent_v3/graph.py` passed
+
+---
+
+fix(agent_v3 tracing): replace pydantic structured-output classes with JSON schemas
+
+Eliminates stream/tracer serialization warnings like:
+`Trying to load an object that doesn't implement serialization` for
+`backend.agent_v3.planning.Plan` and `backend.agent_v3.execution.ExecutionProposal`.
+
+Changes:
+- backend/agent_v3/planning.py
+  - switch `with_structured_output(Plan)` to `with_structured_output(PLAN_RESPONSE_SCHEMA)`
+  - add strict JSON schema (`additionalProperties: false`) for planner output
+  - parse/validate returned dict using local `Plan.model_validate(...)` fallback
+- backend/agent_v3/execution.py
+  - remove pydantic class-based structured output for execution proposal
+  - switch to `with_structured_output(EXECUTION_PROPOSAL_SCHEMA)`
+  - normalize returned dict fields (`tool_name`, `tool_args_json`, `reason`)
+
+Validation:
+- `python3 -m py_compile backend/agent_v3/planning.py backend/agent_v3/execution.py` passed
+- prompt variable checks passed for planner/execution templates
