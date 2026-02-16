@@ -1,4 +1,4 @@
-fix(agent-stream): surface final response for non-streaming respond/rewriter nodes
+fix(agent-ui): preserve chronological render order in chat card
 
-- treat respond and answer_rewriter ephemeral outputs as valid fallback final text
-- keep validator hidden while ensuring final answer is emitted without page refresh
+- render message sections in execution order: Plan -> tool traces -> final answer
+- keep formatting hint between tools and final output until final text is available

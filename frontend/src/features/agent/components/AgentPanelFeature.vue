@@ -264,15 +264,6 @@ const {
         </template>
 
         <div v-else class="message-content">
-          <div v-for="(segment, segIndex) in messageVisibleSegments(msg)" :key="`seg-${index}-${segIndex}`">
-            <div
-              v-if="segment.type === 'text' && segment.content"
-              :key="`md-${index}-${segIndex}-${segment.content.length}`"
-              class="text markdown-content"
-              v-html="renderMarkdown(segment.content)"
-            ></div>
-          </div>
-
           <div v-if="messagePlannerSegment(msg)?.content" class="ephemeral-wrap">
             <details
               class="ephemeral-group plan-group"
@@ -338,6 +329,15 @@ const {
             class="formatting-hint"
           >
             Formatting final output...
+          </div>
+
+          <div v-for="(segment, segIndex) in messageVisibleSegments(msg)" :key="`seg-${index}-${segIndex}`">
+            <div
+              v-if="segment.type === 'text' && segment.content"
+              :key="`md-${index}-${segIndex}-${segment.content.length}`"
+              class="text markdown-content"
+              v-html="renderMarkdown(segment.content)"
+            ></div>
           </div>
         </div>
       </div>
