@@ -228,6 +228,12 @@ const {
               class="text markdown-content"
               v-html="renderMarkdown(segment.content)"
             ></div>
+            <div v-else-if="segment.type === 'draft' && segment.content" class="draft-ribbon">
+              <span class="draft-label">
+                {{ segment.node === 'answer_rewriter' ? 'Draft rewrite' : segment.node === 'answer_validator' ? 'Validator note' : 'Draft update' }}
+              </span>
+              <span class="draft-content">{{ segment.content }}</span>
+            </div>
 
             <div v-else-if="segment.type === 'tool'" class="tools-container">
               <details
@@ -528,6 +534,33 @@ const {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.draft-ribbon {
+  margin-top: 6px;
+  border: 1px dashed rgba(15, 23, 42, 0.2);
+  background: rgba(15, 23, 42, 0.04);
+  color: var(--color-text-muted);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.35;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.draft-label {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-subtle);
+  white-space: nowrap;
+}
+
+.draft-content {
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
 }
 
 .tool-trace {

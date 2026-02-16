@@ -395,7 +395,7 @@ def planner(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
         "current_step_index": _first_pending_index(merged_steps),
         "failed_step_index": None,
         "should_replan": False,
-        "replan_attempts": 0,
+        "replan_attempts": state.replan_attempts,
         "terminal_error": None,
         "last_user_question": user_query,
         "plan_action": plan.plan_action,

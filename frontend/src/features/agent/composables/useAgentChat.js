@@ -56,6 +56,19 @@ export function useAgentChat(alertIdRef) {
     return msg.segments[msg.segments.length - 1];
   };
 
+  const upsertDraftSegment = (msg, node, content) => {
+    if (!msg.segments) msg.segments = [];
+    const existingIndex = msg.segments.findIndex(
+      (seg) => seg.type === 'draft' && seg.node === node
+    );
+    const draft = { type: 'draft', node, content };
+    if (existingIndex >= 0) {
+      msg.segments.splice(existingIndex, 1, draft);
+      return;
+    }
+    msg.segments.push(draft);
+  };
+
   const generateGreeting = (info) => {
     if (!info) return 'Hello! I am your Trade Surveillance Assistant. How can I help you investigate this alert?';
     return `Hello! I'm your Trade Surveillance Assistant. I can see you're investigating:\n\n` +
@@ -444,6 +457,11 @@ export function useAgentChat(alertIdRef) {
                   : null,
                 summarizationTriggered: Boolean(data.summarization_triggered),
               };
+            } else if (data.type === 'draft_update') {
+              const msg = messages.value[agentMsgIndex];
+              const content = String(data.content || '').trim();
+              const node = String(data.node || 'respond');
+              if (content) upsertDraftSegment(msg, node, content);
             }
 
             await scrollToBottom();

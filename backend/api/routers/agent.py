@@ -85,6 +85,8 @@ def _extract_fallback_ai_text(event: dict) -> str:
     This is needed for agent_v3 planner/structured output flows.
     """
     output = event.get("data", {}).get("output")
+    node_name = event.get("metadata", {}).get("langgraph_node")
+    allow_ephemeral = node_name == "planner"
 
     if output is None:
         return ""
@@ -99,6 +101,7 @@ def _extract_fallback_ai_text(event: dict) -> str:
                     if (
                         isinstance(additional, dict)
                         and additional.get("ephemeral_node_output")
+                        and not allow_ephemeral
                     ):
                         continue
                     return _content_to_text(getattr(msg, "content", ""))
@@ -107,10 +110,46 @@ def _extract_fallback_ai_text(event: dict) -> str:
     role = str(getattr(output, "type", "")).lower()
     if role in {"ai", "assistant"}:
         additional = getattr(output, "additional_kwargs", None)
-        if isinstance(additional, dict) and additional.get("ephemeral_node_output"):
+        if (
+            isinstance(additional, dict)
+            and additional.get("ephemeral_node_output")
+            and not allow_ephemeral
+        ):
             return ""
         return _content_to_text(getattr(output, "content", ""))
 
+    return ""
+
+
+def _extract_ephemeral_ai_text(event: dict) -> str:
+    """
+    Extract assistant text from ephemeral node outputs.
+    Used for draft-update ribbons in the UI.
+    """
+    output = event.get("data", {}).get("output")
+    if output is None:
+        return ""
+
+    if isinstance(output, dict):
+        messages = output.get("messages")
+        if isinstance(messages, list):
+            for msg in reversed(messages):
+                role = str(getattr(msg, "type", "")).lower()
+                if role not in {"ai", "assistant"}:
+                    continue
+                additional = getattr(msg, "additional_kwargs", None)
+                if not isinstance(additional, dict):
+                    continue
+                if not additional.get("ephemeral_node_output"):
+                    continue
+                return _content_to_text(getattr(msg, "content", ""))
+        return ""
+
+    role = str(getattr(output, "type", "")).lower()
+    if role in {"ai", "assistant"}:
+        additional = getattr(output, "additional_kwargs", None)
+        if isinstance(additional, dict) and additional.get("ephemeral_node_output"):
+            return _content_to_text(getattr(output, "content", ""))
     return ""
 
 
@@ -521,6 +560,11 @@ Status: {ctx.status or "N/A"}
             "buy_qt": _to_int_quantity(buy_qt),
             "sell_qt": _to_int_quantity(sell_qt),
         }
+    debug_stream = (
+        str(request.query_params.get("debug", "")).strip().lower() in {"1", "true", "yes"}
+        or str(request.headers.get("x-agent-debug", "")).strip().lower()
+        in {"1", "true", "yes"}
+    )
 
     def _safe_preview(value, max_len: int = 2000):
         def _truncate_json_value(raw, max_string_len: int = 900):
@@ -688,6 +732,35 @@ Status: {ctx.status or "N/A"}
                             yield f"data: {json.dumps(debug_payload)}\n\n"
                     if node_name not in FALLBACK_MODEL_OUTPUT_NODES:
                         continue
+                    if node_name in {"respond", "answer_rewriter"}:
+                        draft_text = (_extract_ephemeral_ai_text(event) or "").strip()
+                        if draft_text:
+                            yield (
+                                "data: "
+                                + json.dumps(
+                                    {
+                                        "type": "draft_update",
+                                        "node": node_name,
+                                        "content": draft_text,
+                                    }
+                                )
+                                + "\n\n"
+                            )
+                        continue
+                    if node_name == "answer_validator" and debug_stream:
+                        validator_text = (_extract_ephemeral_ai_text(event) or "").strip()
+                        if validator_text:
+                            yield (
+                                "data: "
+                                + json.dumps(
+                                    {
+                                        "type": "draft_update",
+                                        "node": node_name,
+                                        "content": validator_text,
+                                    }
+                                )
+                                + "\n\n"
+                            )
                     if streamed_text:
                         continue
                     fallback_text = (_extract_fallback_ai_text(event) or "").strip()

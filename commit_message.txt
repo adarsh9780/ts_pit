@@ -1,21 +1,18 @@
-feat(agent_v3): add response quality pipeline with validator/rewriter and bounded escalation
+fix(agent_v3): stop planner recursion and restore planner visibility in stream fallback
 
-- add post-respond quality flow: `respond -> answer_validator -> (end | answer_rewriter | master)`
-- enforce loop caps via state/config:
-  - `max_answer_revision_attempts` (default 1)
-  - `max_master_escalations_from_validation` (default 1)
-- introduce structured `AnswerFeedback` and response-quality state fields
-- add new modules:
-  - `responding.py` (UX-focused final draft generation)
-  - `validation.py` (hybrid deterministic + LLM quality checks)
-  - `rewriting.py` (single-pass surgical rewrite)
-- add explicit prompts:
-  - `prompts/respond.yaml`
-  - `prompts/answer_validator.yaml`
-  - `prompts/answer_rewriter.yaml`
-- update graph wiring and reset quality-loop state on new user questions
-- add response-quality config loader in `backend/config.py` and defaults in `config.yaml`
-- update SSE fallback extraction to ignore ephemeral internal node outputs and surface accepted final responses only
+- preserve `replan_attempts` in planner output instead of resetting to 0 each run
+  - fixes master retry-cap bypass that could trigger infinite plan/replan loops
+  - addresses `GraphRecursionError: Recursion limit of 25 reached`
+- allow planner ephemeral output to be surfaced by SSE fallback extraction
+  - keeps internal validator/rewriter ephemeral messages hidden
+- no changes to tool execution semantics
 
-fixup:
-- correct indentation in retry config fallback path in `backend/config.py`
+---
+
+feat(agent-ui): surface draft updates as muted ribbons and keep validator hidden by default
+
+- SSE: emit `draft_update` events for ephemeral outputs from `respond` and `answer_rewriter`
+- SSE: keep `answer_validator` hidden unless debug stream is enabled (`?debug=1` or `x-agent-debug: true`)
+- keep planner output visible via fallback path
+- frontend: handle `draft_update` in `useAgentChat` and store as `segment.type='draft'`
+- frontend: render draft segments as muted ribbons in `AgentPanelFeature.vue`
