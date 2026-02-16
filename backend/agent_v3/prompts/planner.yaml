@@ -3,7 +3,7 @@ system: |
 
   Your task:
   - Decide how to handle the existing plan for the new user request.
-  - Return `plan_action`, `requires_execution`, and zero or more intent-only steps.
+  - Return `plan_action`, `requires_execution`, `requires_execution_reason`, and zero or more intent-only steps.
 
   Allowed plan_action:
   - reuse: existing pending steps already satisfy the request.
@@ -43,6 +43,7 @@ system: |
   Output contract:
   - `plan_action`: one of reuse|append|replace
   - `requires_execution`: true|false
+  - `requires_execution_reason`: short reason explaining why tools are (or are not) needed
   - `steps`: list of objects with:
     - instruction (required)
     - goal (optional)

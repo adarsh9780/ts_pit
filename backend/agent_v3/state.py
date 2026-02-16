@@ -66,6 +66,7 @@ class AgentV3State(BaseModel):
     last_user_question: str | None = None
     plan_action: Literal["reuse", "append", "replace", "none"] = "none"
     plan_requires_execution: bool = True
+    plan_requires_execution_reason: str | None = None
     plan_id: str | None = None
     plan_version: int = Field(default=0, ge=0)
 

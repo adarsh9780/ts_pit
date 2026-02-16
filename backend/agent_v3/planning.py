@@ -23,6 +23,7 @@ class PlannerStep(BaseModel):
 class Plan(BaseModel):
     plan_action: Literal["reuse", "append", "replace"] = "append"
     requires_execution: bool = True
+    requires_execution_reason: str = ""
     steps: list[PlannerStep] = Field(default_factory=list)
 
 
@@ -279,6 +280,10 @@ def planner(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
         plan = plan.model_copy(
             update={
                 "requires_execution": False,
+                "requires_execution_reason": (
+                    "The request can be answered directly from current alert context "
+                    "and prior completed outputs."
+                ),
                 "plan_action": "replace",
                 "steps": [],
             }
@@ -317,6 +322,7 @@ def planner(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
     plan_lines = [
         f"Plan action: {plan.plan_action}",
         f"Requires execution: {str(plan.requires_execution).lower()}",
+        f"Execution reason: {plan.requires_execution_reason or 'not provided'}",
         "",
         "**Plan:**",
     ]
@@ -344,6 +350,7 @@ def planner(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
         "last_user_question": user_query,
         "plan_action": plan.plan_action,
         "plan_requires_execution": plan.requires_execution,
+        "plan_requires_execution_reason": plan.requires_execution_reason or None,
         "plan_id": updated_plan_id,
         "plan_version": updated_plan_version,
     }

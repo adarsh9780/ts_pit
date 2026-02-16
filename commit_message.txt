@@ -149,3 +149,24 @@ Changes:
 Validation:
 - `python3 -m py_compile backend/api/routers/agent.py` passed
 - verified buy/sell quantity fields are now present in frontend + backend mapping
+
+---
+
+feat(agent_v3 planner): add requires_execution_reason for plan transparency
+
+Adds explicit planner rationale for execution vs direct-answer decisions.
+
+Changes:
+- backend/agent_v3/state.py
+  - add `plan_requires_execution_reason` to AgentV3State
+- backend/agent_v3/planning.py
+  - extend `Plan` schema with `requires_execution_reason`
+  - set deterministic reason for direct state-only fallback path
+  - include execution reason in planner-visible plan text
+  - persist reason back into state (`plan_requires_execution_reason`)
+- backend/agent_v3/prompts/planner.yaml
+  - update output contract to require `requires_execution_reason`
+
+Validation:
+- `python3 -m py_compile backend/agent_v3/state.py backend/agent_v3/planning.py` passed
+- `uv run python` planner prompt variable check passed
