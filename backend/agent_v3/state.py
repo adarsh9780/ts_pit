@@ -73,6 +73,8 @@ class AgentV3State(BaseModel):
     summary_version: int = Field(default=0, ge=0)
     last_summarized_message_index: int = Field(default=0, ge=0)
     token_estimate: int = Field(default=0, ge=0)
+    intent_class: Literal["task", "meta_help", "blocked_user_code", "blocked_safety"] = "task"
+    guardrail_response: str | None = None
 
 
 class AgentInputSchema(BaseModel):

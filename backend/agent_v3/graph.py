@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
-from langchain_core.messages import AnyMessage, SystemMessage, HumanMessage
+from langchain_core.messages import AnyMessage, SystemMessage, HumanMessage, AIMessage
 
 from backend.agent_v3.state import AgentV3State, AgentInputSchema
 from backend.agent_v3.planning import planner
@@ -18,6 +19,28 @@ MAX_REPLAN_ATTEMPTS = 1
 SUMMARY_TRIGGER_TOKENS = 50_000
 SUMMARY_RECENT_MESSAGE_WINDOW = 16
 SUMMARY_TEXT_LIMIT = 2500
+META_HELP_PATTERNS = (
+    "what can you do",
+    "help",
+    "capabilities",
+    "how can you help",
+    "what do you do",
+)
+CODE_RUN_PATTERNS = (
+    "run this code",
+    "execute this code",
+    "can you run this code",
+    "execute my code",
+)
+HARMFUL_PATTERNS = (
+    "how to make bomb",
+    "make a bomb",
+    "build a bomb",
+    "kill someone",
+    "murder",
+    "sexual content involving minors",
+    "child sexual",
+)
 
 try:
     import tiktoken  # type: ignore
@@ -110,6 +133,37 @@ def _latest_user_question(messages: list[AnyMessage]) -> str:
                     return parts[1].strip()
             return content.strip()
     return ""
+
+
+def _looks_like_user_code(question: str) -> bool:
+    text = str(question or "").strip()
+    lowered = text.lower()
+    if "```" in text:
+        return True
+    if re.search(r"\bselect\b[\s\S]{0,240}\bfrom\b", lowered):
+        return True
+    if re.search(r"^\s*(def|class|import|from)\s+", text, flags=re.IGNORECASE):
+        return True
+    return False
+
+
+def _is_meta_help_question(question: str) -> bool:
+    lowered = str(question or "").strip().lower()
+    if not lowered:
+        return False
+    return any(pattern in lowered for pattern in META_HELP_PATTERNS)
+
+
+def _is_code_run_question(question: str) -> bool:
+    lowered = str(question or "").strip().lower()
+    if any(pattern in lowered for pattern in CODE_RUN_PATTERNS):
+        return True
+    return _looks_like_user_code(question) and ("run" in lowered or "execute" in lowered)
+
+
+def _is_harmful_question(question: str) -> bool:
+    lowered = str(question or "").strip().lower()
+    return any(pattern in lowered for pattern in HARMFUL_PATTERNS)
 
 
 def _safe_json_loads(raw: str | None) -> dict[str, Any]:
@@ -269,6 +323,52 @@ def context_manager(state: AgentV3State, config: RunnableConfig) -> dict[str, An
     return updates
 
 
+def intent_guard(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
+    _ = config
+    question = _latest_user_question(state.messages)
+    if not question:
+        return {"intent_class": "task", "guardrail_response": None}
+
+    if _is_harmful_question(question):
+        return {
+            "intent_class": "blocked_safety",
+            "guardrail_response": (
+                "I can't help with harmful, sexual, or dangerous requests. "
+                "I can still help with alert analysis, SQL/data queries, and "
+                "investigation summaries for this case."
+            ),
+        }
+
+    if _is_code_run_question(question):
+        return {
+            "intent_class": "blocked_user_code",
+            "guardrail_response": (
+                "I can't run user-submitted arbitrary code directly. "
+                "Please describe the analysis goal in plain language and I will "
+                "use approved tools/workflows to help."
+            ),
+        }
+
+    if _is_meta_help_question(question):
+        return {
+            "intent_class": "meta_help",
+            "guardrail_response": (
+                "I can help with this alert workflow: \n"
+                "1. Read schema/methodology artifacts.\n"
+                "2. Retrieve backend data with SQL (preferred).\n"
+                "3. Run bounded Python analysis when needed.\n"
+                "4. Summarize findings and draft disposition/report text.\n"
+                "Ask me a concrete objective and I will create/continue the plan."
+            ),
+            "plan_requires_execution": False,
+        }
+
+    return {
+        "intent_class": "task",
+        "guardrail_response": None,
+    }
+
+
 def master(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
     _ = config
     latest_question = _latest_user_question(state.messages)
@@ -323,6 +423,12 @@ def master(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
 
 def respond(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
     _ = config
+    if state.guardrail_response:
+        return {
+            "messages": [AIMessage(content=state.guardrail_response)],
+            "guardrail_response": None,
+            "terminal_error": None,
+        }
     llm = get_llm_model()
     user_question = _latest_user_question(state.messages)
     completed = _completed_step_payloads(state)
@@ -367,10 +473,17 @@ def router(state: AgentV3State) -> str:
     return mapping[state.next_step]
 
 
+def intent_router(state: AgentV3State) -> str:
+    if state.intent_class in {"blocked_safety", "blocked_user_code", "meta_help"}:
+        return "respond"
+    return "master"
+
+
 def build_graph():
     workflow = StateGraph(state_schema=AgentV3State, input_schema=AgentInputSchema)
     workflow.add_node("ensure_system_prompt", ensure_system_prompt)
     workflow.add_node("context_manager", context_manager)
+    workflow.add_node("intent_guard", intent_guard)
     workflow.add_node("master", master)
     workflow.add_node("planner", planner)
     workflow.add_node("respond", respond)
@@ -378,7 +491,15 @@ def build_graph():
 
     workflow.add_edge(START, "ensure_system_prompt")
     workflow.add_edge("ensure_system_prompt", "context_manager")
-    workflow.add_edge("context_manager", "master")
+    workflow.add_edge("context_manager", "intent_guard")
+    workflow.add_conditional_edges(
+        "intent_guard",
+        intent_router,
+        {
+            "master": "master",
+            "respond": "respond",
+        },
+    )
     workflow.add_conditional_edges(
         "master",
         router,

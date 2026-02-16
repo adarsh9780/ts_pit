@@ -407,3 +407,39 @@ Compatibility behavior:
 
 Validation:
 - `python3 -m py_compile backend/api/routers/agent.py` passed
+
+---
+
+feat(agent_v3 guard): add pre-master intent guard for task/meta/code/safety routing
+
+Goal:
+- Prevent tool execution for non-task asks (capability/meta, blocked code-run requests,
+  harmful requests) and ensure normal tasks continue to planner/master flow.
+
+State changes:
+- backend/agent_v3/state.py
+  - add `intent_class` enum:
+    - task
+    - meta_help
+    - blocked_user_code
+    - blocked_safety
+  - add `guardrail_response` for direct responder output
+
+Graph changes:
+- backend/agent_v3/graph.py
+  - add `intent_guard` node after `context_manager`
+  - routing:
+    - `task` -> `master`
+    - `meta_help|blocked_user_code|blocked_safety` -> `respond`
+  - add deterministic classifiers for:
+    - meta/help prompts
+    - user-code run requests
+    - harmful/safety requests
+  - update `respond` to short-circuit on `guardrail_response`
+
+Flow now:
+- `START -> ensure_system_prompt -> context_manager -> intent_guard -> (master|respond)`
+- For task intents, master continues existing behavior (new ask -> planner first).
+
+Validation:
+- `python3 -m py_compile backend/agent_v3/state.py backend/agent_v3/graph.py` passed
