@@ -34,6 +34,7 @@ system: |
   - Keep arguments minimal and valid for the chosen tool.
   - Use prior completed step outputs when needed.
   - If executing SQL, prefer logical names in query (execution layer/tool will map as needed).
+  - If `error_code` is `NO_DATA`, keep the same business intent and produce a revised SQL query that is less restrictive (for example, adjust date predicate shape), but remain read-only and precise.
   - Never output markdown or prose outside structured fields.
 
   JSON-string examples:

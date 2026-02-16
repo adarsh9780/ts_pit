@@ -64,6 +64,29 @@ class ExecutionProposal(BaseModel):
     reason: str | None = None
 
 
+def _has_no_data_retry(step: Any) -> bool:
+    return any(
+        str(item.error_code or "").upper() == "NO_DATA"
+        for item in (step.retry_history or [])
+    )
+
+
+def _is_empty_sql_success(tool_name: str, result: dict[str, Any]) -> bool:
+    if tool_name != "execute_sql":
+        return False
+    if not bool(result.get("ok")):
+        return False
+    data = result.get("data")
+    if isinstance(data, list):
+        return len(data) == 0
+    if isinstance(data, dict):
+        row_count = (result.get("meta") or {}).get("row_count")
+        if isinstance(row_count, int):
+            return row_count == 0
+    row_count = (result.get("meta") or {}).get("row_count")
+    return isinstance(row_count, int) and row_count == 0
+
+
 def _first_pending_index(steps: list[Any]) -> int:
     for idx, step in enumerate(steps):
         if step.status in {"pending", "running"}:
@@ -407,6 +430,35 @@ async def executioner(state: AgentV3State, config: RunnableConfig) -> dict[str, 
         ok = bool(result.get("ok"))
 
         if ok:
+            # Retry once for empty SQL results before finalizing as done.
+            if _is_empty_sql_success(tool_name, result) and not _has_no_data_retry(step):
+                history = list(step.retry_history)
+                history.append(
+                    CorrectionAttempt(
+                        attempt=len(history) + 1,
+                        error_code="NO_DATA",
+                        error_message="SQL returned 0 rows.",
+                        old_args=tool_args,
+                        new_args={},
+                        reason=(
+                            "Retrying once with revised SQL to handle possible "
+                            "overly restrictive filters."
+                        ),
+                    )
+                )
+                step.retry_history = history
+                step.status = "pending"
+                step.error = None
+                step.last_error_code = None
+                last_error_code = "NO_DATA"
+                last_error_message = (
+                    "Previous SQL returned 0 rows. Retry once with adjusted filters, "
+                    "same business intent, and still read-only SELECT."
+                )
+                forced_tool_name = "execute_sql"
+                allowed_tool_switch = False
+                continue
+
             step.status = "done"
             step.last_error_code = None
             step.error = None

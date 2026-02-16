@@ -102,3 +102,25 @@ Changes:
 Validation:
 - `python3 -m py_compile backend/agent_v3/planning.py` passed
 - `uv run python` planner prompt variables check passed
+
+---
+
+feat(agent_v3 execution): retry once on empty SQL result (no-data path)
+
+Adds a controlled retry path when execute_sql succeeds but returns zero rows,
+so the LLM gets one chance to adjust query arguments before finalizing.
+
+Changes:
+- backend/agent_v3/execution.py
+  - add `_is_empty_sql_success` detection for successful SQL calls with 0 rows
+  - add `_has_no_data_retry` guard to ensure this path retries only once
+  - on first empty SQL result:
+    - append retry_history entry with `error_code=NO_DATA`
+    - set retry context (`last_error_code=NO_DATA`) and retry same step with execute_sql
+  - keep existing max-attempt and error handling behavior unchanged
+- backend/agent_v3/prompts/execution.yaml
+  - add NO_DATA guidance: revise SQL to be less restrictive while preserving business intent and read-only SELECT safety
+
+Validation:
+- `python3 -m py_compile backend/agent_v3/execution.py` passed
+- `uv run python` execution prompt variables check passed
