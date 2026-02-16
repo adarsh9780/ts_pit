@@ -290,12 +290,23 @@ class AlertContext(BaseModel):
     instrument_name: Optional[str] = None
     trade_type: Optional[str] = None
     status: Optional[str] = None
+    buy_qt: Optional[float] = None
+    sell_qt: Optional[float] = None
+    buy_quantity: Optional[float] = None
+    sell_quantity: Optional[float] = None
 
 
 class ChatRequest(BaseModel):
     message: str
     session_id: str
     alert_context: Optional[AlertContext] = None
+
+
+def _to_int_quantity(value) -> int:
+    try:
+        return int(float(value))
+    except Exception:
+        return 0
 
 
 @router.get("/agent/history/{session_id}")
@@ -445,13 +456,19 @@ Status: {ctx.status or "N/A"}
             alert_id_int = int(ctx.id)
         except Exception:
             alert_id_int = None
+        buy_qt = (
+            ctx.buy_qt if ctx.buy_qt is not None else ctx.buy_quantity
+        )
+        sell_qt = (
+            ctx.sell_qt if ctx.sell_qt is not None else ctx.sell_quantity
+        )
         input_state["current_alert"] = {
             "alert_id": alert_id_int,
             "ticker": ctx.ticker,
             "start_date": ctx.start_date,
             "end_date": ctx.end_date,
-            "buy_qt": 0,
-            "sell_qt": 0,
+            "buy_qt": _to_int_quantity(buy_qt),
+            "sell_qt": _to_int_quantity(sell_qt),
         }
 
     def _safe_preview(value, max_len: int = 2000):

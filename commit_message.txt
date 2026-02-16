@@ -124,3 +124,28 @@ Changes:
 Validation:
 - `python3 -m py_compile backend/agent_v3/execution.py` passed
 - `uv run python` execution prompt variables check passed
+
+---
+
+fix(agent_v3 context): pass buy/sell quantities from frontend into current_alert state
+
+Fixes current_alert quantity fields always being zero during agent reasoning.
+
+Root cause:
+- Frontend `alert_context` payload did not include quantity fields.
+- Backend v3 input mapping hardcoded `buy_qt`/`sell_qt` to `0`.
+
+Changes:
+- frontend/src/features/agent/composables/useAgentChat.js
+  - include `buy_qt` and `sell_qt` in `alert_context` payload
+  - map from available alert detail keys with fallbacks:
+    `buy_qt || buy_quantity || buyQty`, `sell_qt || sell_quantity || sellQty`
+- backend/api/routers/agent.py
+  - extend `AlertContext` model with optional quantity fields:
+    `buy_qt`, `sell_qt`, `buy_quantity`, `sell_quantity`
+  - map incoming values into v3 `current_alert` using safe numeric coercion
+  - remove hardcoded zero defaults in v3 input mapping path
+
+Validation:
+- `python3 -m py_compile backend/api/routers/agent.py` passed
+- verified buy/sell quantity fields are now present in frontend + backend mapping

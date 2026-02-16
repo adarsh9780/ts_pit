@@ -330,6 +330,8 @@ export function useAgentChat(alertIdRef) {
           instrument_name: alertInfo.value.instrument_name,
           trade_type: alertInfo.value.trade_type,
           status: alertInfo.value.status,
+          buy_qt: alertInfo.value.buy_qt ?? alertInfo.value.buy_quantity ?? alertInfo.value.buyQty ?? 0,
+          sell_qt: alertInfo.value.sell_qt ?? alertInfo.value.sell_quantity ?? alertInfo.value.sellQty ?? 0,
         }
         : null;
 
