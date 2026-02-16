@@ -59,6 +59,7 @@ tool_descriptions = "\n".join(
 
 
 EXECUTION_PROPOSAL_SCHEMA: dict[str, Any] = {
+    "title": "ExecutionProposal",
     "type": "object",
     "additionalProperties": False,
     "properties": {

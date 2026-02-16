@@ -212,3 +212,24 @@ Changes:
 Validation:
 - `python3 -m py_compile backend/agent_v3/planning.py backend/agent_v3/execution.py` passed
 - prompt variable checks passed for planner/execution templates
+
+---
+
+fix(agent_v3 schema): add top-level titles to JSON schemas for structured output
+
+Fixes Azure/LangChain `Unsupported function` error when converting JSON schema
+to function format for `with_structured_output`.
+
+Root cause:
+- JSON schemas passed to `with_structured_output` lacked top-level `title`.
+- Function-conversion path requires a top-level function name.
+
+Changes:
+- backend/agent_v3/planning.py
+  - add `title: "PlannerResponse"` to `PLAN_RESPONSE_SCHEMA`
+- backend/agent_v3/execution.py
+  - add `title: "ExecutionProposal"` to `EXECUTION_PROPOSAL_SCHEMA`
+
+Validation:
+- `python3 -m py_compile backend/agent_v3/planning.py backend/agent_v3/execution.py` passed
+- schema title smoke check passed

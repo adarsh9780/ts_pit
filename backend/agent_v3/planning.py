@@ -27,6 +27,7 @@ class Plan(BaseModel):
     steps: list[PlannerStep] = Field(default_factory=list)
 
 PLAN_RESPONSE_SCHEMA: dict[str, Any] = {
+    "title": "PlannerResponse",
     "type": "object",
     "additionalProperties": False,
     "properties": {
