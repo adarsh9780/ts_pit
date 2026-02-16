@@ -254,3 +254,26 @@ Impact:
 
 Validation:
 - `python3 -m py_compile backend/agent_v3/graph.py` passed
+
+---
+
+feat(agent_v3 history): hide intermediate planner output after refresh
+
+Keeps planner output visible during live streaming, but removes it from
+persisted chat-history rendering so intermediate node output does not appear
+after page refresh.
+
+Changes:
+- backend/agent_v3/planning.py
+  - tag planner AI message with `additional_kwargs={"ephemeral_node_output": "planner"}`
+- backend/api/routers/agent.py
+  - skip assistant messages marked with `ephemeral_node_output` while building
+    `/agent/history` response payload
+
+Behavior:
+- live session: planner text still streams to UI
+- after refresh/history reload: planner intermediate text is hidden
+- final responder output remains visible
+
+Validation:
+- `python3 -m py_compile backend/agent_v3/planning.py backend/api/routers/agent.py` passed

@@ -377,7 +377,12 @@ def planner(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
         updated_plan_id = state.plan_id or str(uuid4())
 
     return {
-        "messages": [AIMessage(content="\n".join(plan_lines))],
+        "messages": [
+            AIMessage(
+                content="\n".join(plan_lines),
+                additional_kwargs={"ephemeral_node_output": "planner"},
+            )
+        ],
         "steps": merged_steps,
         "archived_steps": archived_steps,
         "current_step_index": _first_pending_index(merged_steps),

@@ -187,6 +187,9 @@ def _build_frontend_messages(messages: list) -> list[dict]:
             continue
 
         if msg_type in {"ai", "assistant"}:
+            additional = getattr(msg, "additional_kwargs", None)
+            if isinstance(additional, dict) and additional.get("ephemeral_node_output"):
+                continue
             assistant_content = _content_to_text(getattr(msg, "content", ""))
             tool_calls = _extract_tool_calls(msg)
             normalized_events.append(
