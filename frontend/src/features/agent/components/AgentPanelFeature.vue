@@ -389,19 +389,21 @@ const {
           </div>
         </div>
 
-        <button v-if="!isLoading" @click="sendMessage" class="send-circle-btn" :disabled="!inputMessage.trim()" title="Send">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="12" y1="19" x2="12" y2="5"/>
-            <polyline points="5 12 12 5 19 12"/>
-          </svg>
-        </button>
-        <button v-else @click="stopGeneration" class="send-circle-btn stop-btn" title="Stop">
-          <span class="stop-icon">■</span>
-        </button>
-        <div class="context-ring-wrap" :title="`Context memory: ${contextDebug.active ? 'active' : 'inactive'}\nTokens: ${(contextDebug.tokenEstimate ?? 'null')} / ${(contextDebug.tokenBudget ?? 'null')}\nTriggered: ${contextDebug.summarizationTriggered ? 'yes' : 'no'}`">
-          <div class="context-ring" :style="contextRingStyle(contextDebug)">
-            <div class="context-ring-inner">{{ contextProgressPercent(contextDebug) }}%</div>
+        <div class="composer-right-tools">
+          <div class="context-ring-wrap" :title="`Context memory: ${contextDebug.active ? 'active' : 'inactive'}\nTokens: ${(contextDebug.tokenEstimate ?? 'null')} / ${(contextDebug.tokenBudget ?? 'null')}\nTriggered: ${contextDebug.summarizationTriggered ? 'yes' : 'no'}`">
+            <div class="context-ring" :style="contextRingStyle(contextDebug)">
+              <div class="context-ring-inner">{{ contextProgressPercent(contextDebug) }}%</div>
+            </div>
           </div>
+          <button v-if="!isLoading" @click="sendMessage" class="send-circle-btn" :disabled="!inputMessage.trim()" title="Send">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="19" x2="12" y2="5"/>
+              <polyline points="5 12 12 5 19 12"/>
+            </svg>
+          </button>
+          <button v-else @click="stopGeneration" class="send-circle-btn stop-btn" title="Stop">
+            <span class="stop-icon"></span>
+          </button>
         </div>
       </div>
     </div>
@@ -955,6 +957,12 @@ const {
   gap: 8px;
 }
 
+.composer-right-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .input-left-tools {
   position: relative;
   display: flex;
@@ -1058,6 +1066,10 @@ const {
 }
 
 .stop-icon {
-  font-size: 0.8em;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: currentColor;
+  display: inline-block;
 }
 </style>

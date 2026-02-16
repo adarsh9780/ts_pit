@@ -1,5 +1,10 @@
-fix(agent-stream): avoid duplicate final text across respond/rewriter transitions
+fix(agent-ui): align stop/send controls and clean up stop icon
 
-- treat respond and answer_rewriter as a single final-answer stream
-- if final node switches (respond -> answer_rewriter), replace prior final text instead of appending
-- broaden fallback dedupe to skip replay when text is already contained
+- group send/stop button with context ring in a right-side toolbar cluster
+- prevent stop button from drifting to center due to space-between layout
+- replace text glyph stop icon with a centered square block for stable rendering
+
+chore(agent-ui): swap context ring and send/stop button positions in composer
+
+- place context token ring before send/stop control on the right toolbar cluster
+- keep existing behavior and styling unchanged otherwise
