@@ -1,5 +1,5 @@
-fix(agent-stream): prevent duplicate final output from fallback replay
+fix(agent-stream): avoid duplicate final text across respond/rewriter transitions
 
-- mark fallback token events with is_fallback flag
-- dedupe fallback tokens in frontend when streamed text already matches
-- preserve fallback behavior for non-streaming nodes so missing final answers are still filled
+- treat respond and answer_rewriter as a single final-answer stream
+- if final node switches (respond -> answer_rewriter), replace prior final text instead of appending
+- broaden fallback dedupe to skip replay when text is already contained

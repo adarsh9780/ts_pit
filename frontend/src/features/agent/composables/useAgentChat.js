@@ -353,6 +353,7 @@ export function useAgentChat(alertIdRef) {
       segments: [],
       planCollapsed: false,
       isFormattingFinal: false,
+      finalAnswerNode: null,
     });
     contextDebug.value = {
       active: false,
@@ -427,14 +428,20 @@ export function useAgentChat(alertIdRef) {
               const isFallback = Boolean(data.is_fallback);
               if (node === 'planner') {
                 const segment = ensurePlannerSegment(msg);
-                if (isFallback && segment.content.trim() === tokenContent.trim()) {
+                if (isFallback && segment.content.includes(tokenContent)) {
                   continue;
                 }
                 segment.content += tokenContent;
               } else if (node === 'respond' || node === 'answer_rewriter') {
                 msg.isFormattingFinal = true;
+                const previousFinalNode = String(msg.finalAnswerNode || '');
+                if (previousFinalNode && previousFinalNode !== node) {
+                  msg.content = '';
+                  msg.segments = (msg.segments || []).filter((seg) => seg.type !== 'text');
+                }
+                msg.finalAnswerNode = node;
                 const segment = ensureTextSegment(msg);
-                if (isFallback && segment.content.trim() === tokenContent.trim()) {
+                if (isFallback && segment.content.includes(tokenContent)) {
                   continue;
                 }
                 segment.content += tokenContent;
@@ -443,7 +450,7 @@ export function useAgentChat(alertIdRef) {
                 // hidden unless debug stream enabled at backend
               } else {
                 const segment = ensureTextSegment(msg);
-                if (isFallback && segment.content.trim() === tokenContent.trim()) {
+                if (isFallback && segment.content.includes(tokenContent)) {
                   continue;
                 }
                 segment.content += tokenContent;
