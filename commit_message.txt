@@ -1,4 +1,5 @@
-fix(agent-ui): preserve chronological render order in chat card
+fix(agent-ui): correct context usage percentage by using real token budget
 
-- render message sections in execution order: Plan -> tool traces -> final answer
-- keep formatting hint between tools and final output until final text is available
+- replace hardcoded ring denominator (4,000) with context token budget (default 50,000)
+- include token_budget in backend context_debug events
+- display tooltip as used/total tokens (e.g., 2700 / 50000)

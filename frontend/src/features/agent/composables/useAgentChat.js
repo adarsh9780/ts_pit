@@ -40,6 +40,7 @@ export function useAgentChat(alertIdRef) {
   const contextDebug = ref({
     active: false,
     tokenEstimate: null,
+    tokenBudget: 50000,
     summaryVersion: null,
     summarizationTriggered: false,
   });
@@ -356,6 +357,7 @@ export function useAgentChat(alertIdRef) {
     contextDebug.value = {
       active: false,
       tokenEstimate: null,
+      tokenBudget: 50000,
       summaryVersion: null,
       summarizationTriggered: false,
     };
@@ -484,6 +486,9 @@ export function useAgentChat(alertIdRef) {
                 tokenEstimate: Number.isInteger(data.token_estimate)
                   ? data.token_estimate
                   : null,
+                tokenBudget: Number.isInteger(data.token_budget) && data.token_budget > 0
+                  ? data.token_budget
+                  : 50000,
                 summaryVersion: Number.isInteger(data.summary_version)
                   ? data.summary_version
                   : null,

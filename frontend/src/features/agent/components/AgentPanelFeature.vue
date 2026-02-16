@@ -167,11 +167,15 @@ const renderPlanMarkdown = (rawContent) => {
     return raw;
   }
 };
-const contextTokenMax = 4000;
+const contextTokenMax = (ctx) => {
+  const raw = Number(ctx?.tokenBudget ?? 50000);
+  if (!Number.isFinite(raw) || raw <= 0) return 50000;
+  return raw;
+};
 const contextProgressPercent = (ctx) => {
   const raw = Number(ctx?.tokenEstimate ?? 0);
   if (!Number.isFinite(raw) || raw <= 0) return 0;
-  return Math.max(0, Math.min(100, Math.round((raw / contextTokenMax) * 100)));
+  return Math.max(0, Math.min(100, Math.round((raw / contextTokenMax(ctx)) * 100)));
 };
 const contextRingStyle = (ctx) => {
   const pct = contextProgressPercent(ctx);
@@ -394,7 +398,7 @@ const {
         <button v-else @click="stopGeneration" class="send-circle-btn stop-btn" title="Stop">
           <span class="stop-icon">■</span>
         </button>
-        <div class="context-ring-wrap" :title="`Context memory: ${contextDebug.active ? 'active' : 'inactive'}\nTokens: ${contextDebug.tokenEstimate ?? 'null'}\nTriggered: ${contextDebug.summarizationTriggered ? 'yes' : 'no'}`">
+        <div class="context-ring-wrap" :title="`Context memory: ${contextDebug.active ? 'active' : 'inactive'}\nTokens: ${(contextDebug.tokenEstimate ?? 'null')} / ${(contextDebug.tokenBudget ?? 'null')}\nTriggered: ${contextDebug.summarizationTriggered ? 'yes' : 'no'}`">
           <div class="context-ring" :style="contextRingStyle(contextDebug)">
             <div class="context-ring-inner">{{ contextProgressPercent(contextDebug) }}%</div>
           </div>

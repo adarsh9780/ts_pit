@@ -15,6 +15,7 @@ from ...logger import logprint
 
 
 router = APIRouter(tags=["agent"])
+DEFAULT_CONTEXT_TOKEN_BUDGET = 50_000
 STREAMABLE_MODEL_NODES = {
     "agent",
     "direct_answer",
@@ -186,6 +187,7 @@ def _extract_context_debug_payload(event: dict) -> dict | None:
         "type": "context_debug",
         "active": True,
         "token_estimate": token_estimate if isinstance(token_estimate, int) else None,
+        "token_budget": DEFAULT_CONTEXT_TOKEN_BUDGET,
         "summary_version": summary_version if isinstance(summary_version, int) else None,
         "summarization_triggered": bool(summarization_triggered),
     }
