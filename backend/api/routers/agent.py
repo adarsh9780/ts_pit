@@ -438,6 +438,21 @@ Status: {ctx.status or "N/A"}
         enriched_message = body.message
 
     input_state = {"messages": [("user", enriched_message)]}
+    if body.alert_context and getattr(request.app.state, "agent_mode", "") == "v3":
+        ctx = body.alert_context
+        alert_id_int: int | None = None
+        try:
+            alert_id_int = int(ctx.id)
+        except Exception:
+            alert_id_int = None
+        input_state["current_alert"] = {
+            "alert_id": alert_id_int,
+            "ticker": ctx.ticker,
+            "start_date": ctx.start_date,
+            "end_date": ctx.end_date,
+            "buy_qt": 0,
+            "sell_qt": 0,
+        }
 
     def _safe_preview(value, max_len: int = 2000):
         if value is None:

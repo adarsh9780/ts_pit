@@ -1,21 +1,104 @@
-fix(agent_v3): harden prompt variable handling across planner/execution/correction
+feat(agent_v3): add direct-answer routing and SQL-first execution guardrails
 
-Resolves recurring runtime failures caused by prompt template variable mismatches
-on VDI/Azure strict flows.
+Implements planner-driven no-tool responses for state-only questions and
+strengthens execution safety/preference for backend data retrieval via SQL.
 
 Changes:
+- backend/agent_v3/state.py
+  - add `plan_requires_execution: bool` to runtime state
+- backend/agent_v3/planning.py
+  - extend planner output model with `requires_execution`
+  - add deterministic direct-state question detection (selected/current alert)
+    and force `requires_execution=false` for those requests
+  - when execution is not required, archive/skip unresolved pending steps to
+    prevent stale tool execution on follow-up questions
+  - tighten SQL-intent keyword detection to reduce false positives
+  - include `plan_requires_execution` in planner state updates
+- backend/agent_v3/prompts/planner.yaml
+  - require planner to output `requires_execution`
+  - document no-tool path when current context/prior outputs are sufficient
+- backend/agent_v3/graph.py
+  - master routes directly to `respond` when `plan_requires_execution=false`
+  - responder now receives current alert context JSON
 - backend/agent_v3/prompts/execution.yaml
-  - escape JSON example braces to avoid accidental `{query}` template variable
+  - add explicit policy: prefer execute_sql for backend retrieval, execute_python
+    mainly for post-fetch analysis, avoid full-table reads, avoid SELECT *
 - backend/agent_v3/execution.py
-  - pass `query` defensively in execution prompt invocation payload
-- backend/agent_v3/correction.py
-  - pass `query` defensively in correction prompt invocation payload
+  - add deterministic tool bias:
+    - force execute_sql first for retrieval-style steps
+    - prefer execute_python for analysis-style steps only when prior data exists
+- backend/agent_v3/tools.py
+  - enforce bounded SQL results by auto-appending `LIMIT 200` when missing
+  - return `query_auto_limited` metadata and executed bounded query
 
-Why:
-- Unescaped JSON in prompt text can be interpreted as template placeholders by
-  ChatPromptTemplate, causing KeyError at runtime.
-- Defensive prompt payloads prevent graph crashes if template vars drift.
+Validation:
+- `python3 -m py_compile` passed for updated state/planning/graph/execution/tools
+- `uv run python` prompt variable checks passed
 
-Result:
-- Planner/execution/correction prompt rendering is robust against accidental
-  prompt-variable regressions.
+---
+
+fix(agent_v3 api): pass structured current_alert into graph input state
+
+Fixes incorrect direct-answer behavior ("There is no alert currently selected")
+when frontend clearly provides selected alert context.
+
+Root cause:
+- /agent/chat only injected alert context into enriched message text.
+- agent_v3 runtime state expected `current_alert` in structured input schema.
+- Missing structured field caused default/empty current_alert in graph nodes.
+
+Changes:
+- backend/api/routers/agent.py
+  - when `agent_mode == "v3"` and `alert_context` exists, add
+    `input_state["current_alert"]` with mapped fields:
+    - alert_id, ticker, start_date, end_date, buy_qt, sell_qt
+  - keep v1/v2 behavior untouched by guarding on agent_mode
+  - safely coerce alert id to int when possible
+
+Validation:
+- `python3 -m py_compile backend/api/routers/agent.py` passed
+
+---
+
+fix(agent_v3): prevent planner/master no-op recursion loops
+
+Fixes GraphRecursionError caused by planner returning `plan_action=reuse` with
+no actionable pending steps, which repeatedly routed master->planner.
+
+Changes:
+- backend/agent_v3/planning.py
+  - coerce `reuse` -> `append` when current state has no pending/running steps
+  - add fallback synthetic step when append/replace returns empty step list
+    to avoid no-op planning loops
+- backend/agent_v3/graph.py
+  - add master-side stop condition:
+    if planner already ran for current question and state still has no steps,
+    route to `respond` with terminal_error instead of replanning indefinitely
+
+Validation:
+- `python3 -m py_compile backend/agent_v3/planning.py backend/agent_v3/graph.py` passed
+- `uv run python` graph import smoke check passed
+
+---
+
+feat(agent_v3 planner): expose tool capabilities + artifact knowledge with schema guardrail
+
+Improves planner quality by giving it capability/context visibility while keeping
+planner outputs intent-only, and adds a deterministic preflight injection for
+SQL-like tasks when schema grounding is missing.
+
+Changes:
+- backend/agent_v3/planning.py
+  - pass `tool_descriptions` and `artifact_knowledge` into planner prompt context
+  - add SQL-intent detection on planned steps
+  - add deterministic schema-grounding step injection:
+    - prepends a step to read `artifacts/DB_SCHEMA_REFERENCE.yaml` when
+      SQL/data-query intent exists and no schema step is present in existing/new steps
+  - apply guardrail for both append and replace plan actions
+- backend/agent_v3/prompts/planner.yaml
+  - explicitly instruct planner to use tool capabilities for planning decisions
+  - add artifact context (`artifacts/*`) and available tool list sections
+
+Validation:
+- `python3 -m py_compile backend/agent_v3/planning.py` passed
+- `uv run python` planner prompt variables check passed

@@ -287,7 +287,7 @@ agent:
     max_read_bytes: 1048576
 
   safe_py_runner:
-    enabled: false
+    enabled: true
     timeout_seconds: 30
     memory_limit_mb: 256
     max_output_kb: 128
@@ -297,7 +297,7 @@ agent:
     #   C:/Users/<you>/ds/.virtualenvs/safe_py_runner/.venv/Scripts/python.exe
     # Linux/macOS example:
     #   ~/.ts_pit/safe_py_runner/.venv/bin/python
-    venv_path: "~/ds/.virtualenvs/safe_py_runner/.venv/Scripts/python.exe"
+    venv_path: "/Users/adarshmaurya/Downloads/Projects/safe_py_runner/.venv/bin/python3.11"
     # Optional imports to validate at startup/runtime (fail fast if missing from runner env).
     required_imports: []
     # Denylist model: imports are allowed except those blocked below.

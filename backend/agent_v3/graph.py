@@ -1,12 +1,3 @@
-"""
-Agent V3 Graph — bare-minimum scaffold.
-
-Three nodes, no conditional routing:
-  START → ensure_system_prompt → agent ↔ tools → ... → END
-
-The agent node binds ALL tools from TOOL_REGISTRY and lets the LLM decide.
-"""
-
 from __future__ import annotations
 
 import json
@@ -20,19 +11,9 @@ from backend.agent_v3.state import AgentV3State, AgentInputSchema
 from backend.agent_v3.planning import planner
 from backend.agent_v3.prompts import load_chat_prompt
 from backend.agent_v3.execution import executioner
-from backend.agent_v3.correction import code_correction
 from backend.llm import get_llm_model
 
-FIXABLE_ERROR_CODES = {
-    "READ_ONLY_ENFORCED",
-    "INVALID_INPUT",
-    "TABLE_NOT_FOUND",
-    "DB_ERROR",
-    "PYTHON_EXEC_ERROR",
-    "TOOL_ERROR",
-}
 MAX_REPLAN_ATTEMPTS = 1
-MAX_CORRECTION_ATTEMPTS = 2
 
 
 def _content_to_text(content: Any) -> str:
@@ -98,9 +79,10 @@ def _completed_step_payloads(state: AgentV3State) -> list[dict[str, Any]]:
             {
                 "id": step.id,
                 "instruction": step.instruction,
-                "tool": step.tool,
+                "tool": step.selected_tool,
                 "attempts": step.attempts,
-                "result": _safe_json_loads(step.result_summary),
+                "result": step.result_payload
+                or _safe_json_loads(step.result_summary),
             }
         )
     return payloads
@@ -115,7 +97,7 @@ def _failed_step_payloads(state: AgentV3State) -> list[dict[str, Any]]:
             {
                 "id": step.id,
                 "instruction": step.instruction,
-                "tool": step.tool,
+                "tool": step.selected_tool,
                 "attempts": step.attempts,
                 "error_code": step.last_error_code,
                 "error": step.error,
@@ -124,9 +106,18 @@ def _failed_step_payloads(state: AgentV3State) -> list[dict[str, Any]]:
     return payloads
 
 
-# ---------------------------------------------------------------------------
-#  Nodes
-# ---------------------------------------------------------------------------
+def _first_pending_index(state: AgentV3State) -> int:
+    for idx, step in enumerate(state.steps):
+        if step.status in {"pending", "running"}:
+            return idx
+    return len(state.steps)
+
+
+def _first_failed_index(state: AgentV3State) -> int | None:
+    for idx, step in enumerate(state.steps):
+        if step.status == "failed":
+            return idx
+    return None
 
 
 def ensure_system_prompt(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
@@ -136,7 +127,7 @@ def ensure_system_prompt(state: AgentV3State, config: RunnableConfig) -> dict[st
     system_prompt = load_chat_prompt("agent").invoke({"messages": []}).to_messages()[0]
 
     if _has_system_message(existing, expected=_content_to_text(system_prompt.content)):
-        return {}  # no-op, already present
+        return {}
 
     return {"messages": [system_prompt]}
 
@@ -144,91 +135,53 @@ def ensure_system_prompt(state: AgentV3State, config: RunnableConfig) -> dict[st
 def master(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
     _ = config
     latest_question = _latest_user_question(state.messages)
-    if latest_question and latest_question != (state.last_planned_user_question or ""):
-        return {
-            "steps": [],
-            "current_step_index": 0,
-            "failed_step_index": None,
-            "should_replan": False,
-            "replan_attempts": 0,
-            "terminal_error": None,
-            "next_step": "plan",
-        }
 
     if state.terminal_error:
         return {"next_step": "respond"}
 
-    if state.should_replan:
-        if state.replan_attempts >= MAX_REPLAN_ATTEMPTS:
-            return {
-                "next_step": "respond",
-                "terminal_error": (
-                    state.terminal_error
-                    or "Unable to produce a valid execution plan after retries."
-                ),
-            }
+    if latest_question and latest_question != (state.last_user_question or ""):
         return {
             "next_step": "plan",
-            "should_replan": False,
-            "replan_attempts": state.replan_attempts + 1,
+            "failed_step_index": None,
+            "terminal_error": None,
         }
+
+    failed_idx = _first_failed_index(state)
+    if failed_idx is not None:
+        if state.replan_attempts < MAX_REPLAN_ATTEMPTS:
+            return {
+                "next_step": "plan",
+                "failed_step_index": failed_idx,
+                "replan_attempts": state.replan_attempts + 1,
+            }
+        failed_step = state.steps[failed_idx]
+        return {
+            "next_step": "respond",
+            "terminal_error": failed_step.error or "Task failed after retries.",
+            "failed_step_index": failed_idx,
+        }
+
+    if not state.plan_requires_execution:
+        return {"next_step": "respond"}
 
     if not state.steps:
+        if latest_question and latest_question == (state.last_user_question or ""):
+            return {
+                "next_step": "respond",
+                "terminal_error": (
+                    "Planner returned no actionable steps for the current request."
+                ),
+            }
         return {"next_step": "plan"}
 
-    if state.current_step_index >= len(state.steps):
-        return {"next_step": "respond", "current_step_index": len(state.steps)}
+    pending_idx = _first_pending_index(state)
+    if pending_idx >= len(state.steps):
+        return {"next_step": "respond", "current_step_index": pending_idx}
 
-    step_idx = state.current_step_index
-    if state.failed_step_index is not None and state.failed_step_index < len(state.steps):
-        step_idx = state.failed_step_index
-    step = state.steps[step_idx]
-
-    if step.status == "failed":
-        if (
-            (step.last_error_code or "").upper() in FIXABLE_ERROR_CODES
-            and step.correction_attempts < MAX_CORRECTION_ATTEMPTS
-        ):
-            return {"next_step": "correct", "current_step_index": step_idx}
-        if (
-            (step.last_error_code or "").upper() in FIXABLE_ERROR_CODES
-            and step.correction_attempts >= MAX_CORRECTION_ATTEMPTS
-        ):
-            return {
-                "next_step": "respond",
-                "terminal_error": (
-                    step.error
-                    or f"Step {step.id} exceeded correction attempts ({MAX_CORRECTION_ATTEMPTS})."
-                ),
-            }
-        if state.replan_attempts >= MAX_REPLAN_ATTEMPTS:
-            return {
-                "next_step": "respond",
-                "terminal_error": (
-                    step.error
-                    or f"Step {step.id} failed with non-fixable error {step.last_error_code}."
-                ),
-            }
-        return {
-            "next_step": "plan",
-            "failed_step_index": step_idx,
-            "replan_attempts": state.replan_attempts + 1,
-        }
-    elif step.status in {"done", "skipped"}:
-        next_index = state.current_step_index + 1
-        if next_index >= len(state.steps):
-            return {"next_step": "respond", "current_step_index": next_index}
-        else:
-            return {
-                "next_step": "execute",
-                "current_step_index": next_index,
-            }
-    else:
-        # step.status in {"pending", "running"}:
-        return {
-            "next_step": "execute",
-            "current_step_index": state.current_step_index,
-        }
+    return {
+        "next_step": "execute",
+        "current_step_index": pending_idx,
+    }
 
 
 def respond(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
@@ -244,9 +197,9 @@ def respond(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
                 content=(
                     "You are generating the final user-facing answer. "
                     "Answer the user's request directly using completed tool outputs. "
-                    "Do not include internal reasoning, planning narration, or tool-debug details. "
-                    "If SQL/tool outputs contain rows, present the requested results clearly (prefer table format). "
-                    "If partial failure occurred, provide the best available answer and a short limitation note."
+                    "Do not include internal reasoning or debug traces. "
+                    "If there are rows/data results, present them clearly. "
+                    "If partial failure occurred, include one concise limitation note."
                 )
             ),
             HumanMessage(
@@ -256,7 +209,11 @@ def respond(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
                     "Completed step outputs (JSON):\n"
                     f"{json.dumps(completed, default=str)}\n\n"
                     "Failed steps (JSON):\n"
-                    f"{json.dumps(failed, default=str)}"
+                    f"{json.dumps(failed, default=str)}\n\n"
+                    "Current alert context (JSON):\n"
+                    f"{state.current_alert.model_dump_json()}\n\n"
+                    "Terminal error (if any):\n"
+                    f"{state.terminal_error or ''}"
                 )
             ),
         ]
@@ -264,38 +221,22 @@ def respond(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
     return {"messages": [ai_msg]}
 
 
-# def executioner(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
-#     _ = config
-#     step = state.steps[state.current_step_index]
-#     step.status = "done"
-#     return {"steps": state.steps}
-
-
 def router(state: AgentV3State) -> str:
     mapping = {
         "plan": "planner",
         "respond": "respond",
         "execute": "executioner",
-        "correct": "code_correction",
     }
-
     return mapping[state.next_step]
 
 
-# ---------------------------------------------------------------------------
-#  Graph builder
-# ---------------------------------------------------------------------------
-
-
 def build_graph():
-
     workflow = StateGraph(state_schema=AgentV3State, input_schema=AgentInputSchema)
     workflow.add_node("ensure_system_prompt", ensure_system_prompt)
     workflow.add_node("master", master)
     workflow.add_node("planner", planner)
     workflow.add_node("respond", respond)
     workflow.add_node("executioner", executioner)
-    workflow.add_node("code_correction", code_correction)
 
     workflow.add_edge(START, "ensure_system_prompt")
     workflow.add_edge("ensure_system_prompt", "master")
@@ -306,16 +247,13 @@ def build_graph():
             "planner": "planner",
             "respond": "respond",
             "executioner": "executioner",
-            "code_correction": "code_correction",
         },
     )
     workflow.add_edge("planner", "master")
     workflow.add_edge("executioner", "master")
-    workflow.add_edge("code_correction", "master")
     workflow.add_edge("respond", END)
 
     return workflow
 
 
-# Expose uncompiled workflow — main.py will compile with a checkpointer.
 workflow = build_graph()

@@ -179,6 +179,27 @@ def _rewrite_logical_sql(query: str) -> tuple[str, bool]:
     return rewritten, changed
 
 
+def _has_sql_limit_clause(query: str) -> bool:
+    return bool(re.search(r"\blimit\s+\d+\b", query, flags=re.IGNORECASE))
+
+
+def _append_sql_limit(query: str, limit: int) -> str:
+    trimmed = query.rstrip()
+    if trimmed.endswith(";"):
+        trimmed = trimmed[:-1].rstrip()
+    return f"{trimmed} LIMIT {limit}"
+
+
+def _enforce_sql_result_limit(query: str, default_limit: int = 200) -> tuple[str, bool]:
+    """
+    Enforce bounded result sets by default to avoid accidental full-table scans.
+    Leaves explicit LIMIT queries unchanged.
+    """
+    if _has_sql_limit_clause(query):
+        return query, False
+    return _append_sql_limit(query, default_limit), True
+
+
 def _load_schema_text() -> str:
     schema_candidates = [
         Path(__file__).parent / "db_schema.yaml",
@@ -319,7 +340,8 @@ def execute_sql(query: str) -> str:
 
     try:
         rewritten_query, auto_rewritten = _rewrite_logical_sql(query)
-        stmt = text(rewritten_query)
+        bounded_query, auto_limited = _enforce_sql_result_limit(rewritten_query)
+        stmt = text(bounded_query)
         with engine.connect() as conn:
             result = conn.execute(stmt)
             rows = result.fetchall()
@@ -329,7 +351,8 @@ def execute_sql(query: str) -> str:
             results,
             row_count=len(results),
             query_rewritten=auto_rewritten,
-            executed_query=rewritten_query if auto_rewritten else query,
+            query_auto_limited=auto_limited,
+            executed_query=bounded_query,
         )
     except Exception as e:
         msg = str(e)
