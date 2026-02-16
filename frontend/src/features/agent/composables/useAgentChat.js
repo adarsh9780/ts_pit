@@ -90,7 +90,8 @@ export function useAgentChat(alertIdRef) {
     if (!msg) return;
     if (!hasEphemeralSegments(msg)) return;
     if (!hasFinalText(msg)) return;
-    msg.ephemeralCollapsed = true;
+    msg.planCollapsed = true;
+    msg.draftCollapsed = true;
   };
 
   const generateGreeting = (info) => {
@@ -363,7 +364,8 @@ export function useAgentChat(alertIdRef) {
       content: '',
       tools: [],
       segments: [],
-      ephemeralCollapsed: false,
+      planCollapsed: false,
+      draftCollapsed: false,
     });
     contextDebug.value = {
       active: false,

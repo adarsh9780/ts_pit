@@ -1,17 +1,11 @@
-feat(agent-ui): surface draft updates as muted ribbons and keep validator hidden by default
+feat(agent-ui): improve agent v3 working-details UX and streaming behavior
 
-- SSE: emit `draft_update` events for ephemeral outputs from `respond` and `answer_rewriter`
-- SSE: keep `answer_validator` hidden unless debug stream is enabled (`?debug=1` or `x-agent-debug: true`)
-- keep planner output visible via fallback path
-- frontend: handle `draft_update` in `useAgentChat` and store as `segment.type='draft'`
-- frontend: render draft segments as muted ribbons in `AgentPanelFeature.vue`
-
-feat(agent-ui): move context debug to composer ring, collapse ephemeral traces, and restore v3 streaming
-
-- move top context debug strip into a bottom circular progress ring beside send/stop
-- show hover tooltip with context memory, token estimate, and summarization trigger state
-- group ephemeral segments (planner, draft updates, tools) under collapsible "Working details"
-- auto-collapse ephemeral details once a final assistant answer is present
-- stream planner/respond/answer_rewriter model chunks from backend with node metadata
-- include node name in token events and use per-node fallback suppression to avoid missing final outputs
-- keep answer_validator hidden by default (only emitted as draft update in debug mode)
+- move context debug status from top strip to bottom composer ring with hover details
+- restore v3 node streaming for planner/respond/answer_rewriter and include node metadata in token SSE events
+- use per-node fallback suppression so final outputs are not dropped when planner streams first
+- split working details into clearer sections:
+  - Plan: dedicated collapsible section rendered as readable markdown (parsed from planner JSON when possible)
+  - Tools: shown in normal flow with existing traces and statuses
+  - Draft updates: separate collapsible section for respond/rewriter ephemeral text
+- auto-collapse Plan and Draft updates once final answer is ready
+- keep answer_validator hidden unless debug stream is enabled
