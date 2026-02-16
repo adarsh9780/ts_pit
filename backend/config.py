@@ -311,6 +311,31 @@ class Config:
             merged["max_tool_error_retries"] = defaults["max_tool_error_retries"]
         return merged
 
+    def get_agent_response_quality_config(self) -> Dict[str, Any]:
+        """Get response quality pipeline settings for agent_v3."""
+        defaults: Dict[str, Any] = {
+            "enabled": True,
+            "max_answer_revision_attempts": 1,
+            "max_master_escalations_from_validation": 1,
+        }
+        cfg = self._config.get("agent", {}).get("response_quality", {})
+        if not isinstance(cfg, dict):
+            return defaults
+
+        merged = dict(defaults)
+        merged.update(cfg)
+
+        merged["enabled"] = bool(merged.get("enabled", True))
+        for key, default in (
+            ("max_answer_revision_attempts", 1),
+            ("max_master_escalations_from_validation", 1),
+        ):
+            try:
+                merged[key] = max(0, int(merged.get(key, default)))
+            except Exception:
+                merged[key] = default
+        return merged
+
     def get_impact_label_aliases(self) -> Dict[str, str]:
         """
         Get optional impact-label aliases.

@@ -1,25 +1,36 @@
 from __future__ import annotations
 
 import ast
-import json
 import re
-from typing import Any
+from typing import Any, Literal
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
-from langchain_core.messages import AnyMessage, SystemMessage, HumanMessage, AIMessage
+from langchain_core.messages import AnyMessage, SystemMessage, HumanMessage
 
 from backend.agent_v3.state import AgentV3State, AgentInputSchema
 from backend.agent_v3.planning import planner
 from backend.agent_v3.prompts import load_chat_prompt
 from backend.agent_v3.execution import executioner
+from backend.agent_v3.responding import respond_node
+from backend.agent_v3.validation import answer_validator_node
+from backend.agent_v3.rewriting import answer_rewriter_node
 from backend.agent_v3.utilis import build_prompt_messages
+from backend.config import get_config
 from backend.llm import get_llm_model
 
 MAX_REPLAN_ATTEMPTS = 1
 SUMMARY_TRIGGER_TOKENS = 50_000
 SUMMARY_RECENT_MESSAGE_WINDOW = 16
 SUMMARY_TEXT_LIMIT = 2500
+_response_quality_cfg = get_config().get_agent_response_quality_config()
+RESPONSE_QUALITY_ENABLED = bool(_response_quality_cfg.get("enabled", True))
+MAX_ANSWER_REVISION_ATTEMPTS = int(
+    _response_quality_cfg.get("max_answer_revision_attempts", 1)
+)
+MAX_MASTER_ESCALATIONS_FROM_VALIDATION = int(
+    _response_quality_cfg.get("max_master_escalations_from_validation", 1)
+)
 META_HELP_PATTERNS = (
     "what can you do",
     "help",
@@ -303,77 +314,6 @@ def _llm_guard_intent(question: str) -> str | None:
     return None
 
 
-def _safe_json_loads(raw: str | None) -> dict[str, Any]:
-    if not raw:
-        return {}
-    try:
-        data = json.loads(raw)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {"raw": str(raw)}
-
-
-def _step_plan_version(step_id: str) -> int | None:
-    text = str(step_id or "")
-    if not text.startswith("v"):
-        return None
-    marker = "_s"
-    if marker not in text:
-        return None
-    try:
-        return int(text[1 : text.index(marker)])
-    except Exception:
-        return None
-
-
-def _is_current_plan_step(state: AgentV3State, step_id: str) -> bool:
-    version = _step_plan_version(step_id)
-    if version is None:
-        # Backward compatibility for legacy step IDs without vN prefix.
-        return True
-    return version == state.plan_version
-
-
-def _completed_step_payloads(state: AgentV3State) -> list[dict[str, Any]]:
-    payloads: list[dict[str, Any]] = []
-    for step in state.steps:
-        if step.status != "done":
-            continue
-        if not _is_current_plan_step(state, step.id):
-            continue
-        payloads.append(
-            {
-                "id": step.id,
-                "instruction": step.instruction,
-                "tool": step.selected_tool,
-                "attempts": step.attempts,
-                "result": step.result_payload
-                or _safe_json_loads(step.result_summary),
-            }
-        )
-    return payloads
-
-
-def _failed_step_payloads(state: AgentV3State) -> list[dict[str, Any]]:
-    payloads: list[dict[str, Any]] = []
-    for step in state.steps:
-        if step.status != "failed":
-            continue
-        if not _is_current_plan_step(state, step.id):
-            continue
-        payloads.append(
-            {
-                "id": step.id,
-                "instruction": step.instruction,
-                "tool": step.selected_tool,
-                "attempts": step.attempts,
-                "error_code": step.last_error_code,
-                "error": step.error,
-            }
-        )
-    return payloads
-
-
 def _first_pending_index(state: AgentV3State) -> int:
     for idx, step in enumerate(state.steps):
         if step.status in {"pending", "running"}:
@@ -562,6 +502,12 @@ def master(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
             "next_step": "plan",
             "failed_step_index": None,
             "terminal_error": None,
+            "draft_answer": None,
+            "last_answer_feedback": None,
+            "answer_revision_attempts": 0,
+            "master_escalations_from_validation": 0,
+            "max_answer_revision_attempts": MAX_ANSWER_REVISION_ATTEMPTS,
+            "max_master_escalations_from_validation": MAX_MASTER_ESCALATIONS_FROM_VALIDATION,
         }
 
     if state.terminal_error:
@@ -604,50 +550,6 @@ def master(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
         "current_step_index": pending_idx,
     }
 
-
-def respond(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
-    _ = config
-    if state.guardrail_response:
-        return {
-            "messages": [AIMessage(content=state.guardrail_response)],
-            "guardrail_response": None,
-            "terminal_error": None,
-        }
-    llm = get_llm_model()
-    user_question = _latest_user_question(state.messages)
-    completed = _completed_step_payloads(state)
-    failed = _failed_step_payloads(state)
-
-    ai_msg = llm.invoke(
-        [
-            SystemMessage(
-                content=(
-                    "You are generating the final user-facing answer. "
-                    "Answer the user's request directly using completed tool outputs. "
-                    "Do not include internal reasoning or debug traces. "
-                    "If there are rows/data results, present them clearly. "
-                    "If partial failure occurred, include one concise limitation note."
-                )
-            ),
-            HumanMessage(
-                content=(
-                    "User request:\n"
-                    f"{user_question or '(missing user request)'}\n\n"
-                    "Completed step outputs (JSON):\n"
-                    f"{json.dumps(completed, default=str)}\n\n"
-                    "Failed steps (JSON):\n"
-                    f"{json.dumps(failed, default=str)}\n\n"
-                    "Current alert context (JSON):\n"
-                    f"{state.current_alert.model_dump_json()}\n\n"
-                    "Terminal error (if any):\n"
-                    f"{state.terminal_error or ''}"
-                )
-            ),
-        ]
-    )
-    return {"messages": [ai_msg]}
-
-
 def router(state: AgentV3State) -> str:
     mapping = {
         "plan": "planner",
@@ -663,6 +565,26 @@ def intent_router(state: AgentV3State) -> str:
     return "master"
 
 
+def route_after_respond(
+    state: AgentV3State,
+) -> Literal["answer_validator", "__end__"]:
+    if RESPONSE_QUALITY_ENABLED:
+        return "answer_validator"
+    return "__end__"
+
+
+def route_after_validation(
+    state: AgentV3State,
+) -> Literal["answer_rewriter", "master", "__end__"]:
+    feedback = state.last_answer_feedback
+    decision = str(getattr(feedback, "decision", "accept") or "accept")
+    if decision == "rewrite":
+        return "answer_rewriter"
+    if decision == "escalate":
+        return "master"
+    return "__end__"
+
+
 def build_graph():
     workflow = StateGraph(state_schema=AgentV3State, input_schema=AgentInputSchema)
     workflow.add_node("ensure_system_prompt", ensure_system_prompt)
@@ -670,7 +592,9 @@ def build_graph():
     workflow.add_node("intent_guard", intent_guard)
     workflow.add_node("master", master)
     workflow.add_node("planner", planner)
-    workflow.add_node("respond", respond)
+    workflow.add_node("respond", respond_node)
+    workflow.add_node("answer_validator", answer_validator_node)
+    workflow.add_node("answer_rewriter", answer_rewriter_node)
     workflow.add_node("executioner", executioner)
 
     workflow.add_edge(START, "ensure_system_prompt")
@@ -695,7 +619,9 @@ def build_graph():
     )
     workflow.add_edge("planner", "master")
     workflow.add_edge("executioner", "master")
-    workflow.add_edge("respond", END)
+    workflow.add_conditional_edges("respond", route_after_respond)
+    workflow.add_conditional_edges("answer_validator", route_after_validation)
+    workflow.add_edge("answer_rewriter", "answer_validator")
 
     return workflow
 

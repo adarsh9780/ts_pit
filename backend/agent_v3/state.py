@@ -15,6 +15,14 @@ class CorrectionAttempt(BaseModel):
     reason: str | None = None
 
 
+class AnswerFeedback(BaseModel):
+    decision: Literal["accept", "rewrite", "escalate"] = "accept"
+    reason: str = ""
+    issues: list[str] = Field(default_factory=list)
+    rewrite_instructions: str | None = None
+    confidence: float | None = None
+
+
 class CurrentAlertContext(BaseModel):
     alert_id: int | None = Field(
         default=None,
@@ -75,6 +83,12 @@ class AgentV3State(BaseModel):
     token_estimate: int = Field(default=0, ge=0)
     intent_class: Literal["task", "meta_help", "blocked_user_code", "blocked_safety"] = "task"
     guardrail_response: str | None = None
+    draft_answer: str | None = None
+    last_answer_feedback: AnswerFeedback | None = None
+    answer_revision_attempts: int = Field(default=0, ge=0)
+    master_escalations_from_validation: int = Field(default=0, ge=0)
+    max_answer_revision_attempts: int = Field(default=1, ge=0)
+    max_master_escalations_from_validation: int = Field(default=1, ge=0)
 
 
 class AgentInputSchema(BaseModel):

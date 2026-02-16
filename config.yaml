@@ -262,6 +262,14 @@ agent:
     # 0 disables retry-after-error behavior.
     max_tool_error_retries: 3
 
+  response_quality:
+    # Enable post-response validator/rewriter pipeline in agent_v3.
+    enabled: true
+    # Max rewrite attempts before escalation/fallback finalize.
+    max_answer_revision_attempts: 1
+    # Max times validator can send flow back to master in a single user turn.
+    max_master_escalations_from_validation: 1
+
   filesystem:
     # Directories are resolved relative to project root unless absolute.
     # Keep this scoped and minimal.

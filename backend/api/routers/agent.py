@@ -15,8 +15,15 @@ from ...logger import logprint
 
 
 router = APIRouter(tags=["agent"])
-STREAMABLE_MODEL_NODES = {"agent", "direct_answer", "respond"}
-FALLBACK_MODEL_OUTPUT_NODES = {"agent", "direct_answer", "planner", "respond"}
+STREAMABLE_MODEL_NODES = {"agent", "direct_answer"}
+FALLBACK_MODEL_OUTPUT_NODES = {
+    "agent",
+    "direct_answer",
+    "planner",
+    "respond",
+    "answer_validator",
+    "answer_rewriter",
+}
 
 
 def _looks_like_code_submission(text_value: str) -> bool:
@@ -88,11 +95,20 @@ def _extract_fallback_ai_text(event: dict) -> str:
             for msg in reversed(messages):
                 role = str(getattr(msg, "type", "")).lower()
                 if role in {"ai", "assistant"}:
+                    additional = getattr(msg, "additional_kwargs", None)
+                    if (
+                        isinstance(additional, dict)
+                        and additional.get("ephemeral_node_output")
+                    ):
+                        continue
                     return _content_to_text(getattr(msg, "content", ""))
         return _content_to_text(output.get("content"))
 
     role = str(getattr(output, "type", "")).lower()
     if role in {"ai", "assistant"}:
+        additional = getattr(output, "additional_kwargs", None)
+        if isinstance(additional, dict) and additional.get("ephemeral_node_output"):
+            return ""
         return _content_to_text(getattr(output, "content", ""))
 
     return ""
