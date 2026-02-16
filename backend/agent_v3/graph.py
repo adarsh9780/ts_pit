@@ -70,10 +70,33 @@ def _safe_json_loads(raw: str | None) -> dict[str, Any]:
         return {"raw": str(raw)}
 
 
+def _step_plan_version(step_id: str) -> int | None:
+    text = str(step_id or "")
+    if not text.startswith("v"):
+        return None
+    marker = "_s"
+    if marker not in text:
+        return None
+    try:
+        return int(text[1 : text.index(marker)])
+    except Exception:
+        return None
+
+
+def _is_current_plan_step(state: AgentV3State, step_id: str) -> bool:
+    version = _step_plan_version(step_id)
+    if version is None:
+        # Backward compatibility for legacy step IDs without vN prefix.
+        return True
+    return version == state.plan_version
+
+
 def _completed_step_payloads(state: AgentV3State) -> list[dict[str, Any]]:
     payloads: list[dict[str, Any]] = []
     for step in state.steps:
         if step.status != "done":
+            continue
+        if not _is_current_plan_step(state, step.id):
             continue
         payloads.append(
             {
@@ -92,6 +115,8 @@ def _failed_step_payloads(state: AgentV3State) -> list[dict[str, Any]]:
     payloads: list[dict[str, Any]] = []
     for step in state.steps:
         if step.status != "failed":
+            continue
+        if not _is_current_plan_step(state, step.id):
             continue
         payloads.append(
             {

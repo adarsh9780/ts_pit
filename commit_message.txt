@@ -233,3 +233,24 @@ Changes:
 Validation:
 - `python3 -m py_compile backend/agent_v3/planning.py backend/agent_v3/execution.py` passed
 - schema title smoke check passed
+
+---
+
+fix(agent_v3 respond): scope completed/failed step context to current plan version
+
+Prevents stale errors (and stale outputs) from older plans leaking into final
+responses for new follow-up questions.
+
+Changes:
+- backend/agent_v3/graph.py
+  - add step-id plan version parser (`vN_sM`)
+  - filter `_failed_step_payloads` to include only steps from `state.plan_version`
+  - filter `_completed_step_payloads` to current plan version for consistency
+  - keep backward compatibility: legacy step ids without `vN_` are included
+
+Impact:
+- limitation notes now reflect current ask execution only
+- successful current turns no longer inherit historical technical-issue notes
+
+Validation:
+- `python3 -m py_compile backend/agent_v3/graph.py` passed
