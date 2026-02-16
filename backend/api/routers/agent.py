@@ -475,8 +475,31 @@ Status: {ctx.status or "N/A"}
         }
 
     def _safe_preview(value, max_len: int = 2000):
+        def _truncate_json_value(raw, max_string_len: int = 900):
+            if isinstance(raw, str):
+                if len(raw) <= max_string_len:
+                    return raw
+                return raw[:max_string_len] + "...(truncated)"
+            if isinstance(raw, dict):
+                return {k: _truncate_json_value(v, max_string_len) for k, v in raw.items()}
+            if isinstance(raw, list):
+                return [_truncate_json_value(v, max_string_len) for v in raw]
+            return raw
+
         if value is None:
             return None
+        if isinstance(value, (dict, list)):
+            try:
+                # Keep preview JSON parseable in the frontend by truncating
+                # long leaf strings instead of truncating the serialized blob.
+                structured_preview = _truncate_json_value(value)
+                text_value = json.dumps(structured_preview, default=str)
+                if len(text_value) > max_len:
+                    compact_preview = _truncate_json_value(value, max_string_len=300)
+                    text_value = json.dumps(compact_preview, default=str)
+                return text_value
+            except Exception:
+                pass
         try:
             text_value = json.dumps(value, default=str)
         except Exception:

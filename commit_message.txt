@@ -277,3 +277,28 @@ Behavior:
 
 Validation:
 - `python3 -m py_compile backend/agent_v3/planning.py backend/api/routers/agent.py` passed
+
+---
+
+fix(agent stream/ui): keep tool input preview JSON parseable so truncated Python code still renders
+
+Problem:
+- Successful `execute_python` calls often carry long `code` inputs.
+- Backend preview logic truncated the serialized JSON blob at a character boundary,
+  producing invalid JSON.
+- Frontend tool panel parses `tool.input` as JSON before showing `Python Code`, so
+  invalid JSON caused code blocks to disappear on successful runs.
+
+Changes:
+- backend/api/routers/agent.py
+  - update `_safe_preview` to preserve parseable JSON for dict/list inputs
+  - truncate long leaf string values (e.g., `code`, `query`) instead of truncating
+    the full serialized JSON string
+  - keep fallback truncation behavior for non-JSON primitive/string payloads
+
+Impact:
+- Python and SQL tool cards now show truncated code consistently on successful runs.
+- Tool commentary and code-copy behavior remains unchanged.
+
+Validation:
+- `python3 -m py_compile backend/api/routers/agent.py` passed
