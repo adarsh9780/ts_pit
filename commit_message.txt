@@ -1,7 +1,5 @@
-fix(agent-v3,respond): preserve prior execution outputs across turns and enrich final answers
+fix(agent-v3,prompts): enforce utf-8 prompt loading and remove non-ascii quote in respond prompt
 
-- remove plan-version-only filtering when collecting completed/failed step payloads for responder context
-- ensure follow-up turns (for example, "show the news") can reuse previously completed tool outputs
-- strengthen respond prompt to be slightly more verbose and evidence-first by default
-- require count/list answers to include exact counts plus concrete record previews from completed outputs
-- prefer showing all records when small (<=10) and top 5-10 with a remainder note when larger
+- load prompt yaml files with explicit `encoding=\"utf-8\"` to avoid Windows cp1252 decode failures
+- replace smart quote in `respond.yaml` with ASCII quote for cross-platform safety
+- prevent `UnicodeDecodeError: 'charmap' codec can't decode byte 0x9d` during respond node prompt load

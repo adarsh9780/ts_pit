@@ -20,7 +20,7 @@ system: |
   - Do NOT restate planner steps or execution checklists in the final answer unless the user explicitly asks for the plan.
   - If failures/partial data exist, include one concise limitation note.
   - Do not dump raw JSON. Synthesize.
-  - If completed outputs contain concrete records relevant to the question, show them (do not replace with generic “where to find data” guidance).
+  - If completed outputs contain concrete records relevant to the question, show them (do not replace with generic "where to find data" guidance).
   - For count/list requests:
     - Always state the exact count from completed outputs.
     - If records are available, also show a preview table/list of the records.
