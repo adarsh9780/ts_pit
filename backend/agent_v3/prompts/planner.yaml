@@ -15,6 +15,12 @@ system: |
   - Use replace only when there is clear conflict with pending steps.
   - Use reuse only when pending steps are already sufficient.
   - If the question can be answered directly from current alert context or prior completed outputs, set `requires_execution=false` and return no steps.
+  - Plan for answer-complete outputs, not minimal outputs.
+  - Include enough retrieval/processing so the final response can show concrete evidence, not just a scalar metric.
+  - For count/list requests (for example, "how many news"), plan to provide both:
+    - the exact count, and
+    - representative records (or all records when small) needed to show the items directly.
+  - If relevant records already exist in completed steps, prefer reuse/no execution; otherwise append steps to fetch them.
 
   Step rules:
   - Steps must be intent-only.
@@ -28,6 +34,7 @@ system: |
     2) Fetch required data with SQL
     3) Use Python only if additional analysis/transformation is needed
   - Do not force analysis/code steps if SQL output already answers the request.
+  - Ensure steps support direct user-facing presentation of results (headlines/rows/dates), not only internal aggregates.
 
   Context:
   - User request: {query}

@@ -22,6 +22,14 @@ const getMaterialityColor = (code) => {
 };
 
 const resolveArticleId = (article) => article?.id ?? article?.article_id ?? article?.art_id ?? '-';
+const resolveArticleUrl = (article) =>
+    String(
+        article?.url ??
+        article?.article_url ??
+        article?.link ??
+        article?.news_url ??
+        ''
+    ).trim();
 const resolveTheme = (article) => String(article?.theme ?? 'UNCATEGORIZED');
 const resolveSentiment = (article) => String(article?.sentiment ?? 'NEUTRAL');
 const resolveSentimentClass = (article) =>
@@ -54,7 +62,19 @@ const formatImpactScore = (value) => {
                         <span class="news-date">#{{ resolveArticleId(article) }} • {{ article.created_date }}</span>
                         <span class="news-theme">{{ resolveTheme(article).replace(/_/g, ' ') }}</span>
                     </div>
-                    <h4 class="news-title">{{ article.title }}</h4>
+                    <h4 class="news-title">
+                        <a
+                            v-if="resolveArticleUrl(article)"
+                            class="news-title-link"
+                            :href="resolveArticleUrl(article)"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            :title="`Open original article: ${article.title || 'news article'}`"
+                        >
+                            {{ article.title }}
+                        </a>
+                        <span v-else>{{ article.title }}</span>
+                    </h4>
                     
                     <!-- AI Analysis Block -->
                     <div v-if="article.analysis" class="analysis-block">
@@ -110,7 +130,29 @@ const formatImpactScore = (value) => {
 .news-date { color: #64748b; font-weight: 500; }
 .news-theme { color: #6366f1; font-weight: 600; background: #eef2ff; padding: 0 0.5rem; border-radius: 4px; font-size: 0.7rem; }
 .news-title { margin: 0 0 0.5rem 0; font-size: 1rem; color: #1e293b; line-height: 1.4; }
-.news-summary { font-size: 0.875rem; color: #475569; line-height: 1.5; margin-bottom: 0.75rem; }
+.news-title-link {
+    color: inherit;
+    text-decoration: none;
+    cursor: pointer;
+    transition: color 0.15s ease, text-decoration-color 0.15s ease;
+}
+.news-title-link:hover,
+.news-title-link:focus-visible {
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+    text-decoration-color: rgba(30, 41, 59, 0.6);
+    outline: none;
+}
+.news-summary {
+    font-size: 0.875rem;
+    color: #475569;
+    line-height: 1.5;
+    margin-bottom: 0.75rem;
+    max-inline-size: none;
+    width: 100%;
+    overflow-wrap: anywhere;
+}
 .sentiment-indicator { font-size: 0.75rem; font-weight: 600; }
 .sentiment-indicator.bullish { color: #16a34a; }
 .sentiment-indicator.bearish { color: #dc2626; }

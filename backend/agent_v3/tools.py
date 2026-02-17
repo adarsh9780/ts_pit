@@ -662,7 +662,7 @@ def get_article_by_id(article_id: str) -> str:
 
 
 @tool
-def analyze_current_alert(alert_id: str) -> str:
+def analyze_current_alert(alert_id: str | int) -> str:
     """
     Run deterministic-first analysis for the current alert without persisting.
     """
@@ -698,7 +698,7 @@ def analyze_current_alert(alert_id: str) -> str:
 
 @tool
 def generate_current_alert_report(
-    alert_id: str, session_id: str, include_web_news: bool = True
+    alert_id: str | int, session_id: str, include_web_news: bool = True
 ) -> str:
     """
     Generate a downloadable investigation report for the current alert.

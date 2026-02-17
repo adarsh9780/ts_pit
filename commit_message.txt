@@ -1,5 +1,21 @@
-fix(agent-v3,prompts): enforce utf-8 prompt loading and remove non-ascii quote in respond prompt
+fix(agent-v3,planner): plan answer-complete evidence instead of minimal outputs
 
-- load prompt yaml files with explicit `encoding=\"utf-8\"` to avoid Windows cp1252 decode failures
-- replace smart quote in `respond.yaml` with ASCII quote for cross-platform safety
-- prevent `UnicodeDecodeError: 'charmap' codec can't decode byte 0x9d` during respond node prompt load
+- update planner policy to target answer-complete results so responder can present concrete evidence directly
+- require count/list intents to plan for exact totals plus representative records (or all records when small)
+- prefer reuse when relevant records already exist in completed steps, otherwise append retrieval steps
+- strengthen step guidance to support user-facing presentation (rows/headlines/dates), not just aggregate metrics
+
+fix(alert-news-ui): make article titles link-aware on hover and improve summary text wrapping
+
+- render news titles as clickable links when URL fields are present (`url`, `article_url`, `link`, `news_url`)
+- keep default title styling unchanged so links look like normal titles until hover/focus
+- add subtle underline affordance on hover/focus to indicate original-article navigation
+- remove measure cap for news summaries and force full-width wrapping to use all available card space
+- improve long-text wrapping with `overflow-wrap:anywhere` for dense summaries
+
+fix(agent-v3,respond): prevent stale failure leakage and accept numeric alert ids for report tools
+
+- keep responder access to all completed outputs, but restrict failed-step context to current plan version only
+- prevent old, unrelated failures from being surfaced as current-turn technical issues
+- update `analyze_current_alert` and `generate_current_alert_report` tool signatures to accept `alert_id` as `string | integer`
+- remove recurrent validation mismatch when frontend/current alert context provides numeric alert ids

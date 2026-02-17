@@ -57,6 +57,19 @@ def _latest_user_question(messages: list[AnyMessage]) -> str:
     return ""
 
 
+def _step_plan_version(step_id: str) -> int | None:
+    text = str(step_id or "")
+    if not text.startswith("v"):
+        return None
+    marker = "_s"
+    if marker not in text:
+        return None
+    try:
+        return int(text[1 : text.index(marker)])
+    except Exception:
+        return None
+
+
 def completed_step_payloads(state: AgentV3State) -> list[dict[str, Any]]:
     payloads: list[dict[str, Any]] = []
     for step in state.steps:
@@ -78,6 +91,9 @@ def failed_step_payloads(state: AgentV3State) -> list[dict[str, Any]]:
     payloads: list[dict[str, Any]] = []
     for step in state.steps:
         if step.status != "failed":
+            continue
+        version = _step_plan_version(step.id)
+        if version is not None and version != state.plan_version:
             continue
         payloads.append(
             {
