@@ -42,3 +42,4 @@ backend/agent_v2/db_schema.yamlcommit_message.txt
 .cursorrules
 .langgraph_api/*
 backend/src/artifacts/*
+backend/src/ts_pit/data/reports/*

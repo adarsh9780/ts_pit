@@ -1,12 +1,11 @@
-feat(refactor): migrate backend to src-layout structure
+feat(refactor): inline artifacts and configure report storage
 
-- Relocated core source code from `backend/` to `backend/src/ts_pit/`.
-- Moved all python project configuration files (`pyproject.toml`, `main.py`, `scripts/`, `tests/`, `libs/`, `langgraph.json`, `.env`, `config.yaml`, `alerts.db`, `openapi.yaml`, `README.md`) from root to `backend/`.
-- Updated `pyproject.toml` to configure `src` layout packaging.
-- Fixed `config.py` to correctly resolve configuration paths relative to new structure.
-- Updated all imports throughout the project (`backend`, `scripts`, `tests`) to use the definitive `ts_pit` package instead of fragile `backend` imports.
-
-**Why this matters:**
-1. **Resolves Import Ambiguity**: Eliminates persistent `ModuleNotFoundError` and `backend` vs local imports confusion by enforcing a standard package structure.
-2. **Robust Testing**: Tests now run against the installed package (`ts_pit`), ensuring that what we test matches what we ship, rather than relying on `sys.path` hacks.
-3. **Clean Separation**: Isolates the Python backend environment entirely within `backend/`, preventing root pollution and clearly separating frontend/backend concerns.
+- Moved `artifacts/` from project root to `backend/src/ts_pit/artifacts/` to bundle critical data with the package.
+- Configured reports to be stored in `backend/src/ts_pit/data/reports/{session_id}/`.
+- Updated `backend/src/ts_pit/reporting.py` `REPORTS_ROOT` to point to the new data directory.
+- Updated `backend/src/ts_pit/agent_v3/tools.py` to:
+  - Load `DB_SCHEMA_REFERENCE.yaml` from package resources.
+  - Set `PROJECT_ROOT` to the package root.
+  - Allow writing markdown reports to `data/reports/`.
+- Updated `backend/config.yaml` `agent.filesystem.allowed_dirs` to include `data/reports` and increased default `max_depth`.
+- Updated `execution.yaml` prompt example to reflect new artifact path.

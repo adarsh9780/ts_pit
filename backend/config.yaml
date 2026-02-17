@@ -275,6 +275,7 @@ agent:
     # Keep this scoped and minimal.
     allowed_dirs:
       - artifacts
+      - data/reports
     # Max nesting depth from each allowed root:
     # 0 => only files directly in root
     # 1 => allow one level below root

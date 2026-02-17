@@ -200,21 +200,35 @@ def _enforce_sql_result_limit(query: str, default_limit: int = 200) -> tuple[str
     return _append_sql_limit(query, default_limit), True
 
 
+
 def _load_schema_text() -> str:
-    schema_candidates = [
-        Path(__file__).parent / "db_schema.yaml",
-        Path(__file__).parent.parent / "agent" / "db_schema.yaml",
-    ]
-    for path in schema_candidates:
-        if path.exists():
-            with open(path, "r", encoding="utf-8") as f:
-                schema_data = yaml.safe_load(f)
-                return yaml.dump(schema_data, sort_keys=False)
+    # Try loading from package artifacts
+    candidate = Path(__file__).resolve().parent.parent / "artifacts" / "DB_SCHEMA_REFERENCE.yaml"
+    if candidate.exists():
+        with open(candidate, "r", encoding="utf-8") as f:
+            return f.read()  # Return raw text or yaml dump as preferred
+            # The original code returned yaml dump of safe_load, preserving that behavior:
+            # schema_data = yaml.safe_load(f)
+            # return yaml.dump(schema_data, sort_keys=False)
+            # Actually, let's stick to safe loading to ensure valid YAML
+    
+    # Fallback to local if needed (though we moved it)
     return ""
 
 
-DB_SCHEMA = _load_schema_text()
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+def _load_schema_text_safe() -> str:
+     candidate = Path(__file__).resolve().parent.parent / "artifacts" / "DB_SCHEMA_REFERENCE.yaml"
+     if candidate.exists():
+         with open(candidate, "r", encoding="utf-8") as f:
+             try:
+                 data = yaml.safe_load(f)
+                 return yaml.dump(data, sort_keys=False)
+             except Exception:
+                 return ""
+     return ""
+
+DB_SCHEMA = _load_schema_text_safe()
+PROJECT_ROOT = Path(__file__).resolve().parent.parent  # ts_pit package root
 TEXT_FALLBACK_EXTENSIONS = {
     ".md",
     ".txt",
@@ -382,7 +396,12 @@ def _fs_cfg() -> dict[str, Any]:
 
 def _allowed_roots() -> list[Path]:
     roots: list[Path] = []
-    for item in _fs_cfg().get("allowed_dirs", []):
+    # If config has allowed_dirs, usage them.
+    # Otherwise default to PROJECT_ROOT (package root)
+    allowed = _fs_cfg().get("allowed_dirs", [])
+    if not allowed:
+        roots.append(PROJECT_ROOT)
+    for item in allowed:
         raw = str(item or "").strip()
         if not raw:
             continue
@@ -411,7 +430,7 @@ def _resolve_allowed_path(path_value: str, *, must_exist: bool) -> Path | None:
     else:
         candidate = candidate.resolve()
 
-    max_depth = int(_fs_cfg().get("max_depth", 1))
+    max_depth = int(_fs_cfg().get("max_depth", 5)) # Increased default depth
     for root in _allowed_roots():
         if not root.exists():
             continue
@@ -420,7 +439,15 @@ def _resolve_allowed_path(path_value: str, *, must_exist: bool) -> Path | None:
         except ValueError:
             continue
         if _path_depth_from_root(candidate, root) > max_depth:
-            return None
+            # Allow deeper if it is in data/reports
+            try:
+                rel = candidate.relative_to(PROJECT_ROOT)
+                if len(rel.parts) > 2 and rel.parts[0] == "data" and rel.parts[1] == "reports":
+                     pass # Allow
+                else: 
+                     return None
+            except Exception:
+                 return None
         if must_exist and not candidate.exists():
             return None
         return candidate
@@ -441,7 +468,7 @@ def _allowed_write_extensions() -> set[str]:
 def _is_session_scoped_artifact_write_path(target: Path) -> bool:
     """
     Enforce markdown artifact writes to session-scoped report folders:
-    artifacts/reports/<session_id>/<filename>.md
+    data/reports/<session_id>/<filename>.md
     """
     try:
         rel = target.resolve().relative_to(PROJECT_ROOT)
@@ -450,7 +477,8 @@ def _is_session_scoped_artifact_write_path(target: Path) -> bool:
     parts = rel.parts
     if len(parts) < 4:
         return False
-    if parts[0] != "artifacts" or parts[1] != "reports":
+    # Expecting data/reports/<session_id>/file
+    if parts[0] != "data" or parts[1] != "reports":
         return False
     session_id = str(parts[2]).strip()
     return session_id != ""

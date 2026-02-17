@@ -21,7 +21,7 @@ from .db import get_engine
 from .services.db_helpers import get_table
 
 
-REPORTS_ROOT = Path(__file__).parent.parent / "artifacts" / "reports"
+REPORTS_ROOT = Path(__file__).parent / "data" / "reports"
 CHART_SNAPSHOTS_DIR = "chart_snapshots"
 SESSION_ID_PATTERN = re.compile(r"^[a-zA-Z0-9._-]{1,128}$")
 DATA_URL_PATTERN = re.compile(r"^data:image/(png|jpeg);base64,", re.IGNORECASE)
