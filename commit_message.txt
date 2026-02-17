@@ -1,26 +1,7 @@
-feat(frontend,agent-ui): unify agent chat polish and harden alert dashboard refresh/default behavior
+fix(agent-v3,respond): preserve prior execution outputs across turns and enrich final answers
 
-- streamline agent chat UI and interactions across message cards, action controls, plan rendering, and header/composer consistency
-- add reusable global toast notifications and wire copy/feedback affordances with success/error user feedback
-- improve streamed response rendering by tightening token/chunk joining and preserving markdown/table integrity
-- prevent planner/ephemeral outputs from leaking into persisted or prompted final answers in agent v3 history/context handling
-- refine frontend typography system with shared tokens, consistent hierarchy, and normalized font usage across major views
-- clean up alert/detail visual semantics by consolidating color usage and simplifying action/label presentation
-- fix alert detail runtime crash by guarding `created_date` before `startsWith` checks when computing table/news counts
-- preserve selected alert on refresh when route includes `/ui/:alertId`
-- for `/ui` (no selected alert), default to expanded sidebar, closed agent panel, and latest-date alerts so users choose an alert explicitly
-
-fix(agent-v3,history): drop ephemeral/tool traces from persistence and bound history to 10 turns
-
-- prevent checkpoint persistence of `ephemeral_node_output` assistant messages and tool trace messages via a persistent-only message reducer in agent v3 state
-- keep planner output visible in live stream while ensuring it disappears after page refresh/history hydration
-- harden `/agent/history/{session_id}` with intermediate-message filtering for ephemeral outputs and assistant tool-call traces
-- enforce turn-page safety (`limit <= 10`) and return paginated user+assistant turns only
-- optimize history extraction with bounded reverse scanning to reduce latency and prevent UI freeze during initial history load
-
-fix(agent-ui): show AI message actions on hover and improve streamed message spacing
-
-- render message action controls only for agent messages and keep them hidden by default
-- reveal agent action controls on message hover/focus-within for cleaner idle chat cards
-- add extra top spacing above action controls when planner/tool/formatting sections are present
-- reduce cramped layout while responses are still streaming with plan/tool traces visible
+- remove plan-version-only filtering when collecting completed/failed step payloads for responder context
+- ensure follow-up turns (for example, "show the news") can reuse previously completed tool outputs
+- strengthen respond prompt to be slightly more verbose and evidence-first by default
+- require count/list answers to include exact counts plus concrete record previews from completed outputs
+- prefer showing all records when small (<=10) and top 5-10 with a remainder note when larger
