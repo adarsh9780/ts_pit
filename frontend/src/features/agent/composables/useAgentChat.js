@@ -11,7 +11,9 @@ import {
 import { API_BASE_URL } from '../../../api/index.js';
 
 export function useAgentChat(alertIdRef) {
+  const COMPOSE_ONLY_MODE = false;
   const HISTORY_PAGE_SIZE = 10;
+  const HISTORY_TOP_THRESHOLD_PX = 24;
   const messages = ref([]);
   const inputMessage = ref('');
   const isLoading = ref(false);
@@ -19,6 +21,7 @@ export function useAgentChat(alertIdRef) {
   const hasMoreHistory = ref(false);
   const historyOffset = ref(0);
   const isPrependingHistory = ref(false);
+  const showLoadMoreHistoryControl = ref(false);
   const sessionId = ref('');
   const messagesContainer = ref(null);
   const inputRef = ref(null);
@@ -64,6 +67,30 @@ export function useAgentChat(alertIdRef) {
     const plannerSegment = { type: 'planner', content: '' };
     msg.segments.push(plannerSegment);
     return plannerSegment;
+  };
+
+  const joinChunkText = (existing, incoming, { preferParagraph = false } = {}) => {
+    const left = String(existing || '');
+    const right = String(incoming || '');
+    if (!right) return left;
+    if (!left) return right;
+
+    const leftLast = left[left.length - 1];
+    const rightFirst = right[0];
+    const alreadySeparated = /\s/.test(leftLast) || /\s/.test(rightFirst);
+    if (alreadySeparated) return `${left}${right}`;
+
+    // Only synthesize separators at clear sentence boundaries.
+    // Avoid generic spacing between alphanumeric characters because it can split words/tables.
+    if (preferParagraph && /[.!?]/.test(leftLast) && /[A-Z]/.test(rightFirst)) {
+      return `${left}\n\n${right}`;
+    }
+
+    if (/[.!?,;:)]/.test(leftLast) && /[A-Za-z0-9("\[]/.test(rightFirst)) {
+      return `${left} ${right}`;
+    }
+
+    return `${left}${right}`;
   };
 
   const hasEphemeralSegments = (msg) => (
@@ -122,16 +149,75 @@ export function useAgentChat(alertIdRef) {
     }
   };
 
+  const updateLoadMoreVisibility = () => {
+    const el = messagesContainer.value;
+    if (!el) {
+      showLoadMoreHistoryControl.value = false;
+      return;
+    }
+    showLoadMoreHistoryControl.value =
+      hasMoreHistory.value && el.scrollTop <= HISTORY_TOP_THRESHOLD_PX;
+  };
+
+  const handleMessagesScroll = () => {
+    updateLoadMoreVisibility();
+  };
+
+  const sanitizeToolTrace = (tool) => {
+    if (!tool || typeof tool !== 'object') return null;
+    return {
+      id: tool.id || null,
+      name: tool.name || tool.tool || 'tool',
+      status: tool.status || 'done',
+      commentary: tool.commentary || null,
+      input: tool.input || null,
+      // Intentionally drop large output blobs from history hydration.
+      output: null,
+      durationMs: typeof tool.durationMs === 'number'
+        ? tool.durationMs
+        : (typeof tool.duration_ms === 'number' ? tool.duration_ms : null),
+      errorCode: tool.errorCode || tool.error_code || null,
+      errorMessage: tool.errorMessage || tool.error_message || null,
+      startedAt: typeof tool.startedAt === 'number' ? tool.startedAt : Date.now(),
+    };
+  };
+
   const mapFrontendMessages = (rawMessages) => (
     rawMessages.map((msg) => {
-      if (msg.role === 'agent') {
+      const role = String(msg?.role || '');
+      const content = typeof msg?.content === 'string' ? msg.content : '';
+
+      if (role === 'agent') {
+        const tools = Array.isArray(msg?.tools)
+          ? msg.tools.map(sanitizeToolTrace).filter(Boolean)
+          : [];
         return {
-          ...msg,
-          segments: msg.content ? [{ type: 'text', content: msg.content }] : [],
-          tools: msg.tools || [],
+          role,
+          content,
+          tools,
+          segments: content ? [{ type: 'text', content }] : [],
+          planCollapsed: true,
+          isFormattingFinal: false,
+          finalAnswerNode: null,
         };
       }
-      return msg;
+
+      if (role === 'user') {
+        return { role, content };
+      }
+
+      if (role === 'context-switch') {
+        return {
+          role,
+          alertId: msg?.alertId || msg?.alert_id || '',
+          ticker: msg?.ticker || '',
+          startDate: msg?.startDate || msg?.start_date || '',
+          endDate: msg?.endDate || msg?.end_date || '',
+          instrumentName: msg?.instrumentName || msg?.instrument_name || '',
+        };
+      }
+
+      return { role: role || 'agent', content };
     })
   );
 
@@ -166,6 +252,8 @@ export function useAgentChat(alertIdRef) {
       historyLoading.value = false;
       isPrependingHistory.value = false;
     }
+    await nextTick();
+    updateLoadMoreVisibility();
     if (!appendOlder) await scrollToBottom();
   };
 
@@ -291,6 +379,7 @@ export function useAgentChat(alertIdRef) {
 
   const handleComposerKeydown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
+      if (COMPOSE_ONLY_MODE) return;
       e.preventDefault();
       sendMessage();
     }
@@ -336,6 +425,7 @@ export function useAgentChat(alertIdRef) {
   };
 
   const sendMessage = async () => {
+    if (COMPOSE_ONLY_MODE) return;
     if (!inputMessage.value.trim() || isLoading.value) return;
 
     const userMsg = inputMessage.value;
@@ -431,7 +521,7 @@ export function useAgentChat(alertIdRef) {
                 if (isFallback && segment.content.includes(tokenContent)) {
                   continue;
                 }
-                segment.content += tokenContent;
+                segment.content = joinChunkText(segment.content, tokenContent);
               } else if (node === 'respond' || node === 'answer_rewriter') {
                 msg.isFormattingFinal = true;
                 const previousFinalNode = String(msg.finalAnswerNode || '');
@@ -444,8 +534,8 @@ export function useAgentChat(alertIdRef) {
                 if (isFallback && segment.content.includes(tokenContent)) {
                   continue;
                 }
-                segment.content += tokenContent;
-                msg.content += tokenContent;
+                segment.content = joinChunkText(segment.content, tokenContent, { preferParagraph: true });
+                msg.content = segment.content;
               } else if (node === 'answer_validator') {
                 // hidden unless debug stream enabled at backend
               } else {
@@ -453,8 +543,8 @@ export function useAgentChat(alertIdRef) {
                 if (isFallback && segment.content.includes(tokenContent)) {
                   continue;
                 }
-                segment.content += tokenContent;
-                msg.content += tokenContent;
+                segment.content = joinChunkText(segment.content, tokenContent, { preferParagraph: true });
+                msg.content = segment.content;
               }
             } else if (data.type === 'tool_start') {
               toolSeq += 1;
@@ -574,10 +664,13 @@ export function useAgentChat(alertIdRef) {
 
   onMounted(async () => {
     await initializeSession(alertIdRef.value);
+    messagesContainer.value?.addEventListener('scroll', handleMessagesScroll, { passive: true });
+    updateLoadMoreVisibility();
     document.addEventListener('click', handleClickOutsideComposer);
   });
 
   onBeforeUnmount(() => {
+    messagesContainer.value?.removeEventListener('scroll', handleMessagesScroll);
     document.removeEventListener('click', handleClickOutsideComposer);
   });
 
@@ -590,6 +683,7 @@ export function useAgentChat(alertIdRef) {
     () => {
       if (isPrependingHistory.value) return;
       void scrollToBottom();
+      void nextTick().then(updateLoadMoreVisibility);
     },
     { deep: true, flush: 'post' }
   );
@@ -600,7 +694,9 @@ export function useAgentChat(alertIdRef) {
     isLoading,
     historyLoading,
     hasMoreHistory,
+    showLoadMoreHistoryControl,
     sessionId,
+    canSend: !COMPOSE_ONLY_MODE,
     messagesContainer,
     inputRef,
     alertInfo,

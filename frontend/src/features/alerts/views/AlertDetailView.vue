@@ -870,7 +870,8 @@ const tableData = computed(() => {
             
             news.value.forEach(article => {
                 // Approximate date matching (simple string match)
-                if (article.created_date === date || article.created_date.startsWith(date)) {
+                const createdDate = typeof article.created_date === 'string' ? article.created_date : '';
+                if (createdDate === date || createdDate.startsWith(date)) {
                     const mat = article.materiality || 'DEFAULT';
                     if (top3Mats.includes(mat)) {
                         counts[mat]++;
@@ -1011,7 +1012,7 @@ onBeforeUnmount(() => {
     display: flex; 
     flex-direction: column; 
     overflow: hidden; /* Main container fixed */
-    font-family: 'Inter', sans-serif;
+    font-family: var(--font-family-ui);
     container-type: inline-size; /* Enable Container Query */
     container-name: details;
 }

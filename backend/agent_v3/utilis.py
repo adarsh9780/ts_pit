@@ -31,13 +31,19 @@ def _has_system_message(
     return False
 
 
+def _is_ephemeral_message(message: AnyMessage) -> bool:
+    additional = getattr(message, "additional_kwargs", None)
+    return isinstance(additional, dict) and bool(additional.get("ephemeral_node_output"))
+
+
 def build_prompt_messages(
     messages: list[AnyMessage],
     *,
     conversation_summary: str | None = None,
     recent_window: int = 16,
 ) -> list[AnyMessage]:
-    recent = list(messages[-max(1, recent_window) :]) if messages else []
+    filtered = [m for m in messages if not _is_ephemeral_message(m)]
+    recent = list(filtered[-max(1, recent_window) :]) if filtered else []
     summary = str(conversation_summary or "").strip()
     if not summary:
         return recent

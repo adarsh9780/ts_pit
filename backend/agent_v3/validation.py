@@ -104,6 +104,68 @@ def _append_fallback_note(answer: str, feedback: AnswerFeedback) -> str:
     )
 
 
+def _strip_planner_like_preamble(answer: str) -> str:
+    text = str(answer or "")
+    if not text.strip():
+        return ""
+
+    normalized = text.lstrip()
+    lowered = normalized.lower()
+
+    # Remove explicit planner scaffolding if present.
+    for marker in ("plan action:", "**plan:**"):
+        idx = lowered.find(marker)
+        if idx >= 0:
+            tail = normalized[idx:].splitlines()
+            # Drop until first non-empty line after a blank separator.
+            dropped: list[str] = []
+            blank_seen = False
+            for line in tail:
+                dropped.append(line)
+                if line.strip() == "":
+                    blank_seen = True
+                    break
+            if blank_seen:
+                cleaned = normalized[len("\n".join(dropped)) :].lstrip("\n")
+                if cleaned.strip():
+                    return cleaned
+
+    lines = normalized.splitlines()
+    if not lines:
+        return normalized
+
+    list_item_re = re.compile(r"^\s*\d+\.\s+")
+    i = 0
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    start = i
+    while i < len(lines) and list_item_re.match(lines[i]):
+        i += 1
+        while i < len(lines) and lines[i].strip() and not list_item_re.match(lines[i]):
+            i += 1
+    end = i
+
+    candidate = lines[start:end]
+    if len(candidate) < 2:
+        return normalized
+
+    candidate_text = "\n".join(candidate).lower()
+    planning_markers = (
+        "search",
+        "analyze",
+        "synthesize",
+        "present",
+        "suggest next steps",
+        "retrieve",
+        "fetch",
+    )
+    if not any(marker in candidate_text for marker in planning_markers):
+        return normalized
+
+    remainder = "\n".join(lines[end:]).lstrip("\n")
+    return remainder if remainder.strip() else normalized
+
+
 def _deterministic_feedback(state: AgentV3State, draft_answer: str) -> AnswerFeedback | None:
     completed = completed_step_payloads(state)
     failed = failed_step_payloads(state)
@@ -166,9 +228,10 @@ def _llm_feedback(state: AgentV3State, draft_answer: str) -> AnswerFeedback:
 
 
 def _finalize_accept(state: AgentV3State, answer_text: str, feedback: AnswerFeedback) -> dict[str, Any]:
+    sanitized = _strip_planner_like_preamble(answer_text)
     return {
         "last_answer_feedback": feedback,
-        "messages": [AIMessage(content=answer_text)],
+        "messages": [AIMessage(content=sanitized)],
         "draft_answer": None,
     }
 

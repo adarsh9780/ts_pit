@@ -16,6 +16,7 @@ from ...logger import logprint
 
 router = APIRouter(tags=["agent"])
 DEFAULT_CONTEXT_TOKEN_BUDGET = 50_000
+MAX_HISTORY_TURNS_PER_PAGE = 10
 STREAMABLE_MODEL_NODES = {
     "agent",
     "direct_answer",
@@ -286,44 +287,31 @@ def _build_frontend_messages(messages: list) -> list[dict]:
             if isinstance(additional, dict) and additional.get("ephemeral_node_output"):
                 continue
             assistant_content = _content_to_text(getattr(msg, "content", ""))
-            tool_calls = _extract_tool_calls(msg)
             normalized_events.append(
                 {
                     "kind": "assistant",
                     "content": assistant_content.strip()
                     if isinstance(assistant_content, str)
                     else "",
-                    "tools": tool_calls,
                 }
             )
             continue
 
+        # Tool traces are intentionally omitted from persisted chat history payloads.
         if msg_type == "tool":
-            normalized_events.append(
-                {
-                    "kind": "tool",
-                    "name": str(getattr(msg, "name", "") or ""),
-                    "tool_call_id": str(getattr(msg, "tool_call_id", "") or ""),
-                    "output": _content_to_text(getattr(msg, "content", "")),
-                    "status": str(getattr(msg, "status", "") or "done"),
-                }
-            )
+            continue
 
     frontend_messages: list[dict] = []
-    turn_tools_map: dict[str, dict] = {}
-    turn_tool_seq = 0
     assistant_parts: list[str] = []
     last_user_content: str | None = None
 
     def _flush_turn():
-        nonlocal turn_tools_map, turn_tool_seq, assistant_parts
+        nonlocal assistant_parts
         content = "\n\n".join([part for part in assistant_parts if part]).strip()
-        tools = list(turn_tools_map.values())
 
-        # Drop pure assistant echo of the latest user prompt when there are no tool traces.
+        # Drop pure assistant echo of the latest user prompt.
         if (
             content
-            and not tools
             and last_user_content
             and " ".join(content.split()).lower()
             == " ".join(last_user_content.split()).lower()
@@ -336,15 +324,9 @@ def _build_frontend_messages(messages: list) -> list[dict]:
                 and frontend_messages[-1].get("role") == "agent"
                 and str(frontend_messages[-1].get("content", "")).strip() == content
             ):
-                if tools:
-                    existing = frontend_messages[-1].setdefault("tools", [])
-                    existing.extend(tools)
+                pass
             else:
-                frontend_messages.append(
-                    {"role": "agent", "content": content, "tools": tools}
-                )
-        turn_tools_map = {}
-        turn_tool_seq = 0
+                frontend_messages.append({"role": "agent", "content": content, "tools": []})
         assistant_parts = []
 
     for event in normalized_events:
@@ -352,31 +334,134 @@ def _build_frontend_messages(messages: list) -> list[dict]:
         if kind == "user":
             _flush_turn()
             last_user_content = str(event["content"])
-            frontend_messages.append(
-                {"role": "user", "content": event["content"], "tools": []}
-            )
+            frontend_messages.append({"role": "user", "content": event["content"], "tools": []})
             continue
 
         if kind == "assistant":
             content = str(event.get("content") or "").strip()
             if content and (not assistant_parts or assistant_parts[-1] != content):
                 assistant_parts.append(content)
-
-            for tool in event.get("tools", []):
-                turn_tool_seq += 1
-                tool_id = str(
-                    tool.get("id") or f"{tool.get('name', 'tool')}-{turn_tool_seq}"
-                )
-                if tool_id in turn_tools_map:
-                    continue
-                turn_tools_map[tool_id] = tool
             continue
-
-        if kind == "tool":
-            _attach_tool_output(turn_tools_map, event)
 
     _flush_turn()
     return frontend_messages
+
+
+def _group_messages_into_turns(frontend_messages: list[dict]) -> list[list[dict]]:
+    """
+    A turn is one user message plus its following agent response (if present).
+    Fallback for malformed history keeps ordering stable.
+    """
+    turns: list[list[dict]] = []
+    i = 0
+    while i < len(frontend_messages):
+        msg = frontend_messages[i]
+        role = str(msg.get("role") or "")
+        if role == "user":
+            turn = [msg]
+            if i + 1 < len(frontend_messages):
+                next_msg = frontend_messages[i + 1]
+                if str(next_msg.get("role") or "") == "agent":
+                    turn.append(next_msg)
+                    i += 1
+            turns.append(turn)
+        else:
+            turns.append([msg])
+        i += 1
+    return turns
+
+
+def _is_intermediate_assistant_message(msg) -> bool:
+    msg_type = str(getattr(msg, "type", "")).lower()
+    if msg_type not in {"ai", "assistant"}:
+        return False
+    additional = getattr(msg, "additional_kwargs", None)
+    if isinstance(additional, dict) and additional.get("ephemeral_node_output"):
+        return True
+    return bool(_extract_tool_calls(msg))
+
+
+def _to_history_event(msg) -> dict | None:
+    msg_type = str(getattr(msg, "type", "")).lower()
+    if msg_type in {"system", "tool"}:
+        return None
+
+    if msg_type in {"human", "user"}:
+        user_content = _content_to_text(getattr(msg, "content", ""))
+        if user_content and "[USER QUESTION]" in user_content:
+            parts = user_content.split("[USER QUESTION]", 1)
+            if len(parts) > 1:
+                user_content = parts[1].strip()
+        user_content = str(user_content or "").strip()
+        if not user_content:
+            return None
+        return {"kind": "user", "content": user_content}
+
+    if msg_type in {"ai", "assistant"}:
+        if _is_intermediate_assistant_message(msg):
+            return None
+        assistant_content = str(_content_to_text(getattr(msg, "content", "")) or "").strip()
+        if not assistant_content:
+            return None
+        return {"kind": "assistant", "content": assistant_content}
+
+    return None
+
+
+def _normalized_text(value: str) -> str:
+    return " ".join(str(value or "").split()).strip().lower()
+
+
+def _build_frontend_messages_window(
+    messages: list,
+    *,
+    limit_turns: int,
+    offset_turns: int,
+) -> tuple[list[dict], int, bool, int]:
+    needed_turns = max(1, offset_turns + limit_turns + 1)
+    turns_newest_first: list[list[dict]] = []
+    assistant_parts_rev: list[str] = []
+
+    for msg in reversed(messages):
+        event = _to_history_event(msg)
+        if not event:
+            continue
+
+        kind = event["kind"]
+        content = str(event["content"])
+        if kind == "assistant":
+            if content and (not assistant_parts_rev or assistant_parts_rev[-1] != content):
+                assistant_parts_rev.append(content)
+            continue
+
+        assistant_content = "\n\n".join(reversed(assistant_parts_rev)).strip()
+        turn: list[dict] = [{"role": "user", "content": content, "tools": []}]
+        if assistant_content and _normalized_text(assistant_content) != _normalized_text(
+            content
+        ):
+            turn.append({"role": "agent", "content": assistant_content, "tools": []})
+        turns_newest_first.append(turn)
+        assistant_parts_rev = []
+
+        if len(turns_newest_first) >= needed_turns:
+            break
+
+    if assistant_parts_rev and len(turns_newest_first) < needed_turns:
+        assistant_content = "\n\n".join(reversed(assistant_parts_rev)).strip()
+        if assistant_content:
+            turns_newest_first.append(
+                [{"role": "agent", "content": assistant_content, "tools": []}]
+            )
+
+    page_newest_first = turns_newest_first[offset_turns : offset_turns + limit_turns]
+    page_turns = list(reversed(page_newest_first))
+    page_messages = [msg for turn in page_turns for msg in turn]
+
+    has_more = len(turns_newest_first) > (offset_turns + limit_turns)
+    next_offset = offset_turns + len(page_newest_first)
+    total_lower_bound = next_offset + (1 if has_more else 0)
+
+    return page_messages, next_offset, has_more, total_lower_bound
 
 
 class AlertContext(BaseModel):
@@ -411,7 +496,7 @@ def _to_int_quantity(value) -> int:
 async def get_chat_history(
     session_id: str,
     request: Request,
-    limit: int = Query(default=10, ge=1, le=100),
+    limit: int = Query(default=10, ge=1, le=10),
     offset: int = Query(default=0, ge=0),
 ):
     agent = request.app.state.agent
@@ -432,21 +517,20 @@ async def get_chat_history(
             }
 
         messages = state.values.get("messages", [])
-        frontend_messages = _build_frontend_messages(messages)
-
-        total = len(frontend_messages)
-        end = max(total - offset, 0)
-        start = max(end - limit, 0)
-        page_messages = frontend_messages[start:end]
-        next_offset = offset + len(page_messages)
+        page_limit = min(max(1, limit), MAX_HISTORY_TURNS_PER_PAGE)
+        page_messages, next_offset, has_more, total = _build_frontend_messages_window(
+            messages,
+            limit_turns=page_limit,
+            offset_turns=offset,
+        )
 
         return {
             "messages": page_messages,
             "pagination": {
-                "limit": limit,
+                "limit": page_limit,
                 "offset": offset,
                 "next_offset": next_offset,
-                "has_more": start > 0,
+                "has_more": has_more,
                 "total": total,
             },
         }

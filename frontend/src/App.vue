@@ -1,13 +1,8 @@
 <script setup>
+import AppToast from './components/AppToast.vue';
 </script>
 
 <template>
   <router-view></router-view>
+  <AppToast />
 </template>
-
-<style>
-body {
-  margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-}
-</style>

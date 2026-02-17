@@ -127,7 +127,7 @@ onMounted(async () => {
           <button v-if="selectedDate" @click="clearDateFilter" class="clear-btn">Clear</button>
         </div>
         <div class="legend">
-          <span class="legend-hint">💡 Click row to view • Ctrl+Click for new tab</span>
+          <span class="legend-hint">Click row to view • Ctrl+Click for new tab</span>
         </div>
       </div>
       
@@ -158,13 +158,13 @@ onMounted(async () => {
                     @click="updateStatus(alert.id, 'ESCALATE_L2', $event)"
                     :disabled="alert.status === 'ESCALATE_L2'"
                     title="Escalate to Level 2"
-                  >!</button>
+                  >Escalate</button>
                   <button 
                     class="action-btn dismiss" 
                     @click="updateStatus(alert.id, 'DISMISS', $event)"
                     :disabled="alert.status === 'DISMISS'"
                     title="Dismiss"
-                  >✓</button>
+                  >Dismiss</button>
                 </td>
               </tr>
             </tbody>
@@ -179,7 +179,7 @@ onMounted(async () => {
 .page-container {
     background-color: #f8fafc;
     min-height: 100vh;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-family: var(--font-family-ui);
 }
 
 .header {
@@ -198,14 +198,16 @@ onMounted(async () => {
 
 h1 {
     margin: 0;
-    font-size: 1.875rem;
+    font-size: var(--font-size-2xl);
     font-weight: 700;
+    line-height: var(--line-height-heading);
 }
 
 .subtitle {
     margin: 0.5rem 0 0 0;
     color: #94a3b8;
-    font-size: 1rem;
+    font-size: var(--font-size-base);
+    line-height: var(--line-height-body);
 }
 
 .header-stats {
@@ -219,8 +221,9 @@ h1 {
 
 .stat-value {
     display: block;
-    font-size: 2rem;
+    font-size: var(--font-size-2xl);
     font-weight: 700;
+    line-height: var(--line-height-tight);
 }
 
 .stat-label {
@@ -406,12 +409,14 @@ td {
 }
 
 .action-btn {
-    width: 2rem;
     height: 2rem;
+    padding: 0 0.625rem;
     border: none;
     border-radius: 0.375rem;
     cursor: pointer;
-    font-size: 0.875rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    line-height: 1;
     transition: all 0.2s;
     display: flex;
     align-items: center;

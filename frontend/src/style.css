@@ -1,53 +1,98 @@
 :root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
-
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
-
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-
-a:hover {
-  color: #535bf2;
+html {
+  font-size: 100%;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
   margin: 0;
-  display: block;
   min-width: 320px;
   min-height: 100vh;
+  background: var(--color-background);
+  color: var(--color-text-main);
+  font-family: var(--font-family-ui);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-body);
+  letter-spacing: var(--tracking-normal);
 }
 
 #app {
   max-width: none;
   margin: 0;
   padding: 0;
+  min-height: 100vh;
   text-align: left;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-family-display);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-heading);
+  letter-spacing: var(--tracking-tight);
+  margin: 0 0 var(--spacing-2) 0;
+}
 
-  a:hover {
-    color: #747bff;
-  }
+h1 {
+  font-size: var(--font-size-2xl);
+}
 
-  button {
-    background-color: #f9f9f9;
-  }
+h2 {
+  font-size: var(--font-size-xl);
+}
+
+h3 {
+  font-size: var(--font-size-lg);
+}
+
+h4 {
+  font-size: var(--font-size-md);
+}
+
+p,
+li,
+dd,
+dt {
+  line-height: var(--line-height-body);
+}
+
+p {
+  margin: 0 0 var(--spacing-4) 0;
+}
+
+a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--color-accent-hover);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.prose,
+.markdown-content,
+.summary-text,
+.news-summary,
+.modal-body {
+  max-inline-size: min(var(--text-measure), 100%);
+}
+
+.is-caps,
+th {
+  letter-spacing: var(--tracking-caps);
 }

@@ -167,12 +167,12 @@ const reasoningParsed = computed(() => parseReasoning(props.alertData?.recommend
 
 <style scoped>
 .executive-summary-wrapper {
-    border-bottom: 1px solid #e2e8f0;
-    background: #f8fafc;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-background);
 }
 
 .executive-summary {
-    background: linear-gradient(to right, #fbf7ff, #f8fafc);
+    background: var(--color-background);
     padding: 1.25rem;
 }
 
@@ -185,7 +185,7 @@ const reasoningParsed = computed(() => parseReasoning(props.alertData?.recommend
 
 .executive-summary h4 {
     margin: 0;
-    color: #4c1d95;
+    color: var(--color-text-main);
     font-size: 0.9rem;
     display: flex;
     align-items: center;
@@ -194,7 +194,7 @@ const reasoningParsed = computed(() => parseReasoning(props.alertData?.recommend
 }
 
 .ai-icon {
-    background: linear-gradient(135deg, #4c1d95, #7c3aed);
+    background: var(--color-accent);
     color: white;
     font-size: 0.65rem;
     font-weight: 700;
@@ -206,7 +206,7 @@ const reasoningParsed = computed(() => parseReasoning(props.alertData?.recommend
 .executive-summary p {
     margin: 0;
     font-size: 0.9rem;
-    color: #334155;
+    color: var(--color-primary-light);
     line-height: 1.6;
 }
 
@@ -214,13 +214,13 @@ const reasoningParsed = computed(() => parseReasoning(props.alertData?.recommend
     display: block;
     margin-top: 8px;
     font-size: 0.7rem;
-    color: #94a3b8;
+    color: var(--color-text-subtle);
 }
 
 .refresh-btn {
     background: transparent;
     border: none;
-    color: #94a3b8;
+    color: var(--color-text-subtle);
     cursor: pointer;
     font-size: 1rem;
     padding: 2px 6px;
@@ -228,19 +228,19 @@ const reasoningParsed = computed(() => parseReasoning(props.alertData?.recommend
 }
 
 .refresh-btn:hover {
-    background: #e2e8f0;
-    color: #64748b;
+    background: var(--color-surface-hover);
+    color: var(--color-text-muted);
 }
 
 .summary-placeholder {
     padding: 1rem;
     display: flex;
     justify-content: center;
-    background: #fff;
+    background: var(--color-surface);
 }
 
 .generate-btn {
-    background: linear-gradient(135deg, #7c3aed, #6d28d9);
+    background: var(--color-accent);
     color: white;
     border: none;
     padding: 0.6rem 1.2rem;
@@ -251,13 +251,14 @@ const reasoningParsed = computed(() => parseReasoning(props.alertData?.recommend
     display: flex;
     align-items: center;
     gap: 8px;
-    box-shadow: 0 2px 4px rgba(124, 58, 237, 0.2);
+    box-shadow: var(--shadow-sm);
     transition: all 0.2s;
 }
 
 .generate-btn:hover:not(:disabled) {
     transform: translateY(-1px);
-    box-shadow: 0 4px 6px rgba(124, 58, 237, 0.3);
+    background: var(--color-accent-hover);
+    box-shadow: var(--shadow-md);
 }
 
 .generate-btn:disabled {
@@ -277,8 +278,8 @@ const reasoningParsed = computed(() => parseReasoning(props.alertData?.recommend
 .spinner-icon {
     width: 14px;
     height: 14px;
-    border: 2px solid #cbd5e1;
-    border-top-color: #6366f1;
+    border: 2px solid var(--color-border);
+    border-top-color: var(--color-accent);
     border-radius: 50%;
     animation: Spin 0.8s linear infinite;
 }
@@ -303,7 +304,7 @@ const reasoningParsed = computed(() => parseReasoning(props.alertData?.recommend
 /* Tabs Styling */
 .summary-tabs {
     display: flex;
-    background: #e2e8f0;
+    background: var(--color-surface-hover);
     padding: 3px;
     border-radius: 6px;
     gap: 2px;
@@ -315,20 +316,20 @@ const reasoningParsed = computed(() => parseReasoning(props.alertData?.recommend
     padding: 4px 12px;
     font-size: 0.75rem;
     font-weight: 600;
-    color: #64748b;
+    color: var(--color-text-muted);
     border-radius: 4px;
     cursor: pointer;
     transition: all 0.2s;
 }
 
 .summary-tabs button:hover {
-    color: #334155;
+    color: var(--color-primary-light);
 }
 
 .summary-tabs button.active {
-    background: white;
-    color: #4c1d95; /* Deep Purple to match header */
-    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    background: var(--color-surface);
+    color: var(--color-accent);
+    box-shadow: var(--shadow-sm);
 }
 
 /* Reasoning Section */
@@ -340,7 +341,7 @@ const reasoningParsed = computed(() => parseReasoning(props.alertData?.recommend
     margin: 0 0 0.5rem 0;
     font-size: 0.85rem;
     font-weight: 700;
-    color: #334155;
+    color: var(--color-primary-light);
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
@@ -352,7 +353,7 @@ const reasoningParsed = computed(() => parseReasoning(props.alertData?.recommend
 
 .reasoning-section li {
     font-size: 0.9rem;
-    color: #334155;
+    color: var(--color-primary-light);
     margin-bottom: 0.5rem;
     line-height: 1.5;
 }
@@ -365,12 +366,12 @@ const reasoningParsed = computed(() => parseReasoning(props.alertData?.recommend
     margin: 0 0 0.35rem 0;
     font-size: 0.85rem;
     font-weight: 700;
-    color: #1e293b;
+    color: var(--color-text-main);
 }
 
 .empty-reasoning {
     font-style: italic;
-    color: #94a3b8;
+    color: var(--color-text-subtle);
     font-size: 0.85rem;
 }
 
@@ -380,18 +381,18 @@ const reasoningParsed = computed(() => parseReasoning(props.alertData?.recommend
     gap: 1.5rem;
     margin-top: 1rem;
     padding-top: 1rem;
-    border-top: 1px solid #e2e8f0;
+    border-top: 1px solid var(--color-border);
 }
 .event-col { flex: 1; }
 .event-col h5 { margin: 0 0 0.5rem 0; font-size: 0.85rem; font-weight: 700; display: flex; align-items: center; gap: 6px; }
 .event-col ul { margin: 0; padding-left: 1.2rem; }
-.event-col li { font-size: 0.85rem; color: #475569; margin-bottom: 0.25rem; }
-.event-col.bullish h5 { color: #166534; }
-.event-col.bullish .indicator { background: #dcfce7; color: #166534; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; }
-.event-col.bearish h5 { color: #991b1b; }
-.event-col.bearish .indicator { background: #fee2e2; color: #991b1b; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; }
-.event-col.neutral h5 { color: #475569; }
-.event-col.neutral .indicator { background: #f1f5f9; color: #475569; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; }
+.event-col li { font-size: 0.85rem; color: var(--color-text-muted); margin-bottom: 0.25rem; }
+.event-col.bullish h5 { color: var(--color-success-text); }
+.event-col.bullish .indicator { background: var(--color-success-bg); color: var(--color-success-text); padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; }
+.event-col.bearish h5 { color: var(--color-danger-text); }
+.event-col.bearish .indicator { background: var(--color-danger-bg); color: var(--color-danger-text); padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; }
+.event-col.neutral h5 { color: var(--color-text-muted); }
+.event-col.neutral .indicator { background: var(--color-surface-hover); color: var(--color-text-muted); padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; }
 
 /* Recommendation Banner Styles */
 .recommendation-banner {
@@ -404,19 +405,19 @@ const reasoningParsed = computed(() => parseReasoning(props.alertData?.recommend
     border: 1px solid transparent;
 }
 .recommendation-banner.reject {
-    background-color: #f0fdf4; /* Green-50 */
-    border-color: #bbf7d0;     /* Green-200 */
-    color: #166534;            /* Green-800 */
+    background-color: var(--color-success-bg);
+    border-color: #bbf7d0;
+    color: var(--color-success-text);
 }
 .recommendation-banner.approve_l2 {
-    background-color: #fef2f2; /* Red-50 */
-    border-color: #fecaca;     /* Red-200 */
-    color: #991b1b;            /* Red-800 */
+    background-color: var(--color-danger-bg);
+    border-color: #fecaca;
+    color: var(--color-danger-text);
 }
 .recommendation-banner.needs_review {
-    background-color: #fffbeb; /* Amber-50 */
-    border-color: #fde68a;     /* Amber-200 */
-    color: #92400e;            /* Amber-800 */
+    background-color: var(--color-warning-bg);
+    border-color: #fde68a;
+    color: var(--color-warning-text);
 }
 .rec-icon {
     font-size: 1.5rem;

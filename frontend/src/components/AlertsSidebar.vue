@@ -371,7 +371,7 @@ const getTypeClass = (type) => {
 .alert-id {
     font-size: 10px;
     color: var(--color-text-subtle);
-    font-family: monospace;
+    font-family: var(--font-family-ui);
 }
 
 .status-indicator {

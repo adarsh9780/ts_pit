@@ -37,7 +37,7 @@ const updateStatus = (status) => {
                 </div>
                 <div class="actions-section">
                     <button class="action-btn ask-ai-btn" @click="$emit('toggle-agent')" title="Open AI Assistant">
-                        <span class="icon">🤖</span> Ask AI
+                        Ask AI
                     </button>
                     <button
                         v-if="validStatuses.includes('ESCALATE_L2')"
@@ -45,7 +45,7 @@ const updateStatus = (status) => {
                         @click="updateStatus('ESCALATE_L2')"
                         :disabled="alertData.status === 'ESCALATE_L2'"
                     >
-                        <span class="icon">!</span> Escalate L2
+                        Escalate L2
                     </button>
                     <button
                         v-if="validStatuses.includes('DISMISS')"
@@ -53,7 +53,7 @@ const updateStatus = (status) => {
                         @click="updateStatus('DISMISS')"
                         :disabled="alertData.status === 'DISMISS'"
                     >
-                        <span class="icon">✓</span> Dismiss
+                        Dismiss
                     </button>
                     <button
                         v-if="validStatuses.includes('NEEDS_REVIEW')"
@@ -61,7 +61,7 @@ const updateStatus = (status) => {
                         @click="updateStatus('NEEDS_REVIEW')"
                         :disabled="alertData.status === 'NEEDS_REVIEW'"
                     >
-                        <span class="icon">↺</span> Needs Review
+                        Needs Review
                     </button>
                 </div>
             </div>
@@ -82,13 +82,6 @@ const updateStatus = (status) => {
                 </div>
                 <div class="badge-group">
                     <span class="status-badge" :class="getStatusClass(alertData.status)">{{ alertData.status }}</span>
-                </div>
-                <div class="badge-separator" v-if="alertData.narrative_theme"></div>
-                <!-- Theme Badge -->
-                <div class="badge-group full-width" v-if="alertData.narrative_theme">
-                   <div class="theme-badge" title="AI Generated Theme">
-                       <span class="theme-icon">✨</span> {{ alertData.narrative_theme }}
-                   </div>
                 </div>
             </div>
 
@@ -142,10 +135,10 @@ const updateStatus = (status) => {
 <style scoped>
 /* Main Container */
 .header { 
-    background: white; 
-    border-bottom: 1px solid #e2e8f0; 
+    background: var(--color-surface); 
+    border-bottom: 1px solid var(--color-border); 
     padding: 1rem 1.5rem; 
-    box-shadow: 0 1px 2px rgba(0,0,0,0.05); 
+    box-shadow: var(--shadow-sm); 
     flex-shrink: 0; 
 }
 .header-container { display: flex; flex-direction: column; gap: 1rem; }
@@ -153,54 +146,51 @@ const updateStatus = (status) => {
 /* 1. Identity & Actions */
 .header-top { display: flex; justify-content: space-between; align-items: center; }
 .identity-section { display: flex; align-items: baseline; gap: 1rem; }
-.identity-section h1 { margin: 0; font-size: 1.75rem; color: #0f172a; font-weight: 700; line-height: 1; }
-.identity-section .subtitle { font-size: 1rem; color: #64748b; font-weight: 400; }
+.identity-section h1 { margin: 0; font-size: 1.75rem; color: var(--color-text-main); font-weight: 700; line-height: 1; }
+.identity-section .subtitle { font-size: 1rem; color: var(--color-text-muted); font-weight: 400; }
 
 .actions-section { display: flex; gap: 0.75rem; }
 .action-btn { 
     padding: 0.5rem 1rem; 
-    border: none; 
+    border: 1px solid var(--color-border); 
     border-radius: 0.5rem; 
     font-size: 0.875rem; 
     font-weight: 600; 
     cursor: pointer; 
     transition: all 0.2s; 
+    background: var(--color-surface);
+    color: var(--color-text-main);
     display: flex; 
     align-items: center; 
     gap: 6px; 
 }
 .action-btn:disabled { opacity: 0.5; cursor: not-allowed; filter: grayscale(0.2); }
 
-.ask-ai-btn { background: #3b82f6; color: white; margin-right: 0.5rem; }
-.ask-ai-btn:hover { background: #2563eb; box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3); }
+.ask-ai-btn { background: var(--color-accent); color: #ffffff; border-color: transparent; margin-right: 0.5rem; }
+.ask-ai-btn:hover { background: var(--color-accent-hover); box-shadow: var(--shadow-sm); }
 
-.dismiss-btn { background: #dcfce7; color: #166534; }
-.dismiss-btn:hover:not(:disabled) { background: #bbf7d0; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-.escalate-btn { background: #fee2e2; color: #991b1b; }
-.escalate-btn:hover:not(:disabled) { background: #fecaca; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-.review-btn { background: #fff7ed; color: #c2410c; }
-.review-btn:hover:not(:disabled) { background: #ffedd5; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+.dismiss-btn,
+.escalate-btn,
+.review-btn { background: var(--color-surface); color: var(--color-text-main); }
+.dismiss-btn:hover:not(:disabled),
+.escalate-btn:hover:not(:disabled),
+.review-btn:hover:not(:disabled) { background: var(--color-surface-hover); box-shadow: var(--shadow-sm); }
 
 /* 2. Context Row */
 .header-context { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; font-size: 0.8rem; }
 .badge-group { display: flex; align-items: center; gap: 6px; }
-.badge-group .label { color: #94a3b8; font-weight: 500; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.5px; }
-.badge-group .value { font-family: 'Monaco', 'Consolas', monospace; color: #334155; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; }
-.badge-separator { width: 1px; height: 16px; background: #e2e8f0; margin: 0 0.25rem; }
+.badge-group .label { color: var(--color-text-subtle); font-weight: 500; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.5px; }
+.badge-group .value { font-family: var(--font-family-ui); color: var(--color-primary-light); background: var(--color-surface-hover); padding: 2px 6px; border-radius: 4px; }
+.badge-separator { width: 1px; height: 16px; background: var(--color-border); margin: 0 0.25rem; }
 
 .tag.type { text-transform: uppercase; padding: 0.25rem 0.75rem; border-radius: 9999px; font-weight: 600; font-size: 0.75rem; letter-spacing: 0.5px; }
-.tag.type.buy { background-color: #dcfce7; color: #166534; }
-.tag.type.sell { background-color: #fee2e2; color: #991b1b; }
+.tag.type.buy { background-color: var(--color-success-bg); color: var(--color-success-text); }
+.tag.type.sell { background-color: var(--color-danger-bg); color: var(--color-danger-text); }
 
 .status-badge { padding: 0.25rem 0.75rem; border-radius: 6px; font-weight: 600; text-transform: uppercase; font-size: 0.75rem; }
-.status-needs-review { background-color: #fff7ed; color: #c2410c; border: 1px solid #ffedd5; }
-.status-escalate-l2 { background-color: #fef2f2; color: #b91c1c; border: 1px solid #fee2e2; }
-.status-dismiss { background-color: #f0fdf4; color: #15803d; border: 1px solid #dcfce7; }
-
-.theme-badge {
-    background-color: #f3e8ff; color: #7e22ce; border: 1px solid #d8b4fe;
-    display: inline-flex; align-items: center; gap: 6px; padding: 0.25rem 0.75rem; border-radius: 9999px; font-weight: 500; font-size: 0.8rem;
-}
+.status-needs-review { background-color: var(--color-warning-bg); color: var(--color-warning-text); border: 1px solid color-mix(in srgb, var(--color-warning) 30%, white); }
+.status-escalate-l2 { background-color: var(--color-danger-bg); color: var(--color-danger-text); border: 1px solid color-mix(in srgb, var(--color-danger) 24%, white); }
+.status-dismiss { background-color: var(--color-success-bg); color: var(--color-success-text); border: 1px solid color-mix(in srgb, var(--color-success) 28%, white); }
 
 /* 3. Metrics Grid */
 .header-metrics { 
@@ -209,7 +199,7 @@ const updateStatus = (status) => {
     gap: 2rem; 
     row-gap: 1.5rem; /* Gap when wrapped */
     padding-top: 1rem; 
-    border-top: 1px solid #f1f5f9; 
+    border-top: 1px solid var(--color-divider); 
 }
 .metric-column { 
     display: flex; 
@@ -217,10 +207,10 @@ const updateStatus = (status) => {
     gap: 0.5rem; 
     min-width: 120px; /* Prevent crushing */
 }
-.metric-label { font-size: 0.7rem; font-weight: 700; color: #94a3b8; letter-spacing: 0.5px; text-transform: uppercase; }
+.metric-label { font-size: 0.7rem; font-weight: 700; color: var(--color-text-subtle); letter-spacing: 0.5px; text-transform: uppercase; }
 .metric-grid { display: flex; gap: 1.5rem; flex-wrap: wrap; } /* Sub-items can wrap if needed */
 .metric-cell { display: flex; flex-direction: column; gap: 2px; }
-.sub-label { font-size: 0.7rem; color: #64748b; }
-.metric-value { font-size: 0.9rem; color: #0f172a; font-weight: 600; white-space: nowrap; }
-.arrow { color: #cbd5e1; font-size: 0.8rem; margin: 0 4px; }
+.sub-label { font-size: 0.7rem; color: var(--color-text-muted); }
+.metric-value { font-size: 0.9rem; color: var(--color-text-main); font-weight: 600; white-space: nowrap; }
+.arrow { color: var(--color-text-subtle); font-size: 0.8rem; margin: 0 4px; }
 </style>

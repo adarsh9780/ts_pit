@@ -63,15 +63,17 @@ const restoreUiState = () => {
     if (!raw) return;
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === 'object') {
+      const hasRouteAlert = Boolean(normalizeAlertId(route.params.alertId));
       const filters = parsed.filters ?? {};
       currentFilters.value = {
         search: typeof filters.search === 'string' ? filters.search : '',
         status: typeof filters.status === 'string' ? filters.status : '',
         type: typeof filters.type === 'string' ? filters.type : '',
-        date: typeof filters.date === 'string' ? filters.date : ''
+        // Always default to latest available date on load.
+        date: ''
       };
-      isSidebarCollapsed.value = Boolean(parsed.isSidebarCollapsed);
-      isAgentOpen.value = Boolean(parsed.isAgentOpen) && Boolean(normalizeAlertId(route.params.alertId));
+      isSidebarCollapsed.value = hasRouteAlert ? Boolean(parsed.isSidebarCollapsed) : false;
+      isAgentOpen.value = hasRouteAlert ? Boolean(parsed.isAgentOpen) : false;
     }
   } catch (error) {
     console.warn('Failed to restore dashboard UI state:', error);
@@ -201,8 +203,9 @@ watch(
   () => route.params.alertId,
   (nextAlertId) => {
     selectedAlertId.value = normalizeAlertId(nextAlertId);
-    if (!selectedAlertId.value && isAgentOpen.value) {
-      isAgentOpen.value = false;
+    if (!selectedAlertId.value) {
+      if (isSidebarCollapsed.value) isSidebarCollapsed.value = false;
+      if (isAgentOpen.value) isAgentOpen.value = false;
       persistUiState();
     }
   },

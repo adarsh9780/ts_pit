@@ -6,6 +6,23 @@ from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 
 
+def _should_persist_message(message: AnyMessage) -> bool:
+    msg_type = str(getattr(message, "type", "")).lower()
+    if msg_type == "tool":
+        return False
+    additional = getattr(message, "additional_kwargs", None)
+    if isinstance(additional, dict) and additional.get("ephemeral_node_output"):
+        return False
+    return True
+
+
+def add_persistent_messages(
+    left: list[AnyMessage], right: list[AnyMessage] | AnyMessage
+) -> list[AnyMessage]:
+    merged = add_messages(left, right)
+    return [message for message in merged if _should_persist_message(message)]
+
+
 class CorrectionAttempt(BaseModel):
     attempt: int = Field(ge=1)
     error_code: str | None = None
@@ -60,7 +77,7 @@ class StepState(BaseModel):
 
 
 class AgentV3State(BaseModel):
-    messages: Annotated[list[AnyMessage], add_messages] = Field(default_factory=list)
+    messages: Annotated[list[AnyMessage], add_persistent_messages] = Field(default_factory=list)
     current_alert: CurrentAlertContext = Field(default_factory=CurrentAlertContext)
     steps: list[StepState] = Field(default_factory=list)
     archived_steps: list[StepState] = Field(default_factory=list)
@@ -92,5 +109,5 @@ class AgentV3State(BaseModel):
 
 
 class AgentInputSchema(BaseModel):
-    messages: Annotated[list[AnyMessage], add_messages] = Field(default_factory=list)
+    messages: Annotated[list[AnyMessage], add_persistent_messages] = Field(default_factory=list)
     current_alert: CurrentAlertContext = Field(default_factory=CurrentAlertContext)

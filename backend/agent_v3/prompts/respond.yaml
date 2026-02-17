@@ -16,6 +16,7 @@ system: |
   - Prefer markdown tables for comparable multi-row data.
   - Highlight important metrics/dates/tickers with concise emphasis.
   - Keep language plain and avoid unnecessary jargon.
+  - Do NOT restate planner steps or execution checklists in the final answer unless the user explicitly asks for the plan.
   - If failures/partial data exist, include one concise limitation note.
   - Do not dump raw JSON. Synthesize.
 

@@ -5,6 +5,7 @@ import markedKatex from 'marked-katex-extension';
 import 'katex/dist/katex.min.css';
 import ConfirmDialog from '../../../components/ConfirmDialog.vue';
 import { useAgentChat } from '../composables/useAgentChat.js';
+import { useToast } from '../../../composables/useToast.js';
 
 marked.setOptions({ breaks: true, gfm: true });
 const renderer = new marked.Renderer();
@@ -32,7 +33,28 @@ const normalizeLatexDelimiters = (content) => {
     .replace(/\[(\s*[^]\n]*\\[a-zA-Z][^]\n]*)\](?!\()/g, (_, expr) => `$$${expr.trim()}$$`);
 };
 
-const renderMarkdown = (content) => (content ? marked.parse(normalizeLatexDelimiters(content)) : '');
+const escapeHtml = (value) => String(value || '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;');
+
+const MAX_MARKDOWN_CACHE_ENTRIES = 200;
+const markdownCache = new Map();
+const renderMarkdown = (content) => {
+  const raw = String(content || '');
+  if (!raw) return '';
+
+  const cached = markdownCache.get(raw);
+  if (cached) return cached;
+
+  const html = marked.parse(normalizeLatexDelimiters(raw));
+  markdownCache.set(raw, html);
+  if (markdownCache.size > MAX_MARKDOWN_CACHE_ENTRIES) {
+    const oldestKey = markdownCache.keys().next().value;
+    if (oldestKey) markdownCache.delete(oldestKey);
+  }
+  return html;
+};
 const formatToolLabel = (name) => name?.replaceAll('_', ' ') || 'tool';
 const formatDuration = (ms) => {
   if (typeof ms !== 'number' || Number.isNaN(ms)) return '';
@@ -76,10 +98,6 @@ const toolCode = (tool) => {
   return '';
 };
 const codeLabel = (tool) => (tool?.name === 'execute_sql' ? 'SQL Code' : 'Python Code');
-const escapeHtml = (value) => String(value || '')
-  .replace(/&/g, '&amp;')
-  .replace(/</g, '&lt;')
-  .replace(/>/g, '&gt;');
 const highlightCode = (tool) => {
   const raw = toolCode(tool);
   if (!raw) return '';
@@ -114,8 +132,33 @@ const copyToolCode = async (tool) => {
   if (!code) return;
   try {
     await navigator.clipboard.writeText(code);
+    notify('Code copied to clipboard.', { level: 'success' });
   } catch {
-    // no-op
+    notify('Unable to copy code. Please try again.', { level: 'error' });
+  }
+};
+const copyMessageText = async (msg) => {
+  const text = String(msg?.content || '').trim();
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    notify('Message copied to clipboard.', { level: 'success' });
+  } catch {
+    notify('Unable to copy message. Please try again.', { level: 'error' });
+  }
+};
+const onPlaceholderFeedback = (kind) => {
+  console.log('Feedback placeholder clicked:', kind);
+  if (kind === 'thumbs_up') {
+    notify('Feedback recorded: thumbs up (placeholder).');
+    return;
+  }
+  if (kind === 'thumbs_down') {
+    notify('Feedback recorded: thumbs down (placeholder).');
+    return;
+  }
+  if (kind === 'save_feedback') {
+    notify('Save feedback action is a placeholder for now.');
   }
 };
 const messageSegments = (msg) => {
@@ -134,22 +177,15 @@ const setPlanCollapsed = (msg, value) => {
   if (!msg || msg.role !== 'agent') return;
   msg.planCollapsed = Boolean(value);
 };
-const renderPlanMarkdown = (rawContent) => {
+const parsePlannerContent = (rawContent) => {
   const raw = String(rawContent || '').trim();
-  if (!raw) return '';
+  if (!raw) return { planAction: null, requiresExecution: null, markdown: '' };
   try {
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return raw;
+    if (!parsed || typeof parsed !== 'object') return { planAction: null, requiresExecution: null, markdown: raw };
     const lines = [];
-    if (parsed.plan_action) lines.push(`**Plan action:** ${parsed.plan_action}`);
-    if (typeof parsed.requires_execution !== 'undefined') {
-      lines.push(`**Requires execution:** ${String(parsed.requires_execution)}`);
-    }
-    if (parsed.execution_reason) lines.push(`**Execution reason:** ${parsed.execution_reason}`);
     const steps = Array.isArray(parsed.steps) ? parsed.steps : [];
     if (steps.length) {
-      lines.push('');
-      lines.push('### Plan');
       steps.forEach((step, idx) => {
         if (typeof step === 'string') {
           lines.push(`${idx + 1}. ${step}`);
@@ -158,15 +194,46 @@ const renderPlanMarkdown = (rawContent) => {
         if (!step || typeof step !== 'object') return;
         const instruction = String(step.instruction || step.name || `Step ${idx + 1}`);
         const goal = String(step.goal || '').trim();
+        const success = String(step.success_criteria || '').trim();
+        const constraints = Array.isArray(step.constraints)
+          ? step.constraints.filter((c) => String(c || '').trim()).map((c) => String(c).trim())
+          : [];
         lines.push(`${idx + 1}. ${instruction}`);
         if (goal) lines.push(`   - Goal: ${goal}`);
+        if (success) lines.push(`   - Success: ${success}`);
+        if (constraints.length) lines.push(`   - Constraints: ${constraints.join('; ')}`);
       });
+    } else {
+      lines.push('No plan steps available.');
     }
-    return lines.join('\n');
+    return {
+      planAction: parsed.plan_action ? String(parsed.plan_action) : null,
+      requiresExecution:
+        typeof parsed.requires_execution === 'undefined'
+          ? null
+          : String(parsed.requires_execution),
+      markdown: lines.join('\n'),
+    };
   } catch {
-    return raw;
+    const actionMatch = raw.match(/^\s*Plan action:\s*(.+)$/im);
+    const requiresMatch = raw.match(/^\s*Requires execution:\s*(.+)$/im);
+    let markdown = raw
+      .replace(/^\s*Plan action:\s*.+$/im, '')
+      .replace(/^\s*Requires execution:\s*.+$/im, '')
+      .replace(/^\s*Execution reason:\s*.+$/im, '')
+      .replace(/^\s*\*\*Plan:\*\*\s*$/im, '')
+      .trim();
+    if (!markdown) markdown = raw;
+    return {
+      planAction: actionMatch ? actionMatch[1].trim() : null,
+      requiresExecution: requiresMatch ? requiresMatch[1].trim() : null,
+      markdown,
+    };
   }
 };
+const plannerPlanAction = (msg) => parsePlannerContent(messagePlannerSegment(msg)?.content || '').planAction;
+const plannerRequiresExecution = (msg) => parsePlannerContent(messagePlannerSegment(msg)?.content || '').requiresExecution;
+const plannerMarkdown = (msg) => parsePlannerContent(messagePlannerSegment(msg)?.content || '').markdown;
 const contextTokenMax = (ctx) => {
   const raw = Number(ctx?.tokenBudget ?? 50000);
   if (!Number.isFinite(raw) || raw <= 0) return 50000;
@@ -187,6 +254,7 @@ const contextRingStyle = (ctx) => {
 
 const props = defineProps({ alertId: String });
 defineEmits(['close']);
+const { notify } = useToast();
 
 const {
   messages,
@@ -194,7 +262,9 @@ const {
   isLoading,
   historyLoading,
   hasMoreHistory,
+  showLoadMoreHistoryControl,
   sessionId,
+  canSend,
   messagesContainer,
   inputRef,
   panelWidth,
@@ -230,22 +300,26 @@ const {
     <div class="panel-header">
       <h3>AI Assistant</h3>
       <div class="header-actions">
-        <button @click="clearChat" class="action-btn" title="Clear chat (new session)">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <button @click="clearChat" class="header-icon-btn" title="Clear chat (new session)" aria-label="Clear chat">
+          <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M20 20H7L3 16l9-13 8 8-5 9"/>
             <path d="M6.5 13.5l5 5"/>
           </svg>
         </button>
-        <button @click="showDeleteConfirmation" class="action-btn delete-btn" title="Delete history from server">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <button @click="showDeleteConfirmation" class="header-icon-btn delete-btn" title="Delete history from server" aria-label="Delete history">
+          <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14M10 11v6M14 11v6"/>
           </svg>
         </button>
-        <button @click="$emit('close')" class="close-btn">×</button>
+        <button @click="$emit('close')" class="header-icon-btn close-btn" title="Close assistant" aria-label="Close assistant">
+          <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M18 6L6 18M6 6l12 12"/>
+          </svg>
+        </button>
       </div>
     </div>
     <div class="messages-area" ref="messagesContainer">
-      <div v-if="hasMoreHistory || historyLoading" class="history-more-wrap">
+      <div v-if="historyLoading || (hasMoreHistory && showLoadMoreHistoryControl)" class="history-more-wrap">
         <button class="history-more-btn" @click="loadMoreHistory" :disabled="historyLoading">
           {{ historyLoading ? 'Loading...' : 'Load older messages' }}
         </button>
@@ -267,7 +341,32 @@ const {
           </div>
         </template>
 
-        <div v-else class="message-content">
+        <template v-else-if="msg.role === 'user'">
+        <div class="user-inline-row">
+          <div class="message-actions inline-user">
+            <button
+              class="message-action-btn icon-btn"
+              :disabled="!String(msg.content || '').trim()"
+              @click="copyMessageText(msg)"
+              title="Copy message"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+              </svg>
+            </button>
+          </div>
+          <div class="user-bubble">
+            <div
+              class="text markdown-content"
+              v-html="renderMarkdown(msg.content)"
+            ></div>
+          </div>
+        </div>
+        </template>
+
+        <template v-else>
+        <div class="message-content">
           <div v-if="messagePlannerSegment(msg)?.content" class="ephemeral-wrap">
             <details
               class="ephemeral-group plan-group"
@@ -278,9 +377,17 @@ const {
                 Plan
               </summary>
               <div class="ephemeral-body plan-body">
+                <div class="plan-tags">
+                  <span v-if="plannerPlanAction(msg)" class="plan-tag">
+                    Plan action: {{ plannerPlanAction(msg) }}
+                  </span>
+                  <span v-if="plannerRequiresExecution(msg)" class="plan-tag">
+                    Requires execution: {{ plannerRequiresExecution(msg) }}
+                  </span>
+                </div>
                 <div
                   class="text markdown-content"
-                  v-html="renderMarkdown(renderPlanMarkdown(messagePlannerSegment(msg)?.content || ''))"
+                  v-html="renderMarkdown(plannerMarkdown(msg))"
                 ></div>
               </div>
             </details>
@@ -335,6 +442,13 @@ const {
             Formatting final output...
           </div>
 
+          <div
+            v-if="messageVisibleSegments(msg).length && (messagePlannerSegment(msg)?.content || messageToolSegments(msg).length)"
+            class="answer-divider"
+          >
+            <span>Final answer</span>
+          </div>
+
           <div v-for="(segment, segIndex) in messageVisibleSegments(msg)" :key="`seg-${index}-${segIndex}`">
             <div
               v-if="segment.type === 'text' && segment.content"
@@ -343,7 +457,65 @@ const {
               v-html="renderMarkdown(segment.content)"
             ></div>
           </div>
+
         </div>
+        <div
+          v-if="msg.role === 'agent'"
+          :class="[
+            'message-actions-outside',
+            msg.role,
+            {
+              'has-aux-sections':
+                Boolean(messagePlannerSegment(msg)?.content) ||
+                messageToolSegments(msg).length > 0 ||
+                msg.isFormattingFinal,
+            },
+          ]"
+        >
+          <div class="message-actions">
+            <button
+              class="message-action-btn icon-btn"
+              :disabled="!String(msg.content || '').trim()"
+              @click="copyMessageText(msg)"
+              title="Copy message"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+              </svg>
+            </button>
+            <template v-if="msg.role === 'agent'">
+              <button
+                class="message-action-btn icon-btn"
+                @click="onPlaceholderFeedback('thumbs_up')"
+                title="Thumbs up (coming soon)"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.3a2 2 0 0 0 2-1.7l1.4-9A2 2 0 0 0 19.7 9H14z"/>
+                  <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/>
+                </svg>
+              </button>
+              <button
+                class="message-action-btn icon-btn"
+                @click="onPlaceholderFeedback('thumbs_down')"
+                title="Thumbs down (coming soon)"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.7a2 2 0 0 0-2 1.7l-1.4 9A2 2 0 0 0 4.3 15H10z"/>
+                  <path d="M17 2h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3"/>
+                </svg>
+              </button>
+              <button
+                class="message-action-btn"
+                @click="onPlaceholderFeedback('save_feedback')"
+                title="Save feedback (coming soon)"
+              >
+                Save feedback
+              </button>
+            </template>
+          </div>
+        </div>
+        </template>
       </div>
 
       <div v-if="isLoading" class="loading-container">
@@ -365,7 +537,7 @@ const {
       <div class="composer-toolbar">
         <div class="input-left-tools">
           <button class="artifact-btn" @click.stop="toggleArtifactsMenu" :disabled="!sessionId" title="Artifacts">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
               <polyline points="7 10 12 15 17 10"/>
               <line x1="12" y1="15" x2="12" y2="3"/>
@@ -395,7 +567,7 @@ const {
               <div class="context-ring-inner">{{ contextProgressPercent(contextDebug) }}%</div>
             </div>
           </div>
-          <button v-if="!isLoading" @click="sendMessage" class="send-circle-btn" :disabled="!inputMessage.trim()" title="Send">
+          <button v-if="!isLoading" @click="sendMessage" class="send-circle-btn" :disabled="!canSend || !inputMessage.trim()" :title="canSend ? 'Send' : 'Sending disabled'">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
               <line x1="12" y1="19" x2="12" y2="5"/>
               <polyline points="5 12 12 5 19 12"/>
@@ -435,17 +607,36 @@ const {
 
 .resize-handle {
   position: absolute;
-  left: 0;
+  left: -6px;
   top: 0;
   bottom: 0;
-  width: 4px;
+  width: 14px;
   cursor: ew-resize;
-  z-index: 10;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+}
+
+.handle-line {
+  width: 2px;
+  height: 72px;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.22);
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+  opacity: 0.7;
 }
 
 .resize-handle:hover,
 .resize-handle:active {
-  background: #3b82f6;
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.resize-handle:hover .handle-line,
+.resize-handle:active .handle-line {
+  background: rgba(59, 130, 246, 0.9);
+  opacity: 1;
 }
 
 .panel-header {
@@ -467,31 +658,32 @@ const {
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
 }
 
-.action-btn {
+.header-icon-btn {
   border: none;
   background: none;
   cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 4px;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 8px;
+  color: #94a3b8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
-.action-btn:hover {
+.header-icon-btn:hover {
   background: var(--color-surface-hover);
+  color: #7b8ca3;
 }
 
-.action-btn.delete-btn:hover {
-  background: rgba(239, 68, 68, 0.1);
-}
-
-.close-btn {
-  border: none;
-  background: none;
-  font-size: 1.5rem;
-  cursor: pointer;
-  color: var(--color-text-subtle);
+.header-icon {
+  width: 20px;
+  height: 20px;
 }
 
 .messages-area {
@@ -538,20 +730,133 @@ const {
 }
 
 .message.user {
-  align-self: flex-end;
-  background-color: var(--color-primary);
-  color: white;
-  border-bottom-right-radius: 2px;
+  align-self: stretch;
+  max-width: 100%;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 4px 8px;
 }
 
 .message.agent {
   align-self: stretch;
   max-width: 100%;
-  background-color: var(--color-background);
+  background: #ffffff;
   color: var(--color-text-main);
   border: 1px solid var(--color-border);
   border-radius: 8px;
   margin: 4px 8px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.user-inline-row {
+  width: 100%;
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.user-bubble {
+  background: #eaf1fb;
+  color: var(--color-text-main);
+  border: 1px solid #d6e2f3;
+  border-radius: 10px;
+  border-bottom-right-radius: 2px;
+  padding: var(--spacing-3);
+  max-width: 82%;
+}
+
+.message-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.message-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+}
+
+.message-actions-outside {
+  display: flex;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.message-actions-outside.user {
+  justify-content: flex-end;
+  padding-right: 6px;
+}
+
+.message-actions-outside.agent {
+  justify-content: flex-end;
+  padding-right: 10px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.message-actions-outside.agent.has-aux-sections {
+  margin-top: 12px;
+}
+
+.message-actions.inline-user {
+  justify-content: flex-start;
+  margin-bottom: 2px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.message.user:hover .message-actions.inline-user,
+.message.user:focus-within .message-actions.inline-user {
+  opacity: 1;
+}
+
+.message.agent:hover .message-actions-outside.agent,
+.message.agent:focus-within .message-actions-outside.agent {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.message-action-btn {
+  border: 1px solid #cfd8e6;
+  background: transparent;
+  color: #64748b;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.message-action-btn:hover:enabled {
+  background: rgba(15, 23, 42, 0.05);
+  color: var(--color-text-main);
+}
+
+.message-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.message-action-btn.icon-btn {
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.message-action-btn.icon-btn:hover:enabled {
+  background: rgba(15, 23, 42, 0.06);
+  border-radius: 6px;
 }
 
 .markdown-content {
@@ -568,7 +873,7 @@ const {
   background: rgba(0, 0, 0, 0.08);
   padding: 0.15em 0.4em;
   border-radius: 3px;
-  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  font-family: var(--font-family-ui);
   font-size: 0.9em;
 }
 .markdown-content :deep(table) {
@@ -631,12 +936,48 @@ const {
 }
 
 .plan-group {
-  border-color: rgba(15, 23, 42, 0.32);
+  border-color: #c7d3e3;
+  background: #f7fafc;
 }
 
 .plan-body {
-  background: rgba(15, 23, 42, 0.02);
+  background: #f3f6fb;
   border-radius: 6px;
+  padding: 12px 12px 10px;
+  border-left: 3px solid #b8c9e0;
+}
+
+.plan-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.plan-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #c7d3e3;
+  background: #ffffff;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.plan-body .markdown-content {
+  font-size: 13px;
+  color: #334155;
+}
+
+.plan-body .markdown-content :deep(p:first-child),
+.plan-body .markdown-content :deep(ol:first-child),
+.plan-body .markdown-content :deep(ul:first-child),
+.plan-body .markdown-content :deep(h1:first-child),
+.plan-body .markdown-content :deep(h2:first-child),
+.plan-body .markdown-content :deep(h3:first-child) {
+  margin-top: 0;
 }
 
 .tool-trace {
@@ -701,8 +1042,8 @@ const {
 }
 
 .context-ring {
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   border-radius: 999px;
   padding: 2px;
   display: grid;
@@ -730,6 +1071,26 @@ const {
   border-radius: 8px;
   padding: 8px 10px;
   background: rgba(15, 23, 42, 0.03);
+}
+
+.answer-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+  margin-bottom: 2px;
+  color: #64748b;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.answer-divider::before,
+.answer-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: #d3dde9;
 }
 
 .tool-section-title {
@@ -761,7 +1122,7 @@ const {
   color: #e2e8f0;
   font-size: 11px;
   line-height: 1.4;
-  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  font-family: var(--font-family-ui);
 }
 
 .tool-code-header {
@@ -800,7 +1161,7 @@ const {
   color: #e2e8f0;
   font-size: 11px;
   line-height: 1.45;
-  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  font-family: var(--font-family-ui);
 }
 
 .tool-code :deep(.tok.kw) {
@@ -974,7 +1335,9 @@ const {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 7px;
+  width: 34px;
+  height: 34px;
+  padding: 0;
   border: 1px solid var(--color-border);
   border-radius: 8px;
   background: transparent;
