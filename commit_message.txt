@@ -1,21 +1,12 @@
-fix(agent-v3,planner): plan answer-complete evidence instead of minimal outputs
+fix(llm,structured-output): avoid callback serialization errors during report generation
 
-- update planner policy to target answer-complete results so responder can present concrete evidence directly
-- require count/list intents to plan for exact totals plus representative records (or all records when small)
-- prefer reuse when relevant records already exist in completed steps, otherwise append retrieval steps
-- strengthen step guidance to support user-facing presentation (rows/headlines/dates), not just aggregate metrics
+- switch `with_structured_output(...)` calls in `backend/llm.py` to pass JSON schema dicts instead of Pydantic class objects
+- normalize structured output results defensively (support dict or typed object) before field access
+- prevent `LogStreamCallbackHandler` not-implemented serialization warnings for `ClusterSummaryOutput`/`ArticleAnalysisOutput`
+- keep existing summary/analysis behavior unchanged while removing noisy runtime callback errors
 
-fix(alert-news-ui): make article titles link-aware on hover and improve summary text wrapping
+fix(news-api): normalize article URL fields so frontend titles become clickable links
 
-- render news titles as clickable links when URL fields are present (`url`, `article_url`, `link`, `news_url`)
-- keep default title styling unchanged so links look like normal titles until hover/focus
-- add subtle underline affordance on hover/focus to indicate original-article navigation
-- remove measure cap for news summaries and force full-width wrapping to use all available card space
-- improve long-text wrapping with `overflow-wrap:anywhere` for dense summaries
-
-fix(agent-v3,respond): prevent stale failure leakage and accept numeric alert ids for report tools
-
-- keep responder access to all completed outputs, but restrict failed-step context to current plan version only
-- prevent old, unrelated failures from being surfaced as current-turn technical issues
-- update `analyze_current_alert` and `generate_current_alert_report` tool signatures to accept `alert_id` as `string | integer`
-- remove recurrent validation mismatch when frontend/current alert context provides numeric alert ids
+- update `/news/{isin}` payload mapping to detect URL-like article columns (`url`, `article_url`, `art_url`, `link`, `news_url`, `article_link`)
+- emit canonical `url` and `article_url` fields whenever any URL-like source column is present
+- ensure alert news cards can render title anchors consistently without requiring strict config column names

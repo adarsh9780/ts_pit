@@ -141,6 +141,7 @@ def get_news(
 
     original_theme_col = config.get_column("articles", "theme")
     original_summary_col = config.get_column("articles", "summary")
+    url_candidates = ("url", "article_url", "art_url", "link", "news_url", "article_link")
     article_cols = [cast(articles.c[col.name], Text).label(col.name) for col in articles.columns]
     stmt = (
         select(
@@ -171,6 +172,19 @@ def get_news(
     for row in rows:
         r = dict(row)
         remapped = remap_row(r, "articles")
+        resolved_url = ""
+        for key in url_candidates:
+            value = remapped.get(key)
+            if value is None:
+                value = r.get(key)
+            text_value = str(value or "").strip()
+            if text_value:
+                resolved_url = text_value
+                break
+        if resolved_url:
+            remapped["url"] = resolved_url
+            remapped["article_url"] = resolved_url
+
         if "impact_label" in remapped:
             remapped["impact_label"] = normalize_impact_label(remapped["impact_label"])
 

@@ -171,8 +171,8 @@ def generate_cluster_summary(
     if llm is None:
         llm = get_llm_model()
 
-    # Use structured output for guaranteed format
-    structured_llm = llm.with_structured_output(ClusterSummaryOutput)
+    # Use JSON schema dict to avoid callback serialization issues with class objects.
+    structured_llm = llm.with_structured_output(ClusterSummaryOutput.model_json_schema())
 
     # Prepare article text
     # Filter articles based on User Request: "At least one H in materiality OR Significant Impact"
@@ -239,16 +239,21 @@ def generate_cluster_summary(
     ]
 
     try:
-        # Invoke with structured output - returns ClusterSummaryOutput instance
+        # Invoke with structured output. Depending on provider/runtime, this may
+        # return a dict or a typed object; normalize defensively.
         result = structured_llm.invoke(messages)
+        if isinstance(result, dict):
+            result_obj = ClusterSummaryOutput.model_validate(result)
+        else:
+            result_obj = result
         return {
-            "narrative_theme": result.narrative_theme,
-            "narrative_summary": result.narrative_summary,
-            "bullish_events": result.bullish_events or [],
-            "bearish_events": result.bearish_events or [],
-            "neutral_events": result.neutral_events or [],
-            "recommendation": _normalize_recommendation(result.recommendation),
-            "recommendation_reason": result.recommendation_reason
+            "narrative_theme": result_obj.narrative_theme,
+            "narrative_summary": result_obj.narrative_summary,
+            "bullish_events": result_obj.bullish_events or [],
+            "bearish_events": result_obj.bearish_events or [],
+            "neutral_events": result_obj.neutral_events or [],
+            "recommendation": _normalize_recommendation(result_obj.recommendation),
+            "recommendation_reason": result_obj.recommendation_reason
             or "No recommendation generated. Manual review required.",
         }
     except Exception as e:
@@ -279,7 +284,7 @@ def generate_article_analysis(
 
     if llm is None:
         llm = get_llm_model()
-    structured_llm = llm.with_structured_output(ArticleAnalysisOutput)
+    structured_llm = llm.with_structured_output(ArticleAnalysisOutput.model_json_schema())
 
     content = f"""
     Title: {article_title}
@@ -296,11 +301,15 @@ def generate_article_analysis(
 
     try:
         result = structured_llm.invoke(messages)
+        if isinstance(result, dict):
+            result_obj = ArticleAnalysisOutput.model_validate(result)
+        else:
+            result_obj = result
 
         # Validation: Filter out placeholder "string" values
         theme = (
-            result.theme
-            if result.theme and result.theme.lower() != "string"
+            result_obj.theme
+            if result_obj.theme and result_obj.theme.lower() != "string"
             else "UNCATEGORIZED"
         )
 
