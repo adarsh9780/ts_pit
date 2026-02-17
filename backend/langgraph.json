@@ -1,0 +1,9 @@
+{
+  "dependencies": [
+    "."
+  ],
+  "graphs": {
+    "agent_v3": "src/ts_pit/agent_v3/graph.py:workflow"
+  },
+  "env": ".env"
+}

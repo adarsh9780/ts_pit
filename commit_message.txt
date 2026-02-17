@@ -1,13 +1,12 @@
-fix(agent-ui,tool-trace): show python/sql code when tool args arrive in nested payloads
+feat(refactor): migrate backend to src-layout structure
 
-- improve tool input parsing in `AgentPanelFeature.vue` to unwrap nested argument shapes (`kwargs`, `input`, `payload`, `args`)
-- keep support for double-encoded JSON tool inputs
-- broaden code extraction keys so execute_sql/execute_python snippets are detected more reliably
-- fix missing code blocks in expanded tool traces when tool start payload is not top-level `code`/`query`
+- Relocated core source code from `backend/` to `backend/src/ts_pit/`.
+- Moved all python project configuration files (`pyproject.toml`, `main.py`, `scripts/`, `tests/`, `libs/`, `langgraph.json`, `.env`, `config.yaml`, `alerts.db`, `openapi.yaml`, `README.md`) from root to `backend/`.
+- Updated `pyproject.toml` to configure `src` layout packaging.
+- Fixed `config.py` to correctly resolve configuration paths relative to new structure.
+- Updated all imports throughout the project (`backend`, `scripts`, `tests`) to use the definitive `ts_pit` package instead of fragile `backend` imports.
 
-refactor(agent-v3): cache prompt templates, standardize utils naming, and remove dead correction module
-
-- add `lru_cache` to `load_chat_prompt(...)` so prompt YAML files are not reloaded from disk on every call
-- introduce canonical `backend/agent_v3/utils.py` and migrate imports from `utilis.py` for naming consistency
-- keep `utilis.py` as a compatibility shim re-exporting `build_prompt_messages`
-- remove unused `backend/agent_v3/correction.py` to reduce duplicated logic risk versus `execution.py`
+**Why this matters:**
+1. **Resolves Import Ambiguity**: Eliminates persistent `ModuleNotFoundError` and `backend` vs local imports confusion by enforcing a standard package structure.
+2. **Robust Testing**: Tests now run against the installed package (`ts_pit`), ensuring that what we test matches what we ship, rather than relying on `sys.path` hacks.
+3. **Clean Separation**: Isolates the Python backend environment entirely within `backend/`, preventing root pollution and clearly separating frontend/backend concerns.
