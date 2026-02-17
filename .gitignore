@@ -41,3 +41,4 @@ backend/agent/db_schema.yaml
 backend/agent_v2/db_schema.yamlcommit_message.txt
 .cursorrules
 .langgraph_api/*
+backend/src/artifacts/*
