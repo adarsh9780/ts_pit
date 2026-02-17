@@ -72,13 +72,29 @@ const prettyToolData = (value) => {
 const isCodeTool = (name) => ['execute_sql', 'execute_python'].includes(name);
 const parseToolInput = (tool) => {
   if (!tool?.input) return null;
+  const normalizeInputObject = (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+    if (value.kwargs && typeof value.kwargs === 'object' && !Array.isArray(value.kwargs)) {
+      return value.kwargs;
+    }
+    if (value.input && typeof value.input === 'object' && !Array.isArray(value.input)) {
+      return value.input;
+    }
+    if (value.payload && typeof value.payload === 'object' && !Array.isArray(value.payload)) {
+      return value.payload;
+    }
+    if (value.args && typeof value.args === 'object' && !Array.isArray(value.args)) {
+      return value.args;
+    }
+    return value;
+  };
   try {
     const parsed = JSON.parse(tool.input);
-    if (parsed && typeof parsed === 'object') return parsed;
+    if (parsed && typeof parsed === 'object') return normalizeInputObject(parsed);
     if (typeof parsed === 'string') {
       try {
         const parsedAgain = JSON.parse(parsed);
-        if (parsedAgain && typeof parsedAgain === 'object') return parsedAgain;
+        if (parsedAgain && typeof parsedAgain === 'object') return normalizeInputObject(parsedAgain);
       } catch {
         return null;
       }
@@ -90,10 +106,19 @@ const parseToolInput = (tool) => {
 };
 const toolCode = (tool) => {
   const input = parseToolInput(tool);
-  if (!input) return '';
-  if (tool?.name === 'execute_sql') return String(input.query || '');
+  if (!input || typeof input !== 'object') return '';
+  if (tool?.name === 'execute_sql') {
+    return String(input.query || input.sql || input.statement || '');
+  }
   if (tool?.name === 'execute_python') {
-    return String(input.code || input.python_code || input.script || '');
+    return String(
+      input.code
+      || input.python_code
+      || input.script
+      || input.program
+      || input.source
+      || ''
+    );
   }
   return '';
 };

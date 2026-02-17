@@ -1,12 +1,13 @@
-fix(llm,structured-output): avoid callback serialization errors during report generation
+fix(agent-ui,tool-trace): show python/sql code when tool args arrive in nested payloads
 
-- switch `with_structured_output(...)` calls in `backend/llm.py` to pass JSON schema dicts instead of Pydantic class objects
-- normalize structured output results defensively (support dict or typed object) before field access
-- prevent `LogStreamCallbackHandler` not-implemented serialization warnings for `ClusterSummaryOutput`/`ArticleAnalysisOutput`
-- keep existing summary/analysis behavior unchanged while removing noisy runtime callback errors
+- improve tool input parsing in `AgentPanelFeature.vue` to unwrap nested argument shapes (`kwargs`, `input`, `payload`, `args`)
+- keep support for double-encoded JSON tool inputs
+- broaden code extraction keys so execute_sql/execute_python snippets are detected more reliably
+- fix missing code blocks in expanded tool traces when tool start payload is not top-level `code`/`query`
 
-fix(news-api): normalize article URL fields so frontend titles become clickable links
+refactor(agent-v3): cache prompt templates, standardize utils naming, and remove dead correction module
 
-- update `/news/{isin}` payload mapping to detect URL-like article columns (`url`, `article_url`, `art_url`, `link`, `news_url`, `article_link`)
-- emit canonical `url` and `article_url` fields whenever any URL-like source column is present
-- ensure alert news cards can render title anchors consistently without requiring strict config column names
+- add `lru_cache` to `load_chat_prompt(...)` so prompt YAML files are not reloaded from disk on every call
+- introduce canonical `backend/agent_v3/utils.py` and migrate imports from `utilis.py` for naming consistency
+- keep `utilis.py` as a compatibility shim re-exporting `build_prompt_messages`
+- remove unused `backend/agent_v3/correction.py` to reduce duplicated logic risk versus `execution.py`

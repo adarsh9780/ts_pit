@@ -12,7 +12,7 @@ from pydantic import ValidationError
 from backend.agent_v3.prompts import load_chat_prompt
 from backend.agent_v3.state import AgentV3State, CorrectionAttempt
 from backend.agent_v3.tools import TOOL_REGISTRY
-from backend.agent_v3.utilis import build_prompt_messages
+from backend.agent_v3.utils import build_prompt_messages
 from backend.config import get_config
 from backend.llm import get_llm_model
 

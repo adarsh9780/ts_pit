@@ -5,7 +5,7 @@ from uuid import uuid4
 from backend.agent_v3.state import AgentV3State, StepState
 from backend.agent_v3.prompts import load_chat_prompt
 from backend.agent_v3.tools import TOOL_REGISTRY
-from backend.agent_v3.utilis import build_prompt_messages
+from backend.agent_v3.utils import build_prompt_messages
 from backend.llm import get_llm_model
 
 from langchain_core.runnables import RunnableConfig

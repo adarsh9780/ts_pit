@@ -15,7 +15,7 @@ from backend.agent_v3.execution import executioner
 from backend.agent_v3.responding import respond_node
 from backend.agent_v3.validation import answer_validator_node
 from backend.agent_v3.rewriting import answer_rewriter_node
-from backend.agent_v3.utilis import build_prompt_messages
+from backend.agent_v3.utils import build_prompt_messages
 from backend.config import get_config
 from backend.llm import get_llm_model
 
