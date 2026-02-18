@@ -790,6 +790,8 @@ Status: {ctx.status or "N/A"}
 
     async def event_generator():
         tool_started_at: dict[str, float] = {}
+        tool_attempts: dict[str, int] = {}
+        last_tool_error: dict[str, dict[str, str | None]] = {}
         streamed_nodes: set[str] = set()
         emitted_fallback_texts: set[str] = set()
         try:
@@ -872,9 +874,34 @@ Status: {ctx.status or "N/A"}
                 elif kind == "on_tool_start":
                     tool_name = event["name"]
                     tool_started_at[tool_name] = time.time()
+                    attempt = int(tool_attempts.get(tool_name, 0) + 1)
+                    tool_attempts[tool_name] = attempt
                     tool_input = event.get("data", {}).get("input")
+                    retry_reason = None
+                    rerun_reason = None
+                    prior_error = last_tool_error.get(tool_name)
+                    if attempt > 1:
+                        if prior_error:
+                            code = str(prior_error.get("error_code") or "").strip()
+                            message = str(prior_error.get("error_message") or "").strip()
+                            retry_reason = (
+                                f"Retrying after prior error"
+                                + (f" [{code}]" if code else "")
+                                + (f": {message}" if message else ".")
+                            )
+                        else:
+                            rerun_reason = (
+                                "Tool re-run without a prior tool error (likely replan "
+                                "or duplicate step execution)."
+                            )
+                    commentary = _tool_commentary(tool_name, tool_input)
+                    if tool_name == "analyze_current_alert":
+                        commentary = (
+                            "Deterministic rule: running baseline current-alert "
+                            "analysis before drill-down."
+                        )
                     yield (
-                        f"data: {json.dumps({'type': 'tool_start', 'tool': tool_name, 'input': _safe_preview(tool_input), 'commentary': _tool_commentary(tool_name, tool_input)})}\n\n"
+                        f"data: {json.dumps({'type': 'tool_start', 'tool': tool_name, 'input': _safe_preview(tool_input), 'commentary': commentary, 'attempt': attempt, 'retry_reason': retry_reason, 'rerun_reason': rerun_reason})}\n\n"
                     )
 
                 elif kind == "on_tool_end":
@@ -908,6 +935,13 @@ Status: {ctx.status or "N/A"}
                             error_code=error_code,
                             error_message=error_message,
                         )
+                    if ok:
+                        last_tool_error.pop(tool_name, None)
+                    else:
+                        last_tool_error[tool_name] = {
+                            "error_code": error_code,
+                            "error_message": error_message,
+                        }
                     if tool_name == "generate_current_alert_report" and isinstance(
                         tool_output, str
                     ):
@@ -921,7 +955,7 @@ Status: {ctx.status or "N/A"}
                         except Exception:
                             pass
                     yield (
-                        f"data: {json.dumps({'type': 'tool_end', 'tool': tool_name, 'ok': ok, 'error_code': error_code, 'error_message': error_message, 'output': _safe_preview(tool_output), 'duration_ms': duration_ms})}\n\n"
+                        f"data: {json.dumps({'type': 'tool_end', 'tool': tool_name, 'ok': ok, 'error_code': error_code, 'error_message': error_message, 'output': _safe_preview(tool_output), 'duration_ms': duration_ms, 'attempt': int(tool_attempts.get(tool_name, 1))})}\n\n"
                     )
 
             yield f"data: {json.dumps({'type': 'done'})}\n\n"

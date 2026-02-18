@@ -3,6 +3,7 @@ from __future__ import annotations
 from .llm import generate_cluster_summary
 from .services.alert_analysis_data import (
     build_alert_articles,
+    find_related_alert_ids,
     build_price_history,
     resolve_alert_row,
 )
@@ -34,6 +35,19 @@ def analyze_alert_non_persisting(conn, config, alert_id: str | int, llm):
 
     price_history = build_price_history(config, None, alert)
     articles = build_alert_articles(config, None, alert, start_date, end_date)
+    linked_alerts = find_related_alert_ids(config, None, alert)
+    related_alert_ids = linked_alerts.get("related_alert_ids", [])
+    related_alert_count = int(linked_alerts.get("related_alert_count", 0) or 0)
+    primary_alert_id = str(linked_alerts.get("primary_alert_id") or "")
+
+    if related_alert_count > 1:
+        linked_alerts_notice = (
+            "Multiple alerts share the same ticker and investigation window: "
+            f"{', '.join(related_alert_ids)}. This conclusion generally applies to "
+            "all linked alerts unless case-specific evidence differs."
+        )
+    else:
+        linked_alerts_notice = "No linked alerts found for the same ticker and investigation window."
     deterministic_result, llm_articles = run_deterministic_summary_gates(
         config=config,
         alert=alert,
@@ -83,6 +97,10 @@ def analyze_alert_non_persisting(conn, config, alert_id: str | int, llm):
     return {
         "ok": True,
         "alert_id": str(alert[config.get_column("alerts", "id")]),
+        "primary_alert_id": primary_alert_id,
+        "related_alert_ids": related_alert_ids,
+        "related_alert_count": related_alert_count,
+        "linked_alerts_notice": linked_alerts_notice,
         "source": source,
         "result": result,
         "citations": citations,

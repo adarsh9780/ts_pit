@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from uuid import uuid4
 
 from ts_pit.agent_v3.state import AgentV3State, StepState
@@ -97,6 +98,25 @@ DIRECT_STATE_QUESTION_KEYWORDS = {
     "current alert",
 }
 
+ALERT_INVESTIGATION_PATTERNS = (
+    "investigate",
+    "investigation",
+    "explain",
+    "disposition",
+    "justify",
+    "why flagged",
+    "why this alert",
+    "review this alert",
+    "analyze this alert",
+    "analyse this alert",
+    "escalate",
+    "dismiss",
+)
+
+FORCED_ANALYSIS_STEP_INSTRUCTION = (
+    "Run deterministic analysis for the current alert before any drill-down."
+)
+
 
 def _latest_user_question(messages: list[Any]) -> str:
     for message in reversed(messages):
@@ -181,6 +201,78 @@ def _text_has_sql_intent(text: str) -> bool:
 def _is_direct_state_question(query: str) -> bool:
     lowered = str(query or "").lower()
     return any(kw in lowered for kw in DIRECT_STATE_QUESTION_KEYWORDS)
+
+
+def _state_has_current_alert(state: AgentV3State) -> bool:
+    return getattr(state.current_alert, "alert_id", None) is not None
+
+
+def _is_alert_investigation_query(state: AgentV3State, query: str) -> bool:
+    if not _state_has_current_alert(state):
+        return False
+    lowered = str(query or "").lower()
+    if not lowered:
+        return False
+    if any(pattern in lowered for pattern in ALERT_INVESTIGATION_PATTERNS):
+        return True
+    # Cover "explain alert #123" style phrasing.
+    return bool(re.search(r"\b(alert|case)\b", lowered) and "explain" in lowered)
+
+
+def _extract_alert_id_from_step(step: StepState) -> str | None:
+    args = step.tool_args or {}
+    alert_id = args.get("alert_id") if isinstance(args, dict) else None
+    if alert_id is None:
+        return None
+    return str(alert_id)
+
+
+def _has_completed_analysis_for_current_alert(state: AgentV3State) -> bool:
+    current_alert_id = getattr(state.current_alert, "alert_id", None)
+    if current_alert_id is None:
+        return False
+    expected = str(current_alert_id)
+    for step in state.steps:
+        if step.status != "done" or step.selected_tool != "analyze_current_alert":
+            continue
+        step_alert_id = _extract_alert_id_from_step(step)
+        if step_alert_id == expected:
+            return True
+    return False
+
+
+def _has_pending_forced_analysis_step(state: AgentV3State) -> bool:
+    for step in state.steps:
+        if step.status not in {"pending", "running"}:
+            continue
+        text = " ".join(
+            [step.instruction or "", step.goal or "", step.success_criteria or ""]
+        ).lower()
+        if "deterministic analysis" in text and "current alert" in text:
+            return True
+    return False
+
+
+def _prepend_forced_alert_analysis_step(plan: Plan) -> Plan:
+    forced = PlannerStep(
+        instruction=FORCED_ANALYSIS_STEP_INSTRUCTION,
+        goal="Establish deterministic baseline findings for the selected alert.",
+        success_criteria=(
+            "Deterministic alert analysis is completed and available for follow-up "
+            "SQL/Python drill-down."
+        ),
+        constraints=[
+            "Use analyze_current_alert for baseline.",
+            "Do not run SQL/Python drill-down before baseline completes.",
+        ],
+    )
+    remaining = [
+        step
+        for step in plan.steps
+        if str(step.instruction or "").strip().lower()
+        != FORCED_ANALYSIS_STEP_INSTRUCTION.lower()
+    ]
+    return plan.model_copy(update={"steps": [forced] + remaining})
 
 
 def _step_is_schema_grounding_text(text: str) -> bool:
@@ -369,6 +461,25 @@ def planner(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
                 ]
             }
         )
+
+    investigation_query = _is_alert_investigation_query(state, user_query)
+    if (
+        investigation_query
+        and not _has_completed_analysis_for_current_alert(state)
+        and not _has_pending_forced_analysis_step(state)
+    ):
+        plan = plan.model_copy(
+            update={
+                "requires_execution": True,
+                "requires_execution_reason": (
+                    "Alert investigation requires deterministic baseline analysis "
+                    "before SQL/Python drill-down."
+                ),
+            }
+        )
+        if plan.plan_action == "reuse":
+            plan = plan.model_copy(update={"plan_action": "append"})
+        plan = _prepend_forced_alert_analysis_step(plan)
     if plan.requires_execution:
         merged_steps, archived_steps = _merge_plan(state, plan)
     else:

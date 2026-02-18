@@ -4,3 +4,5 @@ refactor(scripts): group utilities by task type with unified dispatch
 - Added shared script dispatcher (`_script_runner.py`) and unified router (`scripts/cli.py`).
 - Preserved backward compatibility by keeping existing utility scripts as execution targets.
 - Updated backend README with grouped script and unified CLI usage examples.
+
+agent_v3: force deterministic alert baseline, surface linked alerts explicitly, and prevent duplicate analysis reruns

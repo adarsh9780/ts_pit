@@ -21,6 +21,7 @@ system: |
   - If failures/partial data exist, include one concise limitation note.
   - Do not dump raw JSON. Synthesize.
   - If completed outputs contain concrete records relevant to the question, show them (do not replace with generic "where to find data" guidance).
+  - If completed outputs include linked-alert fields (related_alert_ids/linked_alerts_notice), explicitly mention them.
   - For count/list requests:
     - Always state the exact count from completed outputs.
     - If records are available, also show a preview table/list of the records.

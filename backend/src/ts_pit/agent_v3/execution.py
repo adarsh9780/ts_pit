@@ -28,6 +28,20 @@ RETRYABLE_ERROR_CODES = {
     "TOOL_ERROR",
     "EXECUTION_EXCEPTION",
 }
+ALERT_INVESTIGATION_PATTERNS = (
+    "investigate",
+    "investigation",
+    "explain",
+    "disposition",
+    "justify",
+    "why flagged",
+    "why this alert",
+    "review this alert",
+    "analyze this alert",
+    "analyse this alert",
+    "escalate",
+    "dismiss",
+)
 TABLE_ALIAS_OVERRIDES: dict[str, dict[str, str]] = {
     "alerts": {
         "alert_id": "id",
@@ -121,6 +135,78 @@ def _parse_tool_args_json(raw: str) -> dict[str, Any]:
     except Exception:
         pass
     return {}
+
+
+def _latest_user_question(messages: list[Any]) -> str:
+    for message in reversed(messages):
+        msg_type = str(getattr(message, "type", "")).lower()
+        if msg_type not in {"human", "user"}:
+            continue
+        content = getattr(message, "content", "")
+        if isinstance(content, list):
+            text_parts: list[str] = []
+            for part in content:
+                if isinstance(part, str):
+                    text_parts.append(part)
+                elif isinstance(part, dict) and "text" in part:
+                    text_parts.append(str(part["text"]))
+            text = " ".join(text_parts).strip()
+        else:
+            text = str(content or "").strip()
+        if "[USER QUESTION]" in text:
+            parts = text.split("[USER QUESTION]", 1)
+            if len(parts) > 1:
+                return parts[1].strip()
+        return text
+    return ""
+
+
+def _normalize_alert_id(value: Any) -> str | None:
+    if value is None:
+        return None
+    txt = str(value).strip()
+    return txt or None
+
+
+def _is_alert_investigation_query(state: AgentV3State) -> bool:
+    if getattr(state.current_alert, "alert_id", None) is None:
+        return False
+    lowered = _latest_user_question(state.messages).lower()
+    if not lowered:
+        return False
+    if any(pattern in lowered for pattern in ALERT_INVESTIGATION_PATTERNS):
+        return True
+    return bool(re.search(r"\b(alert|case)\b", lowered) and "explain" in lowered)
+
+
+def _step_alert_id(step: Any) -> str | None:
+    args = step.tool_args or {}
+    if isinstance(args, dict):
+        return _normalize_alert_id(args.get("alert_id"))
+    return None
+
+
+def _completed_analysis_for_alert(
+    steps: list[Any], alert_id: str
+) -> tuple[dict[str, Any], str] | None:
+    for step in steps:
+        if step.status != "done" or step.selected_tool != "analyze_current_alert":
+            continue
+        if _step_alert_id(step) != alert_id:
+            continue
+        payload = step.result_payload
+        if isinstance(payload, dict) and payload:
+            return payload, str(step.id)
+    return None
+
+
+def _should_force_baseline_analysis(state: AgentV3State, steps: list[Any]) -> bool:
+    current_alert_id = _normalize_alert_id(getattr(state.current_alert, "alert_id", None))
+    if not current_alert_id:
+        return False
+    if not _is_alert_investigation_query(state):
+        return False
+    return _completed_analysis_for_alert(steps, current_alert_id) is None
 
 
 def _attempt_signature(tool_name: str, tool_args: dict[str, Any]) -> str:
@@ -428,23 +514,40 @@ async def executioner(state: AgentV3State, config: RunnableConfig) -> dict[str, 
     forced_tool_name = str(step.selected_tool or "")
 
     while step.attempts < MAX_EXECUTION_ATTEMPTS:
-        proposal = _propose_execution(
-            state,
-            instruction=step.instruction,
-            goal=step.goal or step.instruction,
-            success_criteria=step.success_criteria or "Complete the step successfully.",
-            constraints=step.constraints,
-            current_tool_name=str(step.selected_tool or ""),
-            current_tool_args=step.tool_args or {},
-            error_code=last_error_code,
-            error_message=last_error_message,
-            allowed_tool_switch=allowed_tool_switch,
-            force_tool_name=forced_tool_name,
-        )
+        current_alert_id = _normalize_alert_id(getattr(state.current_alert, "alert_id", None))
+        enforce_baseline = _should_force_baseline_analysis(state, steps)
+        if enforce_baseline and current_alert_id:
+            tool_name = "analyze_current_alert"
+            tool_args = {"alert_id": current_alert_id}
+            proposal = {
+                "reason": (
+                    "Deterministic rule: running baseline current-alert analysis "
+                    "before any drill-down."
+                )
+            }
+        else:
+            proposal = _propose_execution(
+                state,
+                instruction=step.instruction,
+                goal=step.goal or step.instruction,
+                success_criteria=step.success_criteria or "Complete the step successfully.",
+                constraints=step.constraints,
+                current_tool_name=str(step.selected_tool or ""),
+                current_tool_args=step.tool_args or {},
+                error_code=last_error_code,
+                error_message=last_error_message,
+                allowed_tool_switch=allowed_tool_switch,
+                force_tool_name=forced_tool_name,
+            )
 
-        tool_name = str(proposal.get("tool_name") or "").strip() or forced_tool_name
-        if forced_tool_name and not allowed_tool_switch:
-            tool_name = forced_tool_name
+            tool_name = str(proposal.get("tool_name") or "").strip() or forced_tool_name
+            if forced_tool_name and not allowed_tool_switch:
+                tool_name = forced_tool_name
+            tool_args = _normalize_tool_args(
+                tool_name,
+                _parse_tool_args_json(str(proposal.get("tool_args_json") or "{}")),
+            )
+
         if tool_name not in TOOL_REGISTRY:
             step.attempts += 1
             last_error_code = "INVALID_INPUT"
@@ -452,10 +555,38 @@ async def executioner(state: AgentV3State, config: RunnableConfig) -> dict[str, 
             allowed_tool_switch = True
             continue
 
-        tool_args = _normalize_tool_args(
-            tool_name,
-            _parse_tool_args_json(str(proposal.get("tool_args_json") or "{}")),
-        )
+        if tool_name == "analyze_current_alert":
+            target_alert_id = _normalize_alert_id((tool_args or {}).get("alert_id"))
+            if target_alert_id:
+                reused = _completed_analysis_for_alert(steps, target_alert_id)
+                if reused is not None:
+                    reused_payload, reused_step_id = reused
+                    step.status = "done"
+                    step.selected_tool = "analyze_current_alert"
+                    step.tool_args = {"alert_id": target_alert_id}
+                    step.last_error_code = None
+                    step.error = None
+                    step.result_payload = reused_payload
+                    step.result_summary = json.dumps(
+                        {
+                            "reused_result": True,
+                            "reused_from_step_id": reused_step_id,
+                            "reason": (
+                                "Skipped duplicate analyze_current_alert call; "
+                                "reused completed output for same alert_id."
+                            ),
+                            "payload": reused_payload,
+                        },
+                        default=str,
+                    )
+                    steps[idx] = step
+                    return {
+                        "steps": steps,
+                        "failed_step_index": None,
+                        "current_step_index": _first_pending_index(steps),
+                        "terminal_error": None,
+                    }
+
         signature = _attempt_signature(tool_name, tool_args)
         signature_repeated = signature in seen_signatures
         seen_signatures.add(signature)

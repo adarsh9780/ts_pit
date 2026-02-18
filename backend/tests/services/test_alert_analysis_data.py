@@ -183,6 +183,63 @@ class AlertAnalysisDataTests(unittest.TestCase):
         self.assertEqual(prices[0]["date"], "2026-02-09")
         self.assertEqual(prices[1]["date"], "2026-02-10")
 
+    def test_find_related_alert_ids_groups_same_ticker_and_window(self):
+        from ts_pit.services.alert_analysis_data import find_related_alert_ids
+        from ts_pit.db import get_engine
+
+        with get_engine().begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO alerts VALUES (102, 'US999', 'NVDA', '2026-02-01', '2026-02-10')"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO alerts VALUES (103, 'US999', 'NVDA', '2026-02-01', '2026-02-10')"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO alerts VALUES (201, 'US999', 'NVDA', '2026-02-02', '2026-02-10')"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO alerts VALUES (202, 'US999', 'AAPL', '2026-02-01', '2026-02-10')"
+                )
+            )
+
+        related = find_related_alert_ids(
+            self.config,
+            None,
+            {
+                "alert_id": 101,
+                "ticker": "NVDA",
+                "start_date": "2026-02-01",
+                "end_date": "2026-02-10",
+            },
+        )
+        self.assertEqual(related["primary_alert_id"], "101")
+        self.assertEqual(related["related_alert_ids"], ["101", "102", "103"])
+        self.assertEqual(related["related_alert_count"], 3)
+
+    def test_find_related_alert_ids_fallback_when_key_fields_missing(self):
+        from ts_pit.services.alert_analysis_data import find_related_alert_ids
+
+        related = find_related_alert_ids(
+            self.config,
+            None,
+            {
+                "alert_id": 101,
+                "ticker": "NVDA",
+                "start_date": None,
+                "end_date": "2026-02-10",
+            },
+        )
+        self.assertEqual(related["primary_alert_id"], "101")
+        self.assertEqual(related["related_alert_ids"], ["101"])
+        self.assertEqual(related["related_alert_count"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

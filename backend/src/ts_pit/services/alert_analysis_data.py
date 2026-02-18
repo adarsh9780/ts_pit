@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from sqlalchemy import MetaData, Table, Text, and_, cast, desc, select
 
 from ..db import get_engine
@@ -33,6 +35,55 @@ def resolve_alert_row(config, cursor, table_name: str, alert_id: str | int):
     _ = config
     _ = cursor
     return _resolve_alert_row(table_name, alert_id)
+
+
+def find_related_alert_ids(config, cursor, alert) -> dict[str, Any]:
+    _ = cursor
+    alerts_table = config.get_table_name("alerts")
+    alerts = _table(alerts_table)
+
+    id_col = config.get_column("alerts", "id")
+    ticker_col = config.get_column("alerts", "ticker")
+    start_col = config.get_column("alerts", "start_date")
+    end_col = config.get_column("alerts", "end_date")
+
+    primary_alert_id = alert.get(id_col) if isinstance(alert, dict) else None
+    primary_alert_id_str = str(primary_alert_id) if primary_alert_id is not None else None
+    ticker = alert.get(ticker_col) if isinstance(alert, dict) else None
+    start_date = alert.get(start_col) if isinstance(alert, dict) else None
+    end_date = alert.get(end_col) if isinstance(alert, dict) else None
+
+    fallback_ids = [primary_alert_id_str] if primary_alert_id_str else []
+    if not (primary_alert_id_str and ticker and start_date and end_date):
+        return {
+            "primary_alert_id": primary_alert_id_str or "",
+            "related_alert_ids": fallback_ids,
+            "related_alert_count": len(fallback_ids),
+        }
+
+    stmt = (
+        select(cast(alerts.c[id_col], Text).label("alert_id"))
+        .where(
+            and_(
+                cast(alerts.c[ticker_col], Text) == str(ticker),
+                cast(alerts.c[start_col], Text) == str(start_date),
+                cast(alerts.c[end_col], Text) == str(end_date),
+            )
+        )
+        .order_by(cast(alerts.c[id_col], Text).asc())
+    )
+    with get_engine().connect() as conn:
+        rows = conn.execute(stmt).mappings().all()
+
+    ids = sorted({str(row["alert_id"]) for row in rows if row.get("alert_id") is not None})
+    if primary_alert_id_str not in ids:
+        ids.append(primary_alert_id_str)
+        ids = sorted(set(ids))
+    return {
+        "primary_alert_id": primary_alert_id_str,
+        "related_alert_ids": ids,
+        "related_alert_count": len(ids),
+    }
 
 
 def build_alert_articles(

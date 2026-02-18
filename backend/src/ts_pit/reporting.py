@@ -295,6 +295,21 @@ def _render_report_html(payload: dict[str, Any]) -> str:
     alert = payload["alert"]
     analysis = payload["analysis"]
     h_articles = payload["high_materiality_articles"]
+    related_alert_ids = [
+        str(x) for x in (payload.get("related_alert_ids") or []) if str(x).strip()
+    ]
+    related_alert_count = int(payload.get("related_alert_count") or 0)
+    linked_alerts_notice = str(payload.get("linked_alerts_notice") or "").strip()
+    if not linked_alerts_notice:
+        if related_alert_count > 1:
+            linked_alerts_notice = (
+                "Multiple alerts share the same ticker and investigation window. "
+                "Use this conclusion consistently unless case-specific evidence differs."
+            )
+        else:
+            linked_alerts_notice = (
+                "No linked alerts found for the same ticker and investigation window."
+            )
     price_svg = payload["price_svg"]
     chart_snapshot = payload.get("chart_snapshot_data_url")
     web_news = payload.get("web_news", [])
@@ -558,6 +573,13 @@ def _render_report_html(payload: dict[str, Any]) -> str:
 
     <div class="card">
       <div class="section-index">Section 2</div>
+      <h2>Linked Alerts Detected</h2>
+      <p>{_e(linked_alerts_notice)}</p>
+      <p><b>Related Alert IDs:</b> {_e(", ".join(related_alert_ids) if related_alert_ids else "None")}</p>
+    </div>
+
+    <div class="card">
+      <div class="section-index">Section 3</div>
       <h2>Executive Summary</h2>
       <div class="recommendation-row">
         <b>Recommendation:</b>
@@ -572,7 +594,7 @@ def _render_report_html(payload: dict[str, Any]) -> str:
     </div>
 
     <div class="card">
-      <div class="section-index">Section 3</div>
+      <div class="section-index">Section 4</div>
       <h2>Price Chart (Alert Window)</h2>
       <div class="chart-frame">
         {"<img src='" + html.escape(chart_snapshot) + "' alt='Alert chart snapshot' style='max-width:100%;display:block;border-radius:4px;'/>" if chart_snapshot else price_svg}
@@ -580,13 +602,13 @@ def _render_report_html(payload: dict[str, Any]) -> str:
     </div>
 
     <div class="card">
-      <div class="section-index">Section 4</div>
+      <div class="section-index">Section 5</div>
       <h2>Internal Evidence Articles (Materiality contains H)</h2>
       <div class="news-feed">{evidence_html}</div>
     </div>
 
     <div class="card">
-      <div class="section-index">Section 5</div>
+      <div class="section-index">Section 6</div>
       <h2>External News (Optional Enrichment)</h2>
       <div class="news-feed">{web_html}</div>
     </div>
@@ -659,6 +681,9 @@ def generate_alert_report_html(
             "analysis": analysis.get("result", {}),
             "citations": analysis.get("citations", []),
         },
+        "related_alert_ids": analysis.get("related_alert_ids", []),
+        "related_alert_count": analysis.get("related_alert_count", 0),
+        "linked_alerts_notice": analysis.get("linked_alerts_notice"),
         "high_materiality_articles": high_materiality_articles,
         "price_svg": price_svg,
         "chart_snapshot_data_url": chart_snapshot_data_url,
