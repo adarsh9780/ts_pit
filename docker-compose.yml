@@ -1,0 +1,29 @@
+services:
+  # The Frontend (Nginx + Vue)
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+  # The Backend (FastAPI + Python)
+  backend:
+    build:
+      context: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      # Pass through API keys from your .env file
+      - NEWSAPI_API_KEY=${NEWSAPI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - AZURE_API_KEY=${AZURE_API_KEY}
+      - AZURE_TENANT_ID=${AZURE_TENANT_ID}
+      - AZURE_CLIENT_ID=${AZURE_CLIENT_ID}
+      - LANGSMITH_API_KEY=${LANGSMITH_API_KEY}
+    volumes:
+      # Persist the database so data isn't lost when container restarts
+      - ./backend/alerts.db:/app/alerts.db
+      # Mount a Docker-specific config file (we will create this next!)
+      - ./config.docker.yaml:/app/config.yaml

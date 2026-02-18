@@ -1,0 +1,353 @@
+# SQLite Database Configuration
+# ==============================
+# This file configures the application to work with your SQLite database.
+# Customize the table names, column mappings, and features below.
+
+# Database Configuration
+database:
+  # Path to SQLite database (relative to project root or absolute path)
+  path: "./alerts.db"
+
+# Table Configuration
+# ===================
+# Define your database tables and map column names to the expected UI fields.
+
+tables:
+  # Primary alerts table (required)
+  alerts:
+    name: "alerts"  # Actual table name in your database
+    columns:
+      # Required columns - these must exist in your database
+      id: "Alert ID"                     # Unique identifier for each alert
+      ticker: "Ticker"                   # Stock ticker symbol
+      status: "status"                   # Current status (canonical default: NEEDS_REVIEW/ESCALATE_L2/DISMISS)
+      
+      # Optional columns - leave empty string "" if not available
+      isin: "ISIN"                       # ISIN for linking alerts to news
+      instrument_name: "Instrument Name" # Full name of the instrument
+      buy_quantity: "Sum of buy quantity"
+      sell_quantity: "Sum of sell quantity"
+      execution_date: "Trade execution date"
+      trade_type: "trade type"
+      alert_date: "Alert date"
+      start_date: "Start date"
+      end_date: "End date"
+      # AI Analysis Columns
+      narrative_theme: "narrative_theme"
+      narrative_summary: "narrative_summary"
+      summary_generated_at: "summary_generated_at"
+      bullish_events: "bullish_events"
+      bearish_events: "bearish_events"
+      neutral_events: "neutral_events"
+      recommendation: "recommendation"
+      recommendation_reason: "recommendation_reason"
+
+  # News/Articles table (required)
+  articles:
+    name: "articles"  # Actual table name in your database
+    columns:
+      id: "art_id"
+      isin: "isin"                       # Links to alerts via ISIN
+      created_date: "art_created_date"
+      title: "art_title"
+      body: "art_body"
+      sentiment: "sentiment"
+      theme: "theme"
+      summary: "art_summary"
+      # Required for Prominence Calculation (No Joins)
+      ticker: "ticker"
+      instrument_name: "instrument_name"
+      # Optional: materiality column (removed from source table requirements)
+      materiality: ""
+      # Event Impact Scoring columns (These might also need moving later, but sticking to request)
+      impact_score: "impact_score"     # Numeric Z-Score
+      impact_label: "impact_label"     # Text label (canonical: Low/Medium/High)
+      # Additional columns in database
+      crescendo_id: "crescendo_id"     # Legacy identifier (same as ISIN)
+
+  # Price cache table (auto-created if doesn't exist)
+  prices:
+    name: "prices"
+    columns:
+      ticker: "ticker"
+      date: "date"
+      open: "opening price"
+      high: "high price"
+      low: "low price"
+      close: "closing price"
+      volume: "volume"
+      industry: "industry"
+
+  # AI Analysis table (linked to articles)
+  article_themes:
+    name: "article_themes"
+    columns:
+      art_id: "art_id"             # Foreign key to articles
+      theme: "narrative_theme"     # AI generated theme
+      summary: "narrative_summary" # AI generated summary
+      analysis: "narrative_analysis" # Detailed reasoning
+      # Calculated Scores
+      p1_prominence: "p1_prominence" # Calculated Entity Prominence (H/M/L)
+
+  # Hourly Price cache table (for Impact Scoring)
+  prices_hourly:
+    name: "prices_hourly"
+    columns:
+      ticker: "ticker"
+      date: "date"
+      open: "open"
+      high: "high"
+      low: "low"
+      close: "close"
+      volume: "volume"
+
+# Display Configuration
+# =====================
+# Customize how data is displayed in the UI
+
+display:
+  # Columns to show in the alerts table (use the keys from alerts.columns above)
+  table_columns:
+    - id
+    - ticker
+    - instrument_name
+    - trade_type
+    - execution_date
+    - alert_date
+    - start_date
+    - end_date
+    - status
+
+  # Human-readable labels for table headers
+  column_labels:
+    id: "Alert ID"
+    ticker: "Ticker"
+    isin: "ISIN"
+    instrument_name: "Instrument"
+    buy_quantity: "Buy Qty"
+    sell_quantity: "Sell Qty"
+    execution_date: "Execution Date"
+    trade_type: "Trade Type"
+    alert_date: "Alert Date"
+    start_date: "Start Date"
+    end_date: "End Date"
+    status: "Status"
+
+# Valid status values for alerts
+valid_statuses:
+  - NEEDS_REVIEW
+  - ESCALATE_L2
+  - DISMISS
+
+# Optional aliases to normalize legacy status values from external systems.
+# The API will return normalized values and writes will always persist canonical values.
+status_aliases:
+  Pending: NEEDS_REVIEW
+  Approved: ESCALATE_L2
+  Rejected: DISMISS
+
+# Optional aliases to normalize legacy impact labels on read paths.
+impact_label_aliases:
+  Noise: Low
+  Significant: Medium
+  Extreme: High
+  NOISE: Low
+  SIGNIFICANT: Medium
+  EXTREME: High
+
+# Enforce strict status validation after alias normalization.
+status_validation:
+  enforce: true
+
+# Materiality Color Configuration
+# ===============================
+# Colors for materiality indicators (only used if materiality column exists)
+# Format: Three-letter code (High/Medium/Low for each dimension) -> hex color
+materiality_colors:
+  HHH: "#8B0000"
+  HHM: "#A00000"
+  HHL: "#B50000"
+  HMH: "#C41E3A"
+  HMM: "#CD5C5C"
+  HML: "#DC143C"
+  HLH: "#E34234"
+  HLM: "#E57373"
+  HLL: "#EF5350"
+  MHH: "#C62828"
+  MHM: "#D32F2F"
+  MHL: "#E53935"
+  MMH: "#F44336"
+  MMM: "#EF5350"
+  MML: "#E57373"
+  MLH: "#EF9A9A"
+  MLM: "#FFCDD2"
+  MLL: "#EF9A9A"
+  LHH: "#EF5350"
+  LHM: "#E57373"
+  LHL: "#EF9A9A"
+  LMH: "#FF5252"
+  LMM: "#FF8A80"
+  LML: "#FFB74D"
+  LLH: "#FF8A65"
+  LLM: "#FF7043"
+  LLL: "#FF5722"
+  DEFAULT: "#607D8B"
+
+# Sector to ETF Mapping
+# =====================
+# Maps stock sectors to corresponding sector ETFs for comparison charts
+sector_etf_mapping:
+  Technology: "XLK"
+  Financial Services: "XLF"
+  Healthcare: "XLV"
+  Consumer Cyclical: "XLY"
+  Industrials: "XLI"
+  Communication Services: "XLC"
+  Energy: "XLE"
+  Consumer Defensive: "XLP"
+  Utilities: "XLU"
+  Real Estate: "XLRE"
+  Basic Materials: "XLB"
+
+# LLM Configuration
+# =================
+# Configure the Language Model Provider (azure or gemini)
+llm:
+  # Provider to use: "azure" or "gemini"
+  provider: "gemini"
+  
+  # Azure OpenAI Configuration
+  azure:
+    deployment: "gpt-4o-2024-08-06"
+    endpoint: "https://llm-multitenancy-exp.jpmchase.net/ver2/"
+    api_version: "2024-12-01-preview"
+    tenant_id: "${AZURE_TENANT_ID}"
+    client_id: "${AZURE_CLIENT_ID}"
+    cert_path: "cert/azure_openai_cert.pem"
+    scope: "https://cognitiveservices.azure.com/.default"
+    api_key: "${AZURE_API_KEY}"
+
+  # Google Gemini Configuration
+  gemini:
+    model: "gemini-2.5-flash"
+    # API Key should be set in environment variable GEMINI_API_KEY
+    # But can be hardcoded here for testing if needed
+    api_key: "${GEMINI_API_KEY}"
+
+# Proxy Configuration
+# ===================
+# Configure HTTP/HTTPS proxies if running behind a corporate firewall/VDI.
+# Leave empty "" for local development (Mac/Personal).
+proxy:
+  http: ""
+  https: ""
+  # Comma-separated domains to bypass proxy (e.g., localhost,127.0.0.1,.jpmchase.net)
+  no_proxy: "localhost,127.0.0.1"
+  
+  # Set to false if running in VDI/Corporate network with self-signed certificates
+  # This disables SSL verification for external tools (DuckDuckGo, Scraper)
+  ssl_verify: true
+
+# Agent Configuration
+# ===================
+# Unified agent configuration. Set `version` to switch runtime.
+# - v1: original graph (backend/agent)
+# - v2: experimental graph (backend/agent_v2)
+# - v3: clean-slate graph (backend/agent_v3)
+agent:
+  version: "v3"
+
+  retries:
+    # Number of autonomous retry turns after a tool returns {"ok": false}.
+    # 0 disables retry-after-error behavior.
+    max_tool_error_retries: 3
+
+  response_quality:
+    # Enable post-response validator/rewriter pipeline in agent_v3.
+    enabled: true
+    # Max rewrite attempts before escalation/fallback finalize.
+    max_answer_revision_attempts: 1
+    # Max times validator can send flow back to master in a single user turn.
+    max_master_escalations_from_validation: 1
+
+  filesystem:
+    # Directories are resolved relative to project root unless absolute.
+    # Keep this scoped and minimal.
+    allowed_dirs:
+      - artifacts
+      - data/reports
+    # Max nesting depth from each allowed root:
+    # 0 => only files directly in root
+    # 1 => allow one level below root
+    # 3 => supports artifacts/reports/<session_id>/...
+    max_depth: 3
+    read_extensions:
+      - .md
+      - .txt
+      - .csv
+      - .json
+      - .yaml
+      - .yml
+      - .log
+      - .sql
+      - .py
+    write_extensions:
+      - .md
+    max_read_bytes: 1048576
+
+  safe_py_runner:
+    enabled: true
+    timeout_seconds: 30
+    memory_limit_mb: 256
+    max_output_kb: 128
+    max_input_json_kb: 256
+    # Path to the runner Python executable (not the venv directory).
+    # Windows example:
+    #   C:/Users/<you>/ds/.virtualenvs/safe_py_runner/.venv/Scripts/python.exe
+    # Linux/macOS example:
+    #   ~/.ts_pit/safe_py_runner/.venv/bin/python
+    venv_path: "/runner-venv/bin/python"
+    # Optional imports to validate at startup/runtime (fail fast if missing from runner env).
+    required_imports: []
+    # Denylist model: imports are allowed except those blocked below.
+    blocked_imports:
+      - os
+      - subprocess
+      - socket
+      - ssl
+      - ftplib
+      - telnetlib
+      - multiprocessing
+      - threading
+      - ctypes
+    # Denylist model: builtins are allowed except those blocked below.
+    blocked_builtins:
+      - eval
+      - exec
+      - compile
+      - open
+      - input
+      - __import__
+      - globals
+      - locals
+      - vars
+      - breakpoint
+
+# Logging Configuration
+# =====================
+logging:
+  # Directory for application logs.
+  # Supports ~ expansion. Relative paths are resolved from project root.
+  dir: "~/.ts_pit/logs"
+  # Rotating log file pattern (Loguru format placeholders are supported).
+  file_pattern: "app_{time:YYYYMMDD}.jsonl"
+  # Default log level; can be overridden with LOG_LEVEL env var.
+  # This acts as the default for both console and file if specific levels aren't set.
+  level: "ERROR"
+  
+  # Optional: Fine-grained control overrides 'level' above
+  # console_level: "INFO"    # Level for console output
+  # file_level: "ERROR"      # Level for file output
+  rotation: "10 MB"
+  retention: "14 days"
+  compression: "zip"
