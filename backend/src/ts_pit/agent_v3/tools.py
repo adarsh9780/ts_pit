@@ -1286,8 +1286,23 @@ async def search_web(
             scrape_limit=scrape_limit,
         )
     except Exception as e:
+        err_text = str(e)
+        if "no results" in err_text.lower():
+            return _ok(
+                {"combined": [], "web": [], "news": []},
+                message=f"No web results found for: {query}",
+                query=query,
+                search_query=search_query,
+                start_date=start_date,
+                end_date=end_date,
+                combined_count=0,
+                web_count=0,
+                news_count=0,
+                scraped_count=0,
+                scrape_limit=scrape_limit,
+            )
         return _error(
-            f"Error searching web: {str(e)}", code="WEB_SEARCH_ERROR", query=query
+            f"Error searching web: {err_text}", code="WEB_SEARCH_ERROR", query=query
         )
 
 

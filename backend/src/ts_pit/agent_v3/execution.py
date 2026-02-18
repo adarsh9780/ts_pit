@@ -28,6 +28,7 @@ RETRYABLE_ERROR_CODES = {
     "TOOL_ERROR",
     "EXECUTION_EXCEPTION",
 }
+SEARCH_WEB_RETRY_LIMIT = 1
 ALERT_INVESTIGATION_PATTERNS = (
     "investigate",
     "investigation",
@@ -94,6 +95,14 @@ def _has_no_data_retry(step: Any) -> bool:
     )
 
 
+def _retry_count(step: Any, *, codes: set[str]) -> int:
+    return sum(
+        1
+        for item in (step.retry_history or [])
+        if str(item.error_code or "").upper() in codes
+    )
+
+
 def _is_empty_sql_success(tool_name: str, result: dict[str, Any]) -> bool:
     if tool_name != "execute_sql":
         return False
@@ -108,6 +117,58 @@ def _is_empty_sql_success(tool_name: str, result: dict[str, Any]) -> bool:
             return row_count == 0
     row_count = (result.get("meta") or {}).get("row_count")
     return isinstance(row_count, int) and row_count == 0
+
+
+def _search_web_result_count(result: dict[str, Any]) -> int:
+    data = result.get("data")
+    if isinstance(data, dict):
+        combined = data.get("combined")
+        if isinstance(combined, list):
+            return len(combined)
+        web = data.get("web")
+        news = data.get("news")
+        web_count = len(web) if isinstance(web, list) else 0
+        news_count = len(news) if isinstance(news, list) else 0
+        if web_count or news_count:
+            return web_count + news_count
+    if isinstance(data, list):
+        return len(data)
+    return 0
+
+
+def _is_empty_search_web_success(tool_name: str, result: dict[str, Any]) -> bool:
+    if tool_name != "search_web":
+        return False
+    if not bool(result.get("ok")):
+        return False
+    return _search_web_result_count(result) == 0
+
+
+def _retuned_search_web_args(
+    tool_args: dict[str, Any], state: AgentV3State
+) -> dict[str, Any]:
+    tuned = dict(tool_args or {})
+    raw_query = str(tuned.get("query") or "").strip()
+    ticker = str(getattr(state.current_alert, "ticker", "") or "").strip()
+
+    if raw_query:
+        lowered_query = raw_query.lower()
+        if ticker and ticker.lower() not in lowered_query:
+            tuned["query"] = f"{raw_query} {ticker} latest company news".strip()
+    elif ticker:
+        tuned["query"] = f"{ticker} latest company news"
+
+    current_max = tuned.get("max_results")
+    try:
+        max_results = int(current_max)
+    except Exception:
+        max_results = 5
+    tuned["max_results"] = min(max(max_results, 8), 10)
+
+    # Broaden window for fallback retry.
+    tuned.pop("start_date", None)
+    tuned.pop("end_date", None)
+    return tuned
 
 
 def _first_pending_index(steps: list[Any]) -> int:
@@ -616,6 +677,61 @@ async def executioner(state: AgentV3State, config: RunnableConfig) -> dict[str, 
         ok = bool(result.get("ok"))
 
         if ok:
+            if _is_empty_search_web_success(tool_name, result):
+                search_retry_count = _retry_count(
+                    step, codes={"WEB_NO_RESULTS", "WEB_SEARCH_EMPTY"}
+                )
+                if search_retry_count < SEARCH_WEB_RETRY_LIMIT:
+                    new_args = _retuned_search_web_args(tool_args, state)
+                    history = list(step.retry_history)
+                    history.append(
+                        CorrectionAttempt(
+                            attempt=len(history) + 1,
+                            error_code="WEB_SEARCH_EMPTY",
+                            error_message="Search web returned 0 results.",
+                            old_args=tool_args,
+                            new_args=new_args,
+                            reason=(
+                                "Retrying search_web once with broadened query and "
+                                "expanded parameters."
+                            ),
+                        )
+                    )
+                    step.retry_history = history
+                    step.status = "pending"
+                    step.selected_tool = "search_web"
+                    step.tool_args = new_args
+                    step.error = None
+                    step.last_error_code = None
+                    forced_tool_name = "search_web"
+                    allowed_tool_switch = False
+                    last_error_code = "WEB_SEARCH_EMPTY"
+                    last_error_message = "Search web returned 0 results."
+                    continue
+
+                step.status = "skipped"
+                step.last_error_code = None
+                step.error = None
+                step.result_payload = _safe_json_loads(json.dumps(result, default=str))
+                step.result_summary = json.dumps(
+                    {
+                        "skipped": True,
+                        "reason": (
+                            "search_web returned no results after retry; "
+                            "continuing with remaining plan steps."
+                        ),
+                        "result": result,
+                    },
+                    default=str,
+                )
+                steps[idx] = step
+                return {
+                    "steps": steps,
+                    "failed_step_index": None,
+                    "current_step_index": _first_pending_index(steps),
+                    "terminal_error": None,
+                }
+
             # Retry once for empty SQL results before finalizing as done.
             if _is_empty_sql_success(tool_name, result) and not _has_no_data_retry(
                 step
@@ -663,6 +779,63 @@ async def executioner(state: AgentV3State, config: RunnableConfig) -> dict[str, 
         err = result.get("error") if isinstance(result, dict) else None
         error_code = str((err or {}).get("code") or "TOOL_ERROR").upper()
         error_message = str((err or {}).get("message") or result)
+
+        if tool_name == "search_web":
+            search_retry_count = _retry_count(
+                step, codes={"WEB_SEARCH_ERROR", "WEB_SEARCH_EMPTY"}
+            )
+            if search_retry_count < SEARCH_WEB_RETRY_LIMIT:
+                new_args = _retuned_search_web_args(tool_args, state)
+                history = list(step.retry_history)
+                history.append(
+                    CorrectionAttempt(
+                        attempt=len(history) + 1,
+                        error_code="WEB_SEARCH_ERROR",
+                        error_message=error_message,
+                        old_args=tool_args,
+                        new_args=new_args,
+                        reason=(
+                            "Retrying search_web once after error with broadened "
+                            "query/parameters."
+                        ),
+                    )
+                )
+                step.retry_history = history
+                step.status = "pending"
+                step.selected_tool = "search_web"
+                step.tool_args = new_args
+                step.error = None
+                step.last_error_code = None
+                forced_tool_name = "search_web"
+                allowed_tool_switch = False
+                last_error_code = "WEB_SEARCH_ERROR"
+                last_error_message = error_message
+                continue
+
+            # Deterministic exception: do not block workflow on search_web.
+            step.status = "skipped"
+            step.last_error_code = None
+            step.error = None
+            step.result_payload = _safe_json_loads(json.dumps(result, default=str))
+            step.result_summary = json.dumps(
+                {
+                    "skipped": True,
+                    "reason": (
+                        "search_web failed after retry; deterministically skipped "
+                        "so remaining plan steps can continue."
+                    ),
+                    "error_code": error_code,
+                    "error_message": error_message,
+                },
+                default=str,
+            )
+            steps[idx] = step
+            return {
+                "steps": steps,
+                "failed_step_index": None,
+                "current_step_index": _first_pending_index(steps),
+                "terminal_error": None,
+            }
 
         step.status = "failed"
         step.last_error_code = error_code
