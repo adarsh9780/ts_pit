@@ -5,12 +5,14 @@ import sys
 from pathlib import Path
 
 # Ensure project root is importable when script is executed directly.
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
+try:
+    from ts_pit.agent_v2.python_env import get_runtime_diagnostics
+    from ts_pit.config import get_config
+except ImportError:
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent / "src"
     sys.path.insert(0, str(PROJECT_ROOT))
-
-from backend.agent_v2.python_env import get_runtime_diagnostics
-from backend.config import get_config
+    from ts_pit.agent_v2.python_env import get_runtime_diagnostics
+    from ts_pit.config import get_config
 
 
 def main() -> int:

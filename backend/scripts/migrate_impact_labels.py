@@ -5,15 +5,11 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-# Add backend directory to path to import config
-current_dir = Path(__file__).resolve().parent
-backend_dir = current_dir.parent / "backend"
-sys.path.append(str(backend_dir))
-
 try:
     from ts_pit.config import get_config
 except ImportError:
-    sys.path.append(str(backend_dir / "src"))
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(PROJECT_ROOT / "src"))
     from ts_pit.config import get_config
 
 config = get_config()

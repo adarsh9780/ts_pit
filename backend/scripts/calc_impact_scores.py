@@ -9,18 +9,19 @@ import time
 from datetime import timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# Add backend directory to path to import config
-current_dir = Path(__file__).resolve().parent
-backend_dir = current_dir.parent / "backend"
-sys.path.append(str(backend_dir))
-
 try:
     from ts_pit.config import get_config
-except ImportError:
-    # If running as script without package installed (dev mode fallback)
+except ImportError as e:
+    # Fallback for dev mode if package not installed
+    # But usually we want to enforce package installation
     import sys
 
-    sys.path.append(str(backend_dir / "src"))
+    # Assume running from backend/scripts/
+    # backend/ is parent
+    # backend/src/ is where packages are
+    # This fallback is getting messy. Let's just try to be clean.
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(PROJECT_ROOT / "src"))
     from ts_pit.config import get_config
 
 config = get_config()
@@ -36,7 +37,7 @@ def get_db_connection():
     return conn
 
 
-from market_data import ensure_hourly_table, fetch_hourly_data_with_fallback
+from ts_pit.market_data import ensure_hourly_table, fetch_hourly_data_with_fallback
 
 # ensure_hourly_table and fetch_hourly_data moved to market_data.py
 

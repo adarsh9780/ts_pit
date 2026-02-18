@@ -27,11 +27,14 @@ import sys
 from pathlib import Path
 from typing import Any
 
-# Add backend to path for imports
-PROJECT_ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
-from backend.config import get_config
+# Add backend to path for imports if running as script
+# But prefer package imports if installed
+try:
+    from ts_pit.config import get_config
+except ImportError:
+    PROJECT_ROOT = Path(__file__).parent.parent
+    sys.path.insert(0, str(PROJECT_ROOT / "src"))
+    from ts_pit.config import get_config
 
 try:
     from colorama import init, Fore, Style
@@ -243,7 +246,16 @@ def generate_schema(
 def parse_args():
     """Parse command line arguments."""
     default_db = Path(get_config().get_database_path())
-    default_output = PROJECT_ROOT / "backend" / "agent" / "db_schema.yaml"
+    # Default to package artifacts
+    try:
+        import importlib.resources
+        # Determine path dynamically if possible, or fallback to fixed src path
+        # Since this is a script, we rely on relative path from script location if needed
+        # Script is in backend/scripts
+        # Artifacts in backend/src/ts_pit/artifacts
+        default_output = Path(__file__).resolve().parent.parent / "src" / "ts_pit" / "artifacts" / "DB_SCHEMA_REFERENCE.yaml"
+    except Exception:
+        default_output = Path("DB_SCHEMA_REFERENCE.yaml")
 
     parser = argparse.ArgumentParser(
         description="Generate YAML schema from SQLite database for AI agent.",

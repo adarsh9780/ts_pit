@@ -6,20 +6,7 @@ import sys
 from datetime import timedelta
 from pathlib import Path
 
-# Add backend directory to path to import config
-# We allow this ONLY for config/config.yaml access, not logic code
-current_dir = Path(__file__).resolve().parent
-backend_dir = current_dir.parent / "backend"
-sys.path.append(str(backend_dir))
-
-try:
-    from ts_pit.config import get_config
-except ImportError:
-    # If running as script without package installed (dev mode fallback)
-    import sys
-
-    sys.path.append(str(backend_dir / "src"))
-    from ts_pit.config import get_config
+from ts_pit.config import get_config
 
 config = get_config()
 
@@ -270,3 +257,9 @@ def fetch_hourly_data_with_fallback(
     except Exception as e:
         print(f"  !! Error fetching {ticker}: {e}")
         return None
+
+
+# Add simple fetch price helper if it was missing?
+def fetch_prices_for_ticker(ticker, period="1mo", interval="1d"):
+    """Wrapper for yfinance history"""
+    return yf.Ticker(ticker).history(period=period, interval=interval)

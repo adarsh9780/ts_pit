@@ -4,15 +4,29 @@ import pandas as pd
 from datetime import datetime, timedelta
 import shutil
 import os
+import sys
+from pathlib import Path
+
+try:
+    from ts_pit.market_data import fetch_prices_for_ticker
+    from ts_pit.config import get_config
+except ImportError:
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(PROJECT_ROOT / "src"))
+    from ts_pit.market_data import fetch_prices_for_ticker
+    from ts_pit.config import get_config
+
+config = get_config()
+DB_PATH = config.get_database_path()
 
 
-def fetch_price_data(db_name="alerts.db"):
+def fetch_price_data():
     # SAFETY: Backup existing DB
-    if os.path.exists(db_name):
-        backup_name = f"{db_name}.bak_price"
+    if os.path.exists(DB_PATH):
+        backup_name = f"{DB_PATH}.bak_price"
         try:
             print(f"📦 Creating backup at '{backup_name}'...")
-            shutil.copy2(db_name, backup_name)
+            shutil.copy2(DB_PATH, backup_name)
         except Exception as e:
             print(f"⚠️  Warning: Failed to create backup: {e}")
 

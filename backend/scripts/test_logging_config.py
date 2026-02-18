@@ -2,11 +2,14 @@ import sys
 import os
 from pathlib import Path
 
-# Add project root to sys.path
-sys.path.append(str(Path(__file__).parent.parent))
-
-from ts_pit.logger import logprint
-from ts_pit.config import get_config
+try:
+    from ts_pit.logger import logprint
+    from ts_pit.config import get_config
+except ImportError:
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent / "src"
+    sys.path.insert(0, str(PROJECT_ROOT))
+    from ts_pit.logger import logprint
+    from ts_pit.config import get_config
 
 
 def test_logging():

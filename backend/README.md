@@ -23,6 +23,10 @@ Use only these two docs as source of truth:
    ```bash
    uv run scripts/validate_schema.py
    ```
+   Or use grouped runner:
+   ```bash
+   uv run scripts/schema_ops.py validate-schema
+   ```
 3. Start backend:
    ```bash
    uv run main.py
@@ -69,6 +73,30 @@ cd frontend && npm run generate:api
 ```
 
 This creates a generated JavaScript client under `frontend/src/api/generated`.
+
+## Script Categories
+
+Utilities under `scripts/` are grouped by task type. Use one of:
+
+- `uv run scripts/db_ops.py <operation>`
+- `uv run scripts/scoring_ops.py <operation>`
+- `uv run scripts/schema_ops.py <operation>`
+- `uv run scripts/dev_checks.py <operation>`
+- `uv run scripts/data_ops.py <operation>`
+
+Or use the unified CLI:
+
+```bash
+uv run scripts/cli.py <category> <operation> [args...]
+```
+
+Examples:
+
+```bash
+uv run scripts/cli.py db migrate-statuses --dry-run
+uv run scripts/cli.py schema export-openapi --output openapi.yaml
+uv run scripts/cli.py scoring calc-impact-scores --calc-all
+```
 
 ## Backend Tests
 

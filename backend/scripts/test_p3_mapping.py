@@ -9,10 +9,13 @@ This is a lightweight script (no pytest dependency) to prevent drift between:
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.append(str(ROOT))
-
-from ts_pit.scoring import calculate_p3
+# Ensure project root is importable when script is executed directly.
+try:
+    from ts_pit.scoring import calculate_p3
+except ImportError:
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent / "src"
+    sys.path.insert(0, str(PROJECT_ROOT))
+    from ts_pit.scoring import calculate_p3
 
 
 def assert_equal(actual, expected, case_name):

@@ -3,16 +3,12 @@ import sys
 from pathlib import Path
 import argparse
 
-# Add backend directory to path to import config
-current_dir = Path(__file__).resolve().parent
-backend_dir = current_dir.parent / "backend"
-sys.path.append(str(backend_dir))
-
 try:
-    from config import get_config
+    from ts_pit.config import get_config
 except ImportError:
-    sys.path.append(str(current_dir.parent))
-    from backend.config import get_config
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(PROJECT_ROOT / "src"))
+    from ts_pit.config import get_config
 
 
 def main():

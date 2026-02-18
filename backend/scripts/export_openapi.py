@@ -10,12 +10,12 @@ from pathlib import Path
 
 import yaml
 
-# Ensure project root is importable when script is executed directly.
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
+try:
+    from ts_pit.main import app
+except ImportError:
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent / "src"
     sys.path.insert(0, str(PROJECT_ROOT))
-
-from ts_pit.main import app
+    from ts_pit.main import app
 
 
 def parse_args() -> argparse.Namespace:

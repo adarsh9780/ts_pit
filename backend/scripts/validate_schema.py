@@ -3,10 +3,13 @@ import sys
 from pathlib import Path
 from colorama import init, Fore, Style
 
-# Add backend directory to path to import config
-current_dir = Path(__file__).resolve().parent
-sys.path.append(str(current_dir.parent))
-from backend.config import get_config
+# Add backend schema validation to use ts_pit
+try:
+    from ts_pit.config import get_config
+except ImportError:
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(PROJECT_ROOT / "src"))
+    from ts_pit.config import get_config
 
 init(autoreset=True)
 

@@ -9,16 +9,14 @@ import time
 import asyncio
 from pathlib import Path
 
-# Add project root to path
-project_root = Path(__file__).parent.parent
-sys.path.append(str(project_root))
-
 # If running as script without package installed (dev mode fallback)
 try:
     from ts_pit.config import get_config
 except ImportError:
     import sys
 
+    # Add project root to path
+    project_root = Path(__file__).parent.parent
     sys.path.append(str(project_root / "src"))
     from ts_pit.config import get_config
 from ts_pit.agent.tools import (
