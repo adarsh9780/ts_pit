@@ -14,6 +14,7 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 # Copy dependency definitions and local libraries
 COPY pyproject.toml uv.lock ./
 COPY libs ./libs
+COPY README.md ./
 
 # Install dependencies
 RUN uv sync --frozen --no-install-project
