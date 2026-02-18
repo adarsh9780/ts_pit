@@ -138,6 +138,12 @@ export function useAgentChat(alertIdRef) {
     el.scrollTop = el.scrollHeight + 1000;
   };
 
+  const isNearBottom = (thresholdPx = 64) => {
+    const el = messagesContainer.value;
+    if (!el) return true;
+    return (el.scrollHeight - el.scrollTop - el.clientHeight) <= thresholdPx;
+  };
+
   const fetchArtifacts = async () => {
     if (!sessionId.value) {
       artifacts.value = [];
@@ -690,13 +696,16 @@ export function useAgentChat(alertIdRef) {
   });
 
   watch(
-    [messages, isLoading],
-    () => {
+    [() => messages.value.length, isLoading],
+    ([newMessageCount, loadingNow], [oldMessageCount]) => {
       if (isPrependingHistory.value) return;
-      void scrollToBottom();
+      const addedMessage = Number(newMessageCount) > Number(oldMessageCount ?? 0);
+      if (loadingNow || addedMessage || isNearBottom()) {
+        void scrollToBottom();
+      }
       void nextTick().then(updateLoadMoreVisibility);
     },
-    { deep: true, flush: 'post' }
+    { flush: 'post' }
   );
 
   return {

@@ -1,1 +1,2 @@
 agent_v3: add planner tool-hint nudges, enforce actionable fallback steps, stop streaming raw planner JSON, and fix web-news/report query behavior with ordered DDGS backends
+agent_v3/frontend: prevent plan expand auto-scroll jump by removing deep message auto-scroll watcher; continue executing pending required steps even when a prior step failed; add master routing regression tests

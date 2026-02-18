@@ -911,7 +911,19 @@ def master(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
     if state.terminal_error:
         return {"next_step": "respond"}
 
+    pending_idx = _first_pending_index(state)
     failed_idx = _first_failed_index(state)
+    if (
+        failed_idx is not None
+        and state.plan_requires_execution
+        and pending_idx < len(state.steps)
+    ):
+        return {
+            "next_step": "execute",
+            "current_step_index": pending_idx,
+            "failed_step_index": failed_idx,
+        }
+
     if failed_idx is not None:
         if state.replan_attempts < MAX_REPLAN_ATTEMPTS:
             return {
@@ -939,7 +951,6 @@ def master(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
             }
         return {"next_step": "plan"}
 
-    pending_idx = _first_pending_index(state)
     if pending_idx >= len(state.steps):
         return {"next_step": "respond", "current_step_index": pending_idx}
 
