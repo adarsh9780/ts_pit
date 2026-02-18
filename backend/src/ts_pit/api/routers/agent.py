@@ -20,7 +20,6 @@ MAX_HISTORY_TURNS_PER_PAGE = 10
 STREAMABLE_MODEL_NODES = {
     "agent",
     "direct_answer",
-    "planner",
     "clarify",
     "respond",
     "answer_rewriter",

@@ -23,6 +23,11 @@ class AgentStreamingTests(unittest.TestCase):
             event = {"metadata": {"langgraph_node": "direct_answer"}}
             self.assertTrue(_should_stream_model_chunk(event))
 
+    def test_does_not_stream_planner_node(self):
+        with patch.object(app_config, "config", autospec=True):
+            event = {"metadata": {"langgraph_node": "planner"}}
+            self.assertFalse(_should_stream_model_chunk(event))
+
     def test_does_not_stream_other_nodes(self):
         with patch.object(app_config, "config", autospec=True):
             event = {"metadata": {"langgraph_node": "tools"}}

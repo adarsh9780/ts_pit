@@ -1,5 +1,1 @@
-agent_v3: force deterministic alert baseline, surface linked alerts explicitly, and prevent duplicate analysis reruns
-
-agent_v3: add risk-based one-turn clarification flow with explainable options and fallback defaults
-
-agent_v3: tighten deterministic alert step ordering, add explainable clarification routing, refine news queries (LLM+fallback), set DDGS backend order, and improve chat history rendering width/perf
+agent_v3: add planner tool-hint nudges, enforce actionable fallback steps, stop streaming raw planner JSON, and fix web-news/report query behavior with ordered DDGS backends

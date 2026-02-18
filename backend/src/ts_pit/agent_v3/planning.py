@@ -86,7 +86,6 @@ SQL_INTENT_KEYWORDS = {
     "column",
     "select",
     "join",
-    "from ",
     "group by",
     "where",
 }
@@ -115,6 +114,10 @@ ALERT_INVESTIGATION_PATTERNS = (
 
 FORCED_ANALYSIS_STEP_INSTRUCTION = (
     "Run deterministic analysis for the current alert before any drill-down."
+)
+
+WEB_SEARCH_FALLBACK_STEP_INSTRUCTION = (
+    "Search web/news evidence related to the current alert ticker and window."
 )
 
 
@@ -170,10 +173,11 @@ def _planner_steps_to_runtime(
 ) -> list[StepState]:
     runtime_steps: list[StepState] = []
     for offset, step in enumerate(planner_steps, start=1):
+        instruction = _instruction_with_tool_hint(step)
         runtime_steps.append(
             StepState(
                 id=_make_step_id(plan_version, start_index + offset),
-                instruction=step.instruction,
+                instruction=instruction,
                 goal=step.goal,
                 success_criteria=step.success_criteria,
                 constraints=step.constraints,
@@ -193,14 +197,89 @@ def _has_pending_steps(steps: list[StepState]) -> bool:
     return any(step.status in {"pending", "running"} for step in steps)
 
 
+def _tool_hint_for_planner_step(step: PlannerStep) -> str | None:
+    text = " ".join(
+        [
+            str(step.instruction or ""),
+            str(step.goal or ""),
+            str(step.success_criteria or ""),
+            " ".join(step.constraints or []),
+        ]
+    ).lower()
+    if "tool hint:" in text:
+        return None
+    if "deterministic analysis" in text and "alert" in text:
+        return "analyze_current_alert"
+    if _step_is_schema_grounding_text(text):
+        return "read_file"
+    if any(
+        token in text
+        for token in ("report", "download", "export", "artifact", "html report")
+    ):
+        return "generate_current_alert_report"
+    if any(token in text for token in ("web", "news", "external", "internet")):
+        return "search_web"
+    if _text_has_sql_intent(text):
+        return "execute_sql"
+    if any(
+        token in text
+        for token in (
+            "python",
+            "rolling",
+            "volatility",
+            "transform",
+            "derived metric",
+            "compute",
+        )
+    ):
+        return "execute_python"
+    return None
+
+
+def _instruction_with_tool_hint(step: PlannerStep) -> str:
+    instruction = str(step.instruction or "").strip()
+    hint = _tool_hint_for_planner_step(step)
+    if not hint:
+        return instruction
+    return f"{instruction} [Tool hint: {hint}]"
+
+
 def _text_has_sql_intent(text: str) -> bool:
     lowered = str(text or "").lower()
-    return any(keyword in lowered for keyword in SQL_INTENT_KEYWORDS)
+    if any(keyword in lowered for keyword in SQL_INTENT_KEYWORDS):
+        return True
+    return bool(re.search(r"\bselect\b[\s\S]{0,160}\bfrom\b", lowered))
 
 
 def _is_direct_state_question(query: str) -> bool:
     lowered = str(query or "").lower()
     return any(kw in lowered for kw in DIRECT_STATE_QUESTION_KEYWORDS)
+
+
+def _looks_like_web_news_request(query: str) -> bool:
+    lowered = str(query or "").lower()
+    return ("web" in lowered or "internet" in lowered or "online" in lowered) and (
+        "news" in lowered or "article" in lowered or "search" in lowered or "look for" in lowered
+    )
+
+
+def _build_fallback_execution_step(query: str) -> PlannerStep:
+    if _looks_like_web_news_request(query):
+        return PlannerStep(
+            instruction=WEB_SEARCH_FALLBACK_STEP_INSTRUCTION,
+            goal="Retrieve current external web/news context relevant to the request.",
+            success_criteria="A concrete set of web/news results is available for user-facing summary.",
+            constraints=[
+                "Prefer current alert ticker and company context when available.",
+                "Keep query broad enough to include company-name and ticker variants.",
+            ],
+        )
+    return PlannerStep(
+        instruction=query or "Execute one actionable retrieval step for the latest user request.",
+        goal="Ensure at least one concrete execution output is produced for this request.",
+        success_criteria="A usable tool result is available for final response synthesis.",
+        constraints=[],
+    )
 
 
 def _state_has_current_alert(state: AgentV3State) -> bool:
@@ -515,6 +594,24 @@ def planner(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
             if step.status in {"pending", "running", "failed"}:
                 merged_steps[idx] = step.model_copy(update={"status": "skipped"})
                 archived_steps.append(step)
+
+    if plan.requires_execution and _first_pending_index(merged_steps) >= len(merged_steps):
+        fallback_step = _build_fallback_execution_step(user_query)
+        fallback_runtime = _planner_steps_to_runtime(
+            [fallback_step],
+            start_index=len(merged_steps),
+            plan_version=max(state.plan_version + 1, 1),
+        )
+        merged_steps = merged_steps + fallback_runtime
+        plan = plan.model_copy(
+            update={
+                "plan_action": "append",
+                "requires_execution": True,
+                "requires_execution_reason": (
+                    "Planner produced no actionable pending steps; appended a deterministic fallback step."
+                ),
+            }
+        )
 
     plan_lines = [
         f"Plan action: {plan.plan_action}",

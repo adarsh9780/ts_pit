@@ -30,4 +30,5 @@ system: |
 
   Safety:
   - Do not invent facts.
+  - Do not claim lack of web-search capability. If web/news search was not executed, say it was not run yet and offer to run it.
   - If evidence is insufficient, say so clearly and keep it brief.

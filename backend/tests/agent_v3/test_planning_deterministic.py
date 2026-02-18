@@ -52,6 +52,19 @@ class _SqlModelStub:
         }
 
 
+class _ReuseNoStepsModelStub:
+    def with_structured_output(self, _schema):
+        return self
+
+    def invoke(self, _messages):
+        return {
+            "plan_action": "reuse",
+            "requires_execution": True,
+            "requires_execution_reason": "Need web search",
+            "steps": [],
+        }
+
+
 class PlanningDeterministicTests(unittest.TestCase):
     def test_planner_skips_execution_while_waiting_for_clarification(self):
         state = AgentV3State(
@@ -121,11 +134,44 @@ class PlanningDeterministicTests(unittest.TestCase):
 
         pending_steps = [s for s in out["steps"] if s.status in {"pending", "running"}]
         self.assertGreaterEqual(len(pending_steps), 3)
-        self.assertEqual(
-            pending_steps[0].instruction,
-            planning.FORCED_ANALYSIS_STEP_INSTRUCTION,
+        self.assertTrue(
+            pending_steps[0].instruction.startswith(
+                planning.FORCED_ANALYSIS_STEP_INSTRUCTION
+            )
         )
         self.assertIn("DB_SCHEMA_REFERENCE.yaml", pending_steps[1].instruction)
+
+    def test_instructions_include_tool_hint_nudge(self):
+        state = AgentV3State(
+            messages=[HumanMessage(content="[USER QUESTION]\nInvestigate this alert and run SQL details.")],
+            current_alert=CurrentAlertContext(alert_id=123, ticker="NVDA"),
+            intent_class="analyze_current_alert",
+        )
+
+        with patch.object(planning, "load_chat_prompt", return_value=_PromptStub()), patch.object(
+            planning, "get_llm_model", return_value=_SqlModelStub()
+        ):
+            out = planning.planner(state, config={})
+
+        pending_steps = [s for s in out["steps"] if s.status in {"pending", "running"}]
+        self.assertTrue(any("Tool hint:" in s.instruction for s in pending_steps))
+
+    def test_fallback_step_added_when_execution_required_but_no_pending(self):
+        state = AgentV3State(
+            messages=[HumanMessage(content="[USER QUESTION]\nlook for news from the web")],
+            current_alert=CurrentAlertContext(alert_id=123, ticker="NVDA"),
+        )
+
+        with patch.object(planning, "load_chat_prompt", return_value=_PromptStub()), patch.object(
+            planning, "get_llm_model", return_value=_ReuseNoStepsModelStub()
+        ):
+            out = planning.planner(state, config={})
+
+        pending_steps = [s for s in out["steps"] if s.status in {"pending", "running"}]
+        self.assertGreaterEqual(len(pending_steps), 1)
+        joined = "\n".join(step.instruction for step in pending_steps)
+        self.assertIn("Tool hint: search_web", joined)
+        self.assertTrue(out["plan_requires_execution"])
 
 
 if __name__ == "__main__":
