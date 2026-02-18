@@ -251,6 +251,20 @@ def _fetch_web_news(query: str, config, max_results: int = 5) -> list[dict[str, 
     return results
 
 
+def _build_web_news_query(alert: dict[str, Any], config) -> str:
+    ticker = str(alert.get(config.get_column("alerts", "ticker"), "") or "").strip()
+    instrument_name = str(
+        alert.get(config.get_column("alerts", "instrument_name"), "") or ""
+    ).strip()
+    terms: list[str] = []
+    if ticker:
+        terms.append(ticker)
+    if instrument_name and instrument_name.lower() != ticker.lower():
+        terms.append(f"\"{instrument_name}\"")
+    terms.append("stock company news")
+    return " ".join(term for term in terms if term).strip()
+
+
 def _render_reasoning_html(reason: str) -> str:
     lines = [ln.strip() for ln in str(reason or "").splitlines() if ln.strip()]
     if not lines:
@@ -659,7 +673,7 @@ def generate_alert_report_html(
 
     web_news = []
     if include_web_news:
-        query = f"{alert.get(config.get_column('alerts', 'ticker'), '')} stock news"
+        query = _build_web_news_query(alert, config)
         web_news = _fetch_web_news(query=query, config=config, max_results=5)
 
     now = datetime.now()

@@ -1,8 +1,5 @@
-refactor(scripts): group utilities by task type with unified dispatch
-
-- Added grouped script entrypoints: `db_ops.py`, `scoring_ops.py`, `schema_ops.py`, `dev_checks.py`, `data_ops.py`.
-- Added shared script dispatcher (`_script_runner.py`) and unified router (`scripts/cli.py`).
-- Preserved backward compatibility by keeping existing utility scripts as execution targets.
-- Updated backend README with grouped script and unified CLI usage examples.
-
 agent_v3: force deterministic alert baseline, surface linked alerts explicitly, and prevent duplicate analysis reruns
+
+agent_v3: add risk-based one-turn clarification flow with explainable options and fallback defaults
+
+agent_v3: tighten deterministic alert step ordering, add explainable clarification routing, refine news queries (LLM+fallback), set DDGS backend order, and improve chat history rendering width/perf

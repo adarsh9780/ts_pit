@@ -50,6 +50,12 @@ export function useAgentChat(alertIdRef) {
 
   let abortController = null;
   let toolSeq = 0;
+  let messageSeq = 0;
+
+  const nextMessageId = () => {
+    messageSeq += 1;
+    return `msg_${Date.now()}_${messageSeq}`;
+  };
 
   const ensureTextSegment = (msg) => {
     if (!msg.segments) msg.segments = [];
@@ -186,12 +192,14 @@ export function useAgentChat(alertIdRef) {
     rawMessages.map((msg) => {
       const role = String(msg?.role || '');
       const content = typeof msg?.content === 'string' ? msg.content : '';
+      const id = msg?.id || nextMessageId();
 
       if (role === 'agent') {
         const tools = Array.isArray(msg?.tools)
           ? msg.tools.map(sanitizeToolTrace).filter(Boolean)
           : [];
         return {
+          id,
           role,
           content,
           tools,
@@ -203,11 +211,12 @@ export function useAgentChat(alertIdRef) {
       }
 
       if (role === 'user') {
-        return { role, content };
+        return { id, role, content };
       }
 
       if (role === 'context-switch') {
         return {
+          id,
           role,
           alertId: msg?.alertId || msg?.alert_id || '',
           ticker: msg?.ticker || '',
@@ -217,7 +226,7 @@ export function useAgentChat(alertIdRef) {
         };
       }
 
-      return { role: role || 'agent', content };
+      return { id, role: role || 'agent', content };
     })
   );
 
@@ -274,6 +283,7 @@ export function useAgentChat(alertIdRef) {
       if (sessionId.value && previousTicker === newTicker) {
         if (previousAlertId.value && previousAlertId.value !== alertId) {
           messages.value.push({
+            id: nextMessageId(),
             role: 'context-switch',
             alertId,
             ticker: newTicker,
@@ -296,7 +306,7 @@ export function useAgentChat(alertIdRef) {
         await fetchArtifacts();
 
         if (!messages.value.length) {
-          messages.value = [{ role: 'agent', content: generateGreeting(newAlertInfo) }];
+          messages.value = [{ id: nextMessageId(), role: 'agent', content: generateGreeting(newAlertInfo) }];
         }
       }
 
@@ -318,7 +328,7 @@ export function useAgentChat(alertIdRef) {
     artifacts.value = [];
     hasMoreHistory.value = false;
     historyOffset.value = 0;
-    messages.value = [{ role: 'agent', content: generateGreeting(alertInfo.value) }];
+    messages.value = [{ id: nextMessageId(), role: 'agent', content: generateGreeting(alertInfo.value) }];
   };
 
   const showDeleteConfirmation = () => {
@@ -429,7 +439,7 @@ export function useAgentChat(alertIdRef) {
     if (!inputMessage.value.trim() || isLoading.value) return;
 
     const userMsg = inputMessage.value;
-    messages.value.push({ role: 'user', content: userMsg });
+    messages.value.push({ id: nextMessageId(), role: 'user', content: userMsg });
     inputMessage.value = '';
     isLoading.value = true;
     await scrollToBottom();
@@ -437,6 +447,7 @@ export function useAgentChat(alertIdRef) {
 
     const agentMsgIndex = messages.value.length;
     messages.value.push({
+      id: nextMessageId(),
       role: 'agent',
       content: '',
       tools: [],

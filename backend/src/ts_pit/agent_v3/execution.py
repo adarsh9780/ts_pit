@@ -201,12 +201,18 @@ def _completed_analysis_for_alert(
 
 
 def _should_force_baseline_analysis(state: AgentV3State, steps: list[Any]) -> bool:
+    target_alert_id = _normalize_alert_id(getattr(state, "intent_target_alert_id", None))
     current_alert_id = _normalize_alert_id(getattr(state.current_alert, "alert_id", None))
-    if not current_alert_id:
+    resolved_alert_id = target_alert_id or current_alert_id
+    if not resolved_alert_id:
         return False
+    if state.intent_class == "analyze_current_alert":
+        return _completed_analysis_for_alert(steps, resolved_alert_id) is None
+    if state.intent_class == "analyze_other_alert":
+        return _completed_analysis_for_alert(steps, resolved_alert_id) is None
     if not _is_alert_investigation_query(state):
         return False
-    return _completed_analysis_for_alert(steps, current_alert_id) is None
+    return _completed_analysis_for_alert(steps, resolved_alert_id) is None
 
 
 def _attempt_signature(tool_name: str, tool_args: dict[str, Any]) -> str:
@@ -499,6 +505,13 @@ async def _invoke_tool(tool_name: str, tool_args: dict[str, Any]) -> dict[str, A
 
 async def executioner(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
     _ = config
+    if state.needs_clarification and not state.clarification_resolved:
+        return {
+            "terminal_error": (
+                "Execution blocked pending clarification. "
+                "Please answer the clarification question first."
+            )
+        }
 
     idx = _first_pending_index(state.steps)
     if idx >= len(state.steps):
@@ -514,11 +527,13 @@ async def executioner(state: AgentV3State, config: RunnableConfig) -> dict[str, 
     forced_tool_name = str(step.selected_tool or "")
 
     while step.attempts < MAX_EXECUTION_ATTEMPTS:
+        target_alert_id = _normalize_alert_id(getattr(state, "intent_target_alert_id", None))
         current_alert_id = _normalize_alert_id(getattr(state.current_alert, "alert_id", None))
+        resolved_alert_id = target_alert_id or current_alert_id
         enforce_baseline = _should_force_baseline_analysis(state, steps)
-        if enforce_baseline and current_alert_id:
+        if enforce_baseline and resolved_alert_id:
             tool_name = "analyze_current_alert"
-            tool_args = {"alert_id": current_alert_id}
+            tool_args = {"alert_id": resolved_alert_id}
             proposal = {
                 "reason": (
                     "Deterministic rule: running baseline current-alert analysis "

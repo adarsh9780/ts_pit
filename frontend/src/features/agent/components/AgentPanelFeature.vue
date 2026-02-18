@@ -350,7 +350,7 @@ const {
         </button>
       </div>
 
-      <div v-for="(msg, index) in messages" :key="index" :class="['message', msg.role]">
+      <div v-for="(msg, index) in messages" :key="msg.id || index" :class="['message', msg.role]">
         <template v-if="msg.role === 'context-switch'">
           <div class="context-switch-divider">
             <div class="divider-line"></div>
@@ -886,6 +886,8 @@ const {
 
 .markdown-content {
   line-height: 1.6;
+  max-inline-size: none;
+  width: 100%;
 }
 
 .markdown-content :deep(p) { margin: 0 0 0.5em 0; }

@@ -350,7 +350,19 @@ def _ensure_schema_grounding_step(
             "Do not guess physical DB column names before schema grounding.",
         ],
     )
-    return [schema_step] + planner_steps
+    steps = list(planner_steps)
+    forced_idx = next(
+        (
+            idx
+            for idx, step in enumerate(steps)
+            if str(step.instruction or "").strip().lower()
+            == FORCED_ANALYSIS_STEP_INSTRUCTION.lower()
+        ),
+        -1,
+    )
+    if forced_idx >= 0:
+        return steps[: forced_idx + 1] + [schema_step] + steps[forced_idx + 1 :]
+    return [schema_step] + steps
 
 
 def _merge_plan(
@@ -389,6 +401,14 @@ def _merge_plan(
 
 def planner(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
     _ = config
+    if state.needs_clarification and not state.clarification_resolved:
+        return {
+            "plan_requires_execution": False,
+            "plan_requires_execution_reason": (
+                "Waiting for user clarification before generating executable plan."
+            ),
+            "steps": list(state.steps),
+        }
     model = get_llm_model().with_structured_output(PLAN_RESPONSE_SCHEMA)
     prompt_template = load_chat_prompt("planner")
 
@@ -426,7 +446,9 @@ def planner(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
         plan = Plan()
 
     # Deterministic direct-answer fallback for state-only questions.
-    if _is_direct_state_question(user_query):
+    if _is_direct_state_question(user_query) and not _is_alert_investigation_query(
+        state, user_query
+    ):
         plan = plan.model_copy(
             update={
                 "requires_execution": False,
@@ -462,7 +484,9 @@ def planner(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
             }
         )
 
-    investigation_query = _is_alert_investigation_query(state, user_query)
+    investigation_query = _is_alert_investigation_query(state, user_query) or (
+        state.intent_class in {"analyze_current_alert", "analyze_other_alert"}
+    )
     if (
         investigation_query
         and not _has_completed_analysis_for_current_alert(state)

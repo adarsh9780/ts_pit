@@ -32,7 +32,38 @@ class _ModelStub:
         }
 
 
+class _SqlModelStub:
+    def with_structured_output(self, _schema):
+        return self
+
+    def invoke(self, _messages):
+        return {
+            "plan_action": "append",
+            "requires_execution": True,
+            "requires_execution_reason": "Need SQL drill-down",
+            "steps": [
+                {
+                    "instruction": "Run SQL query on alerts and trades for this case.",
+                    "goal": "Get supporting rows.",
+                    "success_criteria": "Rows are available.",
+                    "constraints": [],
+                }
+            ],
+        }
+
+
 class PlanningDeterministicTests(unittest.TestCase):
+    def test_planner_skips_execution_while_waiting_for_clarification(self):
+        state = AgentV3State(
+            messages=[HumanMessage(content="[USER QUESTION]\nanalyze price data")],
+            current_alert=CurrentAlertContext(alert_id=123, ticker="NVDA"),
+            needs_clarification=True,
+            clarification_resolved=False,
+        )
+        out = planning.planner(state, config={})
+        self.assertFalse(out["plan_requires_execution"])
+        self.assertIn("clarification", str(out["plan_requires_execution_reason"]).lower())
+
     def test_injects_analysis_first_for_alert_investigation_query(self):
         state = AgentV3State(
             messages=[HumanMessage(content="[USER QUESTION]\nPlease investigate this alert.")],
@@ -75,6 +106,26 @@ class PlanningDeterministicTests(unittest.TestCase):
             "Run deterministic analysis for the current alert",
             pending_steps[0].instruction,
         )
+
+    def test_forced_analysis_stays_before_schema_grounding(self):
+        state = AgentV3State(
+            messages=[HumanMessage(content="[USER QUESTION]\nInvestigate this alert and run SQL details.")],
+            current_alert=CurrentAlertContext(alert_id=123, ticker="NVDA"),
+            intent_class="analyze_current_alert",
+        )
+
+        with patch.object(planning, "load_chat_prompt", return_value=_PromptStub()), patch.object(
+            planning, "get_llm_model", return_value=_SqlModelStub()
+        ):
+            out = planning.planner(state, config={})
+
+        pending_steps = [s for s in out["steps"] if s.status in {"pending", "running"}]
+        self.assertGreaterEqual(len(pending_steps), 3)
+        self.assertEqual(
+            pending_steps[0].instruction,
+            planning.FORCED_ANALYSIS_STEP_INSTRUCTION,
+        )
+        self.assertIn("DB_SCHEMA_REFERENCE.yaml", pending_steps[1].instruction)
 
 
 if __name__ == "__main__":

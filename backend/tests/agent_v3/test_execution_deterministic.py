@@ -9,6 +9,17 @@ from ts_pit.agent_v3.state import AgentV3State, CurrentAlertContext, StepState
 
 
 class ExecutionDeterministicTests(unittest.TestCase):
+    def test_execution_is_blocked_when_clarification_pending(self):
+        state = AgentV3State(
+            messages=[HumanMessage(content="[USER QUESTION]\nanalyze price data")],
+            current_alert=CurrentAlertContext(alert_id=321, ticker="NVDA"),
+            steps=[StepState(id="v1_s1", instruction="Pending step")],
+            needs_clarification=True,
+            clarification_resolved=False,
+        )
+        out = asyncio.run(execution.executioner(state, config={}))
+        self.assertIn("clarification", str(out.get("terminal_error", "")).lower())
+
     def test_forces_analyze_current_alert_before_drilldown(self):
         state = AgentV3State(
             messages=[HumanMessage(content="[USER QUESTION]\nInvestigate this alert.")],

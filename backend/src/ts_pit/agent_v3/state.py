@@ -98,8 +98,30 @@ class AgentV3State(BaseModel):
     summary_version: int = Field(default=0, ge=0)
     last_summarized_message_index: int = Field(default=0, ge=0)
     token_estimate: int = Field(default=0, ge=0)
-    intent_class: Literal["task", "meta_help", "blocked_user_code", "blocked_safety"] = "task"
+    intent_class: Literal[
+        "task",
+        "meta_help",
+        "blocked_user_code",
+        "blocked_safety",
+        "analyze_current_alert",
+        "analyze_other_alert",
+        "needs_clarification",
+    ] = "task"
+    intent_confidence: float | None = None
+    intent_reason: str | None = None
+    intent_target_alert_id: int | None = None
     guardrail_response: str | None = None
+    needs_clarification: bool = False
+    clarification_reason: str | None = None
+    clarification_question: str | None = None
+    clarification_questions: list[str] = Field(default_factory=list)
+    clarification_signature: str | None = None
+    clarification_asked_turns: int = Field(default=0, ge=0)
+    max_clarification_turns: int = Field(default=1, ge=0)
+    clarification_resolved: bool = False
+    assumption_risk: Literal["low", "medium", "high"] = "low"
+    assumption_candidate: str | None = None
+    clarify_decision_reason: str | None = None
     draft_answer: str | None = None
     last_answer_feedback: AnswerFeedback | None = None
     answer_revision_attempts: int = Field(default=0, ge=0)

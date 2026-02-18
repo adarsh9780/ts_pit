@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from sqlalchemy import Text, cast, inspect, select, text
 
@@ -900,30 +901,212 @@ def get_python_capabilities() -> str:
 def _prepare_search_query(query: str, start_date: str | None) -> str:
     from datetime import datetime
 
-    search_query = query
+    search_query = _expand_search_query_with_company_names(query)
     if not start_date:
         return search_query
     try:
         dt = datetime.strptime(start_date, "%Y-%m-%d")
         month_year = dt.strftime("%B %Y")
-        if month_year.lower() not in query.lower():
-            search_query = f"{query} {month_year}"
+        if month_year.lower() not in search_query.lower():
+            search_query = f"{search_query} {month_year}"
     except Exception:
         pass
     return search_query
 
 
+def _extract_candidate_tickers(query: str) -> list[str]:
+    tokens = re.findall(r"\$?([A-Z]{1,6})\b", str(query or ""))
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for token in tokens:
+        ticker = token.strip().upper()
+        if not ticker or ticker in seen:
+            continue
+        seen.add(ticker)
+        ordered.append(ticker)
+    return ordered[:5]
+
+
+def _lookup_instrument_names_for_tickers(tickers: list[str]) -> dict[str, str]:
+    if not tickers:
+        return {}
+    cfg = get_config()
+    table_name = cfg.get_table_name("alerts")
+    ticker_col = cfg.get_column("alerts", "ticker")
+    instrument_col = cfg.get_column("alerts", "instrument_name")
+    if not table_name or not ticker_col or not instrument_col:
+        return {}
+
+    alerts = get_table(table_name)
+    alert_date_col = cfg.get_column("alerts", "alert_date")
+    stmt = select(
+        cast(alerts.c[ticker_col], Text).label("ticker"),
+        cast(alerts.c[instrument_col], Text).label("instrument_name"),
+    ).where(
+        cast(alerts.c[ticker_col], Text).in_(tickers),
+        alerts.c[instrument_col].is_not(None),
+    )
+    if alert_date_col and alert_date_col in alerts.c:
+        stmt = stmt.order_by(alerts.c[alert_date_col].desc())
+
+    names: dict[str, str] = {}
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(stmt).mappings().all()
+        for row in rows:
+            ticker = str(row.get("ticker") or "").strip().upper()
+            name = str(row.get("instrument_name") or "").strip()
+            if not ticker or not name or ticker in names:
+                continue
+            names[ticker] = name
+    except Exception:
+        return {}
+    return names
+
+
+def _expand_search_query_with_company_names(query: str) -> str:
+    base = str(query or "").strip()
+    if not base:
+        return base
+
+    tickers = _extract_candidate_tickers(base)
+    if not tickers:
+        return base
+
+    ticker_to_name = _lookup_instrument_names_for_tickers(tickers)
+    if not ticker_to_name:
+        return base
+
+    lowered = base.lower()
+    additions: list[str] = []
+    for ticker in tickers:
+        instrument_name = str(ticker_to_name.get(ticker) or "").strip()
+        if not instrument_name:
+            continue
+        if instrument_name.lower() in lowered:
+            continue
+        additions.append(f"\"{instrument_name}\"")
+    if not additions:
+        return base
+    return f"{base} {' '.join(additions)}"
+
+
+SMART_SEARCH_QUERY_SCHEMA: dict[str, Any] = {
+    "title": "SmartSearchQuery",
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "search_query": {"type": "string"},
+        "reason": {"type": "string"},
+    },
+    "required": ["search_query", "reason"],
+}
+
+
+def _coerce_refined_search_query(
+    candidate: str,
+    *,
+    fallback_query: str,
+    tickers: list[str],
+) -> str | None:
+    text = str(candidate or "").strip()
+    if not text:
+        return None
+    if len(text) > 220:
+        return None
+
+    upper_text = text.upper()
+    if tickers and not any(ticker in upper_text for ticker in tickers):
+        return None
+
+    fallback_tokens = set(re.findall(r"[a-zA-Z]{4,}", str(fallback_query or "").lower()))
+    fallback_tokens -= {
+        "stock",
+        "news",
+        "related",
+        "current",
+        "alert",
+        "latest",
+        "about",
+        "company",
+    }
+    if fallback_tokens and not any(token in text.lower() for token in fallback_tokens):
+        return None
+
+    return text
+
+
+def _refine_search_query_with_llm(
+    *,
+    user_query: str,
+    fallback_query: str,
+    tickers: list[str],
+    ticker_to_name: dict[str, str],
+    start_date: str | None,
+    end_date: str | None,
+) -> str | None:
+    try:
+        from ..llm import get_llm_model
+
+        model = get_llm_model().with_structured_output(SMART_SEARCH_QUERY_SCHEMA)
+        context_lines = [
+            f"User query: {user_query}",
+            f"Fallback deterministic query: {fallback_query}",
+            f"Tickers: {', '.join(tickers) if tickers else '(none)'}",
+            f"Company names: {json.dumps(ticker_to_name, default=str)}",
+            f"Start date: {start_date or '(none)'}",
+            f"End date: {end_date or '(none)'}",
+        ]
+        raw = model.invoke(
+            [
+                SystemMessage(
+                    content=(
+                        "Rewrite the search query for financial/company news retrieval. "
+                        "Keep it short and precise. Preserve ticker coverage, include company "
+                        "name when available, and include timeframe hints if present. "
+                        "Do not add unrelated entities."
+                    )
+                ),
+                HumanMessage(content="\n".join(context_lines)),
+            ]
+        )
+        if not isinstance(raw, dict):
+            return None
+        candidate = raw.get("search_query")
+        if not isinstance(candidate, str):
+            return None
+        return _coerce_refined_search_query(
+            candidate, fallback_query=fallback_query, tickers=tickers
+        )
+    except Exception:
+        return None
+
+
 def _run_ddgs_search(search_query: str, max_results: int) -> tuple[list[dict], list[dict]]:
     from ddgs import DDGS
 
+    web_backend_order = "google,bing,duckduckgo"
+    news_backend_order = "bing,duckduckgo,yahoo"
     proxy_config = get_config().get_proxy_config()
     kwargs: dict[str, Any] = {"verify": proxy_config.get("ssl_verify", True)}
     proxy_url = proxy_config.get("https") or proxy_config.get("http")
     if proxy_url:
         kwargs["proxy"] = proxy_url
     with DDGS(**kwargs) as ddgs:
-        web_hits = list(ddgs.text(search_query, max_results=max_results))
-        news_hits = list(ddgs.news(search_query, max_results=max_results))
+        web_hits = list(
+            ddgs.text(
+                search_query,
+                max_results=max_results,
+                backend=web_backend_order,
+            )
+        )
+        news_hits = list(
+            ddgs.news(
+                search_query,
+                max_results=max_results,
+                backend=news_backend_order,
+            )
+        )
         return web_hits, news_hits
 
 
@@ -1057,6 +1240,18 @@ async def search_web(
     timeout_seconds = 10
     max_chars_per_url = 2500
     search_query = _prepare_search_query(query, start_date)
+    tickers = _extract_candidate_tickers(search_query)
+    ticker_to_name = _lookup_instrument_names_for_tickers(tickers)
+    refined_query = _refine_search_query_with_llm(
+        user_query=query,
+        fallback_query=search_query,
+        tickers=tickers,
+        ticker_to_name=ticker_to_name,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    if refined_query:
+        search_query = refined_query
 
     try:
         web_hits, news_hits = await asyncio.to_thread(
@@ -1081,6 +1276,7 @@ async def search_web(
                 "news": news_results,
             },
             query=query,
+            search_query=search_query,
             start_date=start_date,
             end_date=end_date,
             combined_count=len(combined_results),

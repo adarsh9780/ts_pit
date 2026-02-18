@@ -21,6 +21,7 @@ STREAMABLE_MODEL_NODES = {
     "agent",
     "direct_answer",
     "planner",
+    "clarify",
     "respond",
     "answer_rewriter",
 }
@@ -28,6 +29,7 @@ FALLBACK_MODEL_OUTPUT_NODES = {
     "agent",
     "direct_answer",
     "planner",
+    "clarify",
     "respond",
     "answer_validator",
     "answer_rewriter",
