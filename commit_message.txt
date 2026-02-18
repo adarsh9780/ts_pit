@@ -1,3 +1,1 @@
-agent_v3: add planner tool-hint nudges, enforce actionable fallback steps, stop streaming raw planner JSON, and fix web-news/report query behavior with ordered DDGS backends
-agent_v3/frontend: prevent plan expand auto-scroll jump by removing deep message auto-scroll watcher; continue executing pending required steps even when a prior step failed; add master routing regression tests
-agent_v3/execution: treat empty search_web results as non-fatal, retry once with broadened params, then deterministically mark search_web as skipped and continue remaining steps; add regression tests for empty/error retry-skip flow
+agent_v3/guardrail: prevent LLM-only blocked_user_code false positives on plain-language alert requests by keeping deterministic non-code signals authoritative; add regression test

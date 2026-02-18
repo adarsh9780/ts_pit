@@ -664,15 +664,17 @@ def intent_guard(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
                 "needs_clarification": False,
             }
         if llm_class == "blocked_user_code":
-            return {
-                "intent_class": "blocked_user_code",
-                "guardrail_response": (
-                    "I can't run user-submitted arbitrary shell/Python/SQL code directly. "
-                    "Please describe the analysis goal in plain language and I will "
-                    "use approved tools/workflows to help."
-                ),
-                "needs_clarification": False,
-            }
+            # Only honor model-only blocked_user_code if deterministic code signals exist.
+            if _looks_like_user_code(question) or _is_code_run_question(question):
+                return {
+                    "intent_class": "blocked_user_code",
+                    "guardrail_response": (
+                        "I can't run user-submitted arbitrary shell/Python/SQL code directly. "
+                        "Please describe the analysis goal in plain language and I will "
+                        "use approved tools/workflows to help."
+                    ),
+                    "needs_clarification": False,
+                }
         if llm_class == "meta_help":
             return {
                 "intent_class": "meta_help",
@@ -691,7 +693,11 @@ def intent_guard(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
             # Keep deterministic high-risk ambiguity decisions authoritative.
             det_class = str(deterministic.get("intent_class") or "")
             det_risk = str(deterministic.get("assumption_risk") or "low")
-            if det_class in {"task"} and det_risk in {"low", "medium"}:
+            if (
+                det_class in {"task"}
+                and det_risk in {"low", "medium"}
+                and llm_class not in {"blocked_user_code", "blocked_safety"}
+            ):
                 deterministic["intent_class"] = llm_class or deterministic["intent_class"]
                 deterministic["reason"] = str(llm_intent.get("reason") or deterministic["reason"])
             confidence_val = llm_intent.get("confidence")
