@@ -174,9 +174,7 @@ const handleTooltipLeave = () => {
     showTooltip.value = false;
 };
 
-const handleTooltipLeave = () => {
-    showTooltip.value = false;
-};
+
 
 const handleChartClick = (params) => {
     // If background clicked, reset selection
@@ -400,6 +398,7 @@ const chartOptions = computed(() => {
             type: 'scatter',
             data: bubbleSeriesData.value,
             symbolSize: 16,
+            z: 10,
             itemStyle: {
                 borderColor: '#fff',
                 borderWidth: 1

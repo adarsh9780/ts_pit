@@ -1,1 +1,3 @@
-agent_v3/guardrail: prevent LLM-only blocked_user_code false positives on plain-language alert requests by keeping deterministic non-code signals authoritative; add regression test
+feat: Interactive Chart Bubbles - Click to filter/sort news
+fix: Remove duplicate handleTooltipLeave declaration in AlertDetailView
+style: Bring chart bubbles to front (z-index) for better usability
