@@ -99,3 +99,10 @@ Tests:
   - SQL schema preflight runs before execute_sql
 - Updated `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/tests/agent_v3/test_planning_deterministic.py`:
   - planner tool args are propagated to runtime step state
+
+fix(streaming): remove in-node second-pass rewrite to prevent duplicated final output chunks
+
+- Updated `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/src/ts_pit/agent_v3/responding.py`:
+  - removed the second `llm.invoke(...)` "repair" pass inside `respond_node`
+  - `respond_node` now emits a single final-generation stream per turn
+- This avoids draft+repair concatenation in the frontend when token streaming is enabled.

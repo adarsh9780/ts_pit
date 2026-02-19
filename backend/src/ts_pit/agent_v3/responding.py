@@ -209,33 +209,6 @@ def respond_node(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
 
     ai_msg = llm.invoke(prompt)
     answer_text = _content_to_text(getattr(ai_msg, "content", "")).strip()
-    issues = _quality_issues(answer_text, completed, failed)
-    if issues:
-        repair_prompt = load_chat_prompt("respond").invoke(
-            {
-                "messages": build_prompt_messages(
-                    state.messages,
-                    conversation_summary=state.conversation_summary,
-                    recent_window=RESPOND_RECENT_WINDOW,
-                ),
-                "query": user_question or "(missing user request)",
-                "completed_step_outputs": json.dumps(completed, default=str),
-                "failed_steps": json.dumps(failed, default=str),
-                "current_alert": state.current_alert.model_dump_json(),
-                "terminal_error": state.terminal_error or "",
-                "conversation_summary": state.conversation_summary or "(none)",
-                "quality_hint": (
-                    quality_hint
-                    + " Fix these issues now: "
-                    + " ".join(f"- {issue}" for issue in issues)
-                ),
-            }
-        )
-        repaired = llm.invoke(repair_prompt)
-        repaired_text = _content_to_text(getattr(repaired, "content", "")).strip()
-        if repaired_text:
-            answer_text = repaired_text
-
     msg = AIMessage(content=answer_text)
     if ephemeral_marker:
         msg = AIMessage(
