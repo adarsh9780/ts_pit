@@ -36,6 +36,7 @@ const config = ref(null);
 const viewMode = ref('chart');
 const isGeneratingSummary = ref(false);
 const summaryTab = ref('narrative'); // 'narrative' or 'recommendation'
+const selectedBubbleArticleIds = ref(null); // List of article IDs for the selected bubble
 
 // Confirm Dialog State
 const showConfirmDialog = ref(false);
@@ -171,6 +172,35 @@ const handleTooltipEnter = (event, details) => {
 
 const handleTooltipLeave = () => {
     showTooltip.value = false;
+};
+
+const handleTooltipLeave = () => {
+    showTooltip.value = false;
+};
+
+const handleChartClick = (params) => {
+    // If background clicked, reset selection
+    if (!params || !params.data) {
+        selectedBubbleArticleIds.value = null;
+        return;
+    }
+
+    // Check if it's a bubble click
+    if (params.componentType === 'series' && params.seriesType === 'scatter' && params.seriesName === 'News Events') {
+        const articleIds = params.data.articleIds;
+        
+        // Toggle behavior: if clicking the same bubble, reset.
+        if (selectedBubbleArticleIds.value && 
+            articleIds && 
+            JSON.stringify(selectedBubbleArticleIds.value.sort()) === JSON.stringify(articleIds.sort())) {
+            selectedBubbleArticleIds.value = null;
+        } else {
+            selectedBubbleArticleIds.value = articleIds;
+        }
+    } else {
+        // If clicking other series or background, reset
+        selectedBubbleArticleIds.value = null;
+    }
 };
 
 const chartOptions = computed(() => {
@@ -706,7 +736,14 @@ const prepareChartData = () => {
                 dateMatGroups.set(matchedLabel, new Map());
             }
             const matMap = dateMatGroups.get(matchedLabel);
-            matMap.set(mat, (matMap.get(mat) || 0) + 1);
+            
+            // Store count AND article IDs
+            if (!matMap.has(mat)) {
+                matMap.set(mat, { count: 0, articleIds: [] });
+            }
+            const entry = matMap.get(mat);
+            entry.count += 1;
+            entry.articleIds.push(article.id || article.article_id || article.art_id);
         });
 
         // For each date, create bubbles: TOP 3 + "rest" with count
@@ -725,17 +762,19 @@ const prepareChartData = () => {
             const top3 = sortedMats.slice(0, 3);
             // Combine rest into one "Others" category
             const restMats = sortedMats.slice(3);
-            const restCount = restMats.reduce((sum, [, cnt]) => sum + cnt, 0);
+            const restCount = restMats.reduce((sum, [, { count }]) => sum + count, 0);
+            const restArticleIds = restMats.flatMap(([, { articleIds }]) => articleIds);
             
             // Add top 3 bubbles (reversed for stacking order)
             top3.reverse().forEach((entry, stackIndex) => {
-                const [mat, count] = entry;
+                const [mat, { count, articleIds }] = entry;
                 const offset = stackIndex * 4;
                 
                 bubbleData.push({
                     value: [dateLabel, yBase + offset],
                     materiality: mat,
                     count: count,
+                    articleIds: articleIds,
                     itemStyle: { color: getMaterialityColor(mat) }
                 });
             });
@@ -747,6 +786,7 @@ const prepareChartData = () => {
                     value: [dateLabel, yBase + offset],
                     materiality: 'Others',
                     count: restCount,
+                    articleIds: restArticleIds,
                     itemStyle: { color: getMaterialityColor('DEFAULT') }
                 });
             }
@@ -771,8 +811,35 @@ const uniqueThemes = computed(() => {
 });
 
 const filteredNews = computed(() => {
-    if (activeTheme.value === 'All') return news.value;
-    return news.value.filter(article => article.theme === activeTheme.value);
+    let result = news.value;
+    
+    // 1. Filter by Theme
+    if (activeTheme.value !== 'All') {
+        result = result.filter(article => article.theme === activeTheme.value);
+    }
+    
+    // 2. Sort by "Selected Bubble" if active
+    if (selectedBubbleArticleIds.value && selectedBubbleArticleIds.value.length > 0) {
+        // Partition articles into matches and others
+        const matches = [];
+        const others = [];
+        
+        const selectedIdsSet = new Set(selectedBubbleArticleIds.value.map(String));
+        
+        result.forEach(article => {
+            const artId = String(article.id || article.article_id || article.art_id);
+            if (selectedIdsSet.has(artId)) {
+                matches.push(article);
+            } else {
+                others.push(article);
+            }
+        });
+        
+        // Return concatenated list: matches first
+        return [...matches, ...others];
+    }
+    
+    return result;
 });
 
 watch(selectedPeriod, async (newPeriod) => {
@@ -959,6 +1026,7 @@ onBeforeUnmount(() => {
                 :tableData="tableData"
                 :activeMaterialityColumns="activeMaterialityColumns"
                 :config="config"
+                @bubble-click="handleChartClick"
             />
             
             <AlertNews 

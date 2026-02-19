@@ -2675,8 +2675,10 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.9.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "restrictedpython", specifier = ">=7.4" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.3.0" },
 ]
 provides-extras = ["dev"]
 

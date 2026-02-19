@@ -21,7 +21,8 @@ const emit = defineEmits([
     'update:viewMode', 
     'update:chartType', 
     'update:priceMode', 
-    'update:selectedPeriod'
+    'update:selectedPeriod',
+    'bubble-click'
 ]);
 
 // Helper for materiality colors
@@ -93,6 +94,7 @@ const isRebasedDisabled = computed(() => props.viewMode !== 'chart' || props.cha
                     class="chart"
                     :option="chartOptions"
                     autoresize
+                    @click="$emit('bubble-click', $event)"
                 />
                 
                 <div v-else-if="viewMode === 'table' && chartLabels.length" class="table-container">
