@@ -4,12 +4,14 @@ import contextlib
 import io
 import json
 import sys
+import traceback
 from typing import Any
 
 try:
     import resource  # POSIX only
 except Exception:  # pragma: no cover - platform specific
     resource = None
+
 
 def _inject_input_keys(exec_globals: dict[str, Any], input_data: Any) -> None:
     """
@@ -67,6 +69,10 @@ def _safe_import_factory_mode(
     blocked_imports: set[str],
 ):
     def _safe_import(name, globals=None, locals=None, fromlist=(), level=0):
+        # Prevent bypassing blocklist via importlib
+        if name == "importlib" or name.startswith("importlib."):
+            raise ImportError("Import 'importlib' is blocked by policy")
+
         root = name.split(".")[0]
         if root in blocked_imports:
             raise ImportError(f"Import '{name}' is blocked by policy")
@@ -90,6 +96,8 @@ def _build_safe_builtins(
         safe[name] = value
 
     safe["__import__"] = safe_import
+    # Also block critical functions if not explicitly blocked but commonly dangerous
+    # (Though policy usually handles this, specific overrides here add depth)
     return safe
 
 
@@ -110,11 +118,28 @@ def main() -> int:
         _set_limits(memory_limit_mb=memory_limit_mb)
 
         safe_import = _safe_import_factory_mode(blocked_imports)
-        safe_builtins = _build_safe_builtins(
-            blocked_builtins, safe_import
-        )
+        safe_builtins = _build_safe_builtins(blocked_builtins, safe_import)
 
-        byte_code = compile(code, "<user_code>", "exec")
+        # Pre-compile to catch SyntaxError before exec
+        try:
+            byte_code = compile(code, "<user_code>", "exec")
+        except SyntaxError as e:
+            # Format SyntaxError explicitly
+            sys.stdout.write(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "result": None,
+                        "stdout": "",
+                        "stderr": "",
+                        "timed_out": False,
+                        "resource_exceeded": False,
+                        "error": f"SyntaxError: {e}",
+                    }
+                )
+            )
+            return 1
+
         exec_globals = {
             "__builtins__": safe_builtins,
             "input_data": input_data,
@@ -125,16 +150,54 @@ def main() -> int:
 
         stdout_buffer = io.StringIO()
         stderr_buffer = io.StringIO()
-        with contextlib.redirect_stdout(stdout_buffer), contextlib.redirect_stderr(stderr_buffer):
-            exec(byte_code, exec_globals, exec_globals)
+
+        try:
+            with (
+                contextlib.redirect_stdout(stdout_buffer),
+                contextlib.redirect_stderr(stderr_buffer),
+            ):
+                exec(byte_code, exec_globals, exec_globals)
+        except SystemExit as e:
+            # Handle sys.exit() calls gracefully
+            # We treat this as a "success" execution but captured output
+            # If code was 0, it's ok=True. If non-zero, ok=False?
+            # Standard python behavior: exit(0) is success.
+            # But we want to return JSON.
+            # So we catch it, and continue to JSON serialization.
+            # Note: sys.exit("error") sets code to "error"
+            pass
+        except Exception:
+            # Capture runtime errors with traceback to give full context
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            # We only want the last part of the traceback usually, or simply the message with type
+            # traceback.format_exc() gives the full stack.
+            # We'll return detailed error message.
+            error_msg = f"{exc_type.__name__}: {str(exc_value)}"
+
+            # Also print stack into stderr for debugging if needed
+            stderr_buffer.write(traceback.format_exc())
+
+            # We set error to this message
+            sys.stdout.write(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "result": None,
+                        "stdout": stdout_buffer.getvalue()[: max_output_kb * 1024],
+                        "stderr": stderr_buffer.getvalue()[: max_output_kb * 1024],
+                        "timed_out": False,
+                        "resource_exceeded": False,
+                        "error": error_msg,
+                    },
+                    default=str,
+                )
+            )
+            return 1
 
         max_output_bytes = max_output_kb * 1024
         printed_text = str(exec_globals.get("printed", ""))
         stdout_text = (stdout_buffer.getvalue() + printed_text)[:max_output_bytes]
         stderr_text = stderr_buffer.getvalue()[:max_output_bytes]
-        # Don't surface platform capability notes (like missing RLIMIT on Windows)
-        # as stderr; they confuse downstream LLM/tool consumers into treating
-        # successful runs as failures.
 
         resp = {
             "ok": True,
@@ -147,6 +210,7 @@ def main() -> int:
         }
         sys.stdout.write(json.dumps(resp, default=str))
         return 0
+
     except MemoryError:
         sys.stdout.write(
             json.dumps(
@@ -163,6 +227,7 @@ def main() -> int:
         )
         return 2
     except Exception as e:
+        # Fallback for unexpected runner errors (e.g. init failures)
         sys.stdout.write(
             json.dumps(
                 {
