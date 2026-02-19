@@ -47,9 +47,13 @@ def analyze_article(id: str, request: Request):
     article_id_col = config.get_column("articles", "id")
     articles = _table(articles_table)
     with engine.connect() as conn:
-        row = conn.execute(
-            select(articles).where(articles.c[article_id_col] == id).limit(1)
-        ).mappings().first()
+        row = (
+            conn.execute(
+                select(articles).where(articles.c[article_id_col] == id).limit(1)
+            )
+            .mappings()
+            .first()
+        )
 
     if not row:
         raise HTTPException(status_code=404, detail="Article not found")
@@ -100,7 +104,12 @@ def analyze_article(id: str, request: Request):
                     )
                 )
     except Exception as e:
-        logprint("Failed to persist article analysis", level="ERROR", article_id=id, error=str(e))
+        logprint(
+            "Failed to persist article analysis",
+            level="ERROR",
+            article_id=id,
+            error=str(e),
+        )
 
     return analysis_result
 
@@ -116,7 +125,8 @@ def get_alerts(date: str | None = None):
     if date:
         # Match both exact date and datetime-prefix variants (portable across dialects).
         stmt = stmt.where(
-            (alerts.c[alert_date_col] == date) | alerts.c[alert_date_col].like(f"{date}%")
+            (alerts.c[alert_date_col] == date)
+            | alerts.c[alert_date_col].like(f"{date}%")
         )
     with engine.connect() as conn:
         rows = conn.execute(stmt).mappings().all()
@@ -127,15 +137,16 @@ def get_alerts(date: str | None = None):
 
     sqlite_conn = get_db_connection()
     latest_map = fetch_latest_analysis_map(
-        sqlite_conn, [str(item.get("id")) for item in results if item.get("id") is not None]
+        sqlite_conn,
+        [str(item.get("id")) for item in results if item.get("id") is not None],
     )
     sqlite_conn.close()
     return [apply_latest_analysis_to_alert(item, latest_map) for item in results]
 
 
 @router.patch("/alerts/{alert_id}/status")
-def update_alert_status(alert_id: str | int, update: StatusUpdate):
-    normalized_status = config.normalize_status(update.status)
+def update_alert_status(alert_id: str | int, status_update: StatusUpdate):
+    normalized_status = config.normalize_status(status_update.status)
     valid_statuses = config.get_valid_statuses()
     if config.is_status_enforced() and normalized_status not in valid_statuses:
         raise HTTPException(
@@ -159,7 +170,11 @@ def update_alert_status(alert_id: str | int, update: StatusUpdate):
     if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="Alert not found")
 
-    return {"message": "Status updated", "alert_id": alert_id, "status": normalized_status}
+    return {
+        "message": "Status updated",
+        "alert_id": alert_id,
+        "status": normalized_status,
+    }
 
 
 @router.get("/alerts/{alert_id}")
@@ -190,14 +205,18 @@ def generate_summary(alert_id: str, request: Request):
         if not analysis.get("ok"):
             if analysis.get("error") == "Alert not found":
                 raise HTTPException(status_code=404, detail="Alert not found")
-            raise HTTPException(status_code=500, detail=analysis.get("error", "Analysis failed"))
+            raise HTTPException(
+                status_code=500, detail=analysis.get("error", "Analysis failed")
+            )
 
         result = analysis["result"]
         canonical_alert_id = str(analysis.get("alert_id") or alert_id)
         now_str = datetime.now().isoformat()
 
         recommendation = result.get("recommendation", "NEEDS_REVIEW")
-        recommendation_reason = result.get("recommendation_reason", "AI analysis completed.")
+        recommendation_reason = result.get(
+            "recommendation_reason", "AI analysis completed."
+        )
 
         insert_alert_analysis(
             conn,

@@ -1,14 +1,13 @@
-feat(search): add company name search to sidebar
+fix(backend): resolve variable shadowing and schema inference issues
 
-This commit introduces the ability to search for alerts by company name, in addition to the existing ticker search. The changes span both the backend and frontend to ensure a seamless "2 in 1" search experience.
+This commit addresses two critical bugs identified during testing:
 
-Key changes:
--   **Backend**:
-    -   Added `company_name` column to the `alerts` table in `backend/config.yaml`.
-    -   Updated `backend/scripts/generate_dummy_data.py` to populate company names based on a ticker mapping (e.g., AAPL -> Apple Inc.).
-    -   Regenerated the dummy database to include the new column and data.
--   **Frontend**:
-    -   Enhanced `frontend/src/features/alerts/views/DashboardLayoutView.vue` to filter alerts by checking both `ticker` and `company_name` fields.
-    -   Updated the search input placeholder in `frontend/src/components/AlertsSidebar.vue` to "Search Ticker or Company...".
+1.  **Alert Status Update**:
+    -   Fixed `TypeError: 'StatusUpdate' object is not callable` in `backend/src/ts_pit/api/routers/alerts.py`.
+    -   Renamed the function argument `update` to `status_update` to prevent shadowing the imported SQLAlchemy `update` function.
 
-This improvement allows users to find relevant alerts even if they only recall the company name and not the specific ticker symbol.
+2.  **Schema Inference**:
+    -   Fixed `StatementError` related to SQLite Date types in `backend/scripts/generate_dummy_data.py`.
+    -   Refined the logic for inferring `DATE` columns to be more specific (checking for "date" or "_at" suffix), ensuring text columns like `status` are correctly created as `TEXT` instead of `DATE`.
+
+These changes ensure stable backend operation and correct database schema generation.

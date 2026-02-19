@@ -418,7 +418,7 @@ def get_db_type(column_name, key_name):
     dtype = "TEXT"
     if any(x in col_lower for x in ["id", "quantity", "volume", "score"]):
         dtype = "INTEGER"
-    elif any(x in col_lower for x in ["date", "at"]):
+    elif "date" in col_lower or col_lower.endswith("_at") or col_lower.endswith(" at"):
         dtype = "DATE"
     elif any(x in col_lower for x in ["price", "open", "high", "low", "close"]):
         dtype = "REAL"
