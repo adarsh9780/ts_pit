@@ -69,7 +69,9 @@ def _looks_like_code_submission(text_value: str) -> bool:
 
 def _should_stream_model_chunk(event: dict) -> bool:
     node_name = event.get("metadata", {}).get("langgraph_node")
-    return node_name in STREAMABLE_MODEL_NODES
+    # Stream chunks for any node that can emit user-facing model text.
+    # This reduces perceived latency versus waiting for chain-end fallbacks.
+    return node_name in FALLBACK_MODEL_OUTPUT_NODES
 
 
 def _content_to_text(value) -> str:

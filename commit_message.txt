@@ -11,3 +11,91 @@ This commit addresses two critical bugs identified during testing:
     -   Refined the logic for inferring `DATE` columns to be more specific (checking for "date" or "_at" suffix), ensuring text columns like `status` are correctly created as `TEXT` instead of `DATE`.
 
 These changes ensure stable backend operation and correct database schema generation.
+
+feat(agent_v3): add backend-driven multi-ticker article fetch tool
+
+- Added backend endpoint `GET /market/news/by-ticker/{ticker}` that resolves ticker -> ISIN(s) and returns merged, de-duplicated, materiality-ranked articles.
+- Added Agent v3 tool `get_articles_by_tickers` in `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/src/ts_pit/agent_v3/tools.py` to fetch one or more tickers concurrently using backend endpoint logic.
+- Registered the new tool in Agent v3 `TOOL_REGISTRY` so planner/execution can select it.
+- Added regression tests in `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/tests/agent_v3/test_tools_get_articles_by_tickers.py` to guard:
+  - empty ticker input handling
+  - multi-ticker aggregation behavior
+
+refactor(agent_v3): remove redundant ticker news route and reuse existing alert-news backend flow
+
+- Removed the newly introduced `/market/news/by-ticker/{ticker}` endpoint from `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/src/ts_pit/api/routers/market.py`.
+- Updated `get_articles_by_tickers` in `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/src/ts_pit/agent_v3/tools.py` to use existing backend logic:
+  - resolve alert IDs by ticker
+  - call `get_current_alert_news_non_persisting` for those alert IDs
+  - merge/dedupe/sort articles per ticker
+  - execute multi-ticker fetch concurrently
+- Updated regression test mocks in `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/tests/agent_v3/test_tools_get_articles_by_tickers.py` to assert behavior against the new internal alert-flow helper.
+
+perf(agent_v3): reduce latency by forcing baseline analysis only for explicit analysis intent
+
+- Updated baseline forcing logic in `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/src/ts_pit/agent_v3/execution.py`:
+  - `analyze_current_alert` is now forced only when `intent_class` is `analyze_current_alert` or `analyze_other_alert`.
+  - Removed generic "investigation/explain" fallback forcing path.
+- Updated planner gating in `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/src/ts_pit/agent_v3/planning.py`:
+  - forced deterministic baseline step now depends on explicit analysis intent class only.
+  - direct-state shortcut no longer depends on investigation keyword heuristics.
+- Narrowed deterministic intent keyword patterns in `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/src/ts_pit/agent_v3/graph.py`:
+  - removed `investigate/review/explain` phrases from `ALERT_ANALYSIS_PATTERNS` to avoid auto-classifying those as analysis requests.
+- Updated and added regression tests:
+  - `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/tests/agent_v3/test_execution_deterministic.py`
+  - `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/tests/agent_v3/test_planning_deterministic.py`
+  - ensured explicit analysis still forces baseline, while investigate-text without explicit analysis intent no longer forces baseline.
+
+fix(llm): coerce recommendation_reason to string to prevent structured output validation failures
+
+- Updated `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/src/ts_pit/llm.py` to normalize `recommendation_reason` before schema validation.
+- Added coercion rules:
+  - list -> newline-joined string
+  - scalar -> string
+  - null -> empty string
+- Applied normalization both:
+  - before `ClusterSummaryOutput.model_validate(...)` for dict responses
+  - before final return payload to ensure downstream consumers always receive a string
+- Added regression test `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/tests/test_llm_cluster_summary.py` to lock this behavior.
+
+perf(streaming): enable incremental token streaming in Azure LLM wrapper
+
+- Updated `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/src/ts_pit/azure_llm.py` to implement:
+  - `_stream(...)` delegating to wrapped model `_stream(...)`
+  - `_astream(...)` delegating to wrapped model `_astream(...)`
+- This allows LangGraph `astream_events` to emit `on_chat_model_stream` token chunks, improving perceived latency in chat UI.
+- Added regression tests in `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/tests/test_azure_llm_streaming.py` to verify sync and async stream delegation.
+
+perf(agent-stream): stream planner/validator model chunks instead of waiting for fallback updates
+
+- Updated `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/src/ts_pit/api/routers/agent.py`:
+  - `_should_stream_model_chunk(...)` now streams chunks for all user-facing fallback model nodes (via `FALLBACK_MODEL_OUTPUT_NODES`) rather than the narrower `STREAMABLE_MODEL_NODES` allowlist.
+- This reduces perceived latency by showing planner/other model text as it is generated, instead of waiting for `on_chain_end` fallback emission.
+- Updated regression test in `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/tests/api/test_agent_streaming.py`:
+  - planner node is now expected to stream.
+
+perf(agent_v3): collapse response quality pipeline and reduce per-step LLM selection latency
+
+- Updated graph routing in `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/src/ts_pit/agent_v3/graph.py`:
+  - removed `answer_validator` and `answer_rewriter` from active graph path
+  - `respond` now terminates directly (`__end__`)
+- Enhanced `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/src/ts_pit/agent_v3/responding.py`:
+  - integrated deterministic quality checks directly in respond phase
+  - added single in-node repair pass when deterministic issues are detected
+- Extended planner schema/output in `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/src/ts_pit/agent_v3/planning.py`:
+  - planner steps now support optional `tool_name` + `tool_args_json`
+  - runtime steps carry planner-provided tool/args into `StepState`
+- Updated planner prompt `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/src/ts_pit/agent_v3/prompts/planner.yaml`:
+  - allows optional tool+args generation
+  - explicitly requires schema grounding before SQL steps
+- Added hard execution safety in `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/src/ts_pit/agent_v3/execution.py`:
+  - if SQL is selected and schema not yet grounded, force `read_file("artifacts/DB_SCHEMA_REFERENCE.yaml")` preflight
+  - uses planner-provided tool/args directly on first attempt to skip extra execution-proposal LLM call
+- Updated respond prompt `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/src/ts_pit/agent_v3/prompts/respond.yaml` with `quality_hint`.
+
+Tests:
+- Updated `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/tests/agent_v3/test_execution_deterministic.py`:
+  - planner-provided tool+args bypass proposal call
+  - SQL schema preflight runs before execute_sql
+- Updated `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/tests/agent_v3/test_planning_deterministic.py`:
+  - planner tool args are propagated to runtime step state

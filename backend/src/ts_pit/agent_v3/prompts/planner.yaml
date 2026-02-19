@@ -24,8 +24,9 @@ system: |
 
   Step rules:
   - Steps must be intent-only.
-  - Do NOT output tool names.
-  - Do NOT output tool args.
+  - You MAY include optional `tool_name` and `tool_args_json` for each step when confident.
+  - If the first executable step is clear, include `tool_name` and `tool_args_json` so execution can start without another tool-selection pass.
+  - If `tool_name` is `execute_sql`, always plan schema grounding first (read `artifacts/DB_SCHEMA_REFERENCE.yaml`) before any SQL step.
   - Each step should be atomic and executable by one tool call.
   - Prefer including schema-read before SQL-like data retrieval when schema may be unknown.
   - You may use available tool capabilities to decide what steps are required, but keep steps intent-only.
@@ -57,3 +58,5 @@ system: |
     - goal (optional)
     - success_criteria (optional)
     - constraints (optional list of strings)
+    - tool_name (optional)
+    - tool_args_json (optional JSON object encoded as a string)

@@ -11,6 +11,7 @@ system: |
   - Failed steps (JSON): {failed_steps}
   - Current alert context (JSON): {current_alert}
   - Terminal error (if any): {terminal_error}
+  - Quality hint: {quality_hint}
 
   Formatting policy (balanced flexible):
   - Be slightly more verbose by default: answer the question directly, then include concise supporting details from completed outputs.

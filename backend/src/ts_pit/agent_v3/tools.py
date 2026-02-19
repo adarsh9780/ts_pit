@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -11,7 +12,10 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from sqlalchemy import Text, cast, inspect, select, text
 
-from ..alert_analysis import analyze_alert_non_persisting
+from ..alert_analysis import (
+    analyze_alert_non_persisting,
+    get_current_alert_news_non_persisting,
+)
 from ..config import get_config
 from ..database import get_db_connection, remap_row
 from ..db import get_engine
@@ -604,6 +608,200 @@ def write_file(path: str, content: str) -> str:
         )
     except Exception as e:
         return _error(f"Failed to write file: {e}", code="FS_WRITE_ERROR")
+
+
+def _normalize_tickers_input(tickers: str) -> list[str]:
+    raw = str(tickers or "").strip()
+    if not raw:
+        return []
+    parts = re.split(r"[\s,]+", raw)
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        ticker = re.sub(r"[^A-Za-z0-9._-]", "", part).upper().strip()
+        if not ticker or ticker in seen:
+            continue
+        seen.add(ticker)
+        normalized.append(ticker)
+    return normalized[:25]
+
+
+def _resolve_alert_ids_for_ticker(ticker: str, *, max_alerts: int = 3) -> list[str]:
+    cfg = get_config()
+    alerts_table_name = cfg.get_table_name("alerts")
+    alerts = get_table(alerts_table_name)
+    ticker_col = cfg.get_column("alerts", "ticker")
+    alert_id_col = cfg.get_column("alerts", "id")
+    alert_date_col = cfg.get_column("alerts", "alert_date")
+
+    stmt = select(cast(alerts.c[alert_id_col], Text).label("alert_id")).where(
+        cast(alerts.c[ticker_col], Text) == str(ticker or "").strip().upper()
+    )
+    if alert_date_col in alerts.c:
+        stmt = stmt.order_by(alerts.c[alert_date_col].desc())
+
+    with engine.connect() as conn:
+        rows = conn.execute(stmt).mappings().all()
+
+    seen: set[str] = set()
+    alert_ids: list[str] = []
+    for row in rows:
+        aid = str(row.get("alert_id") or "").strip()
+        if not aid or aid in seen:
+            continue
+        seen.add(aid)
+        alert_ids.append(aid)
+        if len(alert_ids) >= max(1, int(max_alerts)):
+            break
+    return alert_ids
+
+
+def _article_sort_rank(article: dict[str, Any]) -> tuple[int, str]:
+    score_map = {"H": 3, "M": 2, "L": 1}
+    materiality = str(article.get("materiality") or "").upper()
+    rank = sum(score_map.get(ch, 0) for ch in materiality[:3])
+    return rank, str(article.get("created_date") or "")
+
+
+def _in_range(date_text: str, start_date: str | None, end_date: str | None) -> bool:
+    d = str(date_text or "").strip()
+    if not d:
+        return True
+    if start_date and d < str(start_date):
+        return False
+    if end_date and d > str(end_date):
+        return False
+    return True
+
+
+def _fetch_articles_for_ticker_via_alerts(
+    ticker: str,
+    *,
+    start_date: str | None,
+    end_date: str | None,
+    max_articles_per_ticker: int,
+) -> dict[str, Any]:
+    cfg = get_config()
+    alert_ids = _resolve_alert_ids_for_ticker(ticker=ticker, max_alerts=3)
+    if not alert_ids:
+        return {
+            "ticker": ticker,
+            "alert_ids": [],
+            "article_count": 0,
+            "articles": [],
+        }
+
+    all_articles: list[dict[str, Any]] = []
+    for alert_id in alert_ids:
+        conn = get_db_connection()
+        try:
+            payload = get_current_alert_news_non_persisting(
+                conn=conn,
+                config=cfg,
+                alert_id=alert_id,
+                limit=max_articles_per_ticker,
+            )
+        finally:
+            conn.close()
+        if not payload.get("ok"):
+            continue
+        rows = payload.get("articles") if isinstance(payload, dict) else []
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            if not _in_range(row.get("created_date"), start_date, end_date):
+                continue
+            row = dict(row)
+            row["ticker"] = ticker
+            row["source_alert_id"] = alert_id
+            all_articles.append(row)
+
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in sorted(all_articles, key=_article_sort_rank, reverse=True):
+        article_id = str(
+            row.get("article_id") or row.get("id") or row.get("art_id") or ""
+        ).strip()
+        url = str(row.get("url") or row.get("article_url") or "").strip()
+        key = article_id or url
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(row)
+        if len(deduped) >= max_articles_per_ticker:
+            break
+
+    return {
+        "ticker": ticker,
+        "alert_ids": alert_ids,
+        "article_count": len(deduped),
+        "articles": deduped,
+    }
+
+
+@tool
+async def get_articles_by_tickers(
+    tickers: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    max_articles_per_ticker: int = 200,
+) -> str:
+    """
+    Fetch internal articles by ticker(s) using the existing backend alert-news flow.
+
+    Use comma- or space-separated ticker symbols in `tickers`
+    (example: "AAPL, MSFT NVDA").
+    """
+    ticker_list = _normalize_tickers_input(tickers)
+    if not ticker_list:
+        return _error("No valid ticker symbols provided.", code="INVALID_INPUT")
+
+    capped_limit = max(1, min(int(max_articles_per_ticker), 1000))
+    tasks = [
+        asyncio.to_thread(
+            _fetch_articles_for_ticker_via_alerts,
+            ticker=ticker,
+            start_date=start_date,
+            end_date=end_date,
+            max_articles_per_ticker=capped_limit,
+        )
+        for ticker in ticker_list
+    ]
+    try:
+        raw_results = await asyncio.gather(*tasks)
+    except Exception as e:
+        return _error(
+            f"Error fetching ticker articles from backend alert flow: {e}",
+            code="TICKER_ARTICLES_ERROR",
+        )
+
+    by_ticker: dict[str, dict[str, Any]] = {}
+    combined_articles: list[dict[str, Any]] = []
+    for result in raw_results:
+        ticker = str(result.get("ticker") or "").strip().upper()
+        articles = result.get("articles") if isinstance(result, dict) else []
+        if not isinstance(articles, list):
+            articles = []
+        by_ticker[ticker] = {
+            "alert_ids": result.get("alert_ids", []) if isinstance(result, dict) else [],
+            "article_count": len(articles),
+            "articles": articles,
+        }
+        combined_articles.extend(articles)
+
+    return _ok(
+        {
+            "tickers": ticker_list,
+            "by_ticker": by_ticker,
+            "combined_articles": combined_articles,
+        },
+        ticker_count=len(ticker_list),
+        combined_count=len(combined_articles),
+        start_date=start_date,
+        end_date=end_date,
+    )
 
 
 @tool
@@ -1313,6 +1511,7 @@ TOOL_REGISTRY = {
     "list_files": list_files,
     "read_file": read_file,
     "write_file": write_file,
+    "get_articles_by_tickers": get_articles_by_tickers,
     "get_article_by_id": get_article_by_id,
     "analyze_current_alert": analyze_current_alert,
     "search_web": search_web,

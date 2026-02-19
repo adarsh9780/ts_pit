@@ -220,3 +220,4 @@ def get_news(
         del res["_sort_score"]
 
     return results
+

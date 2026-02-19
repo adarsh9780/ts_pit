@@ -29,20 +29,6 @@ RETRYABLE_ERROR_CODES = {
     "EXECUTION_EXCEPTION",
 }
 SEARCH_WEB_RETRY_LIMIT = 1
-ALERT_INVESTIGATION_PATTERNS = (
-    "investigate",
-    "investigation",
-    "explain",
-    "disposition",
-    "justify",
-    "why flagged",
-    "why this alert",
-    "review this alert",
-    "analyze this alert",
-    "analyse this alert",
-    "escalate",
-    "dismiss",
-)
 TABLE_ALIAS_OVERRIDES: dict[str, dict[str, str]] = {
     "alerts": {
         "alert_id": "id",
@@ -198,46 +184,11 @@ def _parse_tool_args_json(raw: str) -> dict[str, Any]:
     return {}
 
 
-def _latest_user_question(messages: list[Any]) -> str:
-    for message in reversed(messages):
-        msg_type = str(getattr(message, "type", "")).lower()
-        if msg_type not in {"human", "user"}:
-            continue
-        content = getattr(message, "content", "")
-        if isinstance(content, list):
-            text_parts: list[str] = []
-            for part in content:
-                if isinstance(part, str):
-                    text_parts.append(part)
-                elif isinstance(part, dict) and "text" in part:
-                    text_parts.append(str(part["text"]))
-            text = " ".join(text_parts).strip()
-        else:
-            text = str(content or "").strip()
-        if "[USER QUESTION]" in text:
-            parts = text.split("[USER QUESTION]", 1)
-            if len(parts) > 1:
-                return parts[1].strip()
-        return text
-    return ""
-
-
 def _normalize_alert_id(value: Any) -> str | None:
     if value is None:
         return None
     txt = str(value).strip()
     return txt or None
-
-
-def _is_alert_investigation_query(state: AgentV3State) -> bool:
-    if getattr(state.current_alert, "alert_id", None) is None:
-        return False
-    lowered = _latest_user_question(state.messages).lower()
-    if not lowered:
-        return False
-    if any(pattern in lowered for pattern in ALERT_INVESTIGATION_PATTERNS):
-        return True
-    return bool(re.search(r"\b(alert|case)\b", lowered) and "explain" in lowered)
 
 
 def _step_alert_id(step: Any) -> str | None:
@@ -271,9 +222,19 @@ def _should_force_baseline_analysis(state: AgentV3State, steps: list[Any]) -> bo
         return _completed_analysis_for_alert(steps, resolved_alert_id) is None
     if state.intent_class == "analyze_other_alert":
         return _completed_analysis_for_alert(steps, resolved_alert_id) is None
-    if not _is_alert_investigation_query(state):
-        return False
-    return _completed_analysis_for_alert(steps, resolved_alert_id) is None
+    return False
+
+
+def _has_schema_grounding(steps: list[Any]) -> bool:
+    target = "artifacts/db_schema_reference.yaml"
+    for step in steps:
+        if step.status != "done" or step.selected_tool != "read_file":
+            continue
+        args = step.tool_args if isinstance(step.tool_args, dict) else {}
+        path = str(args.get("path") or "").strip().replace("\\", "/").lower()
+        if target in path:
+            return True
+    return False
 
 
 def _attempt_signature(tool_name: str, tool_args: dict[str, Any]) -> str:
@@ -586,6 +547,7 @@ async def executioner(state: AgentV3State, config: RunnableConfig) -> dict[str, 
     last_error_message = str(step.error or "")
     allowed_tool_switch = False
     forced_tool_name = str(step.selected_tool or "")
+    schema_grounded_runtime = _has_schema_grounding(steps)
 
     while step.attempts < MAX_EXECUTION_ATTEMPTS:
         target_alert_id = _normalize_alert_id(getattr(state, "intent_target_alert_id", None))
@@ -602,27 +564,39 @@ async def executioner(state: AgentV3State, config: RunnableConfig) -> dict[str, 
                 )
             }
         else:
-            proposal = _propose_execution(
-                state,
-                instruction=step.instruction,
-                goal=step.goal or step.instruction,
-                success_criteria=step.success_criteria or "Complete the step successfully.",
-                constraints=step.constraints,
-                current_tool_name=str(step.selected_tool or ""),
-                current_tool_args=step.tool_args or {},
-                error_code=last_error_code,
-                error_message=last_error_message,
-                allowed_tool_switch=allowed_tool_switch,
-                force_tool_name=forced_tool_name,
+            use_preplanned = (
+                step.attempts == 0
+                and isinstance(step.tool_args, dict)
+                and bool(step.tool_args)
+                and isinstance(step.selected_tool, str)
+                and step.selected_tool in TOOL_REGISTRY
             )
+            if use_preplanned:
+                tool_name = str(step.selected_tool or "")
+                tool_args = _normalize_tool_args(tool_name, step.tool_args or {})
+                proposal = {"reason": "Using planner-provided tool and args."}
+            else:
+                proposal = _propose_execution(
+                    state,
+                    instruction=step.instruction,
+                    goal=step.goal or step.instruction,
+                    success_criteria=step.success_criteria or "Complete the step successfully.",
+                    constraints=step.constraints,
+                    current_tool_name=str(step.selected_tool or ""),
+                    current_tool_args=step.tool_args or {},
+                    error_code=last_error_code,
+                    error_message=last_error_message,
+                    allowed_tool_switch=allowed_tool_switch,
+                    force_tool_name=forced_tool_name,
+                )
 
-            tool_name = str(proposal.get("tool_name") or "").strip() or forced_tool_name
-            if forced_tool_name and not allowed_tool_switch:
-                tool_name = forced_tool_name
-            tool_args = _normalize_tool_args(
-                tool_name,
-                _parse_tool_args_json(str(proposal.get("tool_args_json") or "{}")),
-            )
+                tool_name = str(proposal.get("tool_name") or "").strip() or forced_tool_name
+                if forced_tool_name and not allowed_tool_switch:
+                    tool_name = forced_tool_name
+                tool_args = _normalize_tool_args(
+                    tool_name,
+                    _parse_tool_args_json(str(proposal.get("tool_args_json") or "{}")),
+                )
 
         if tool_name not in TOOL_REGISTRY:
             step.attempts += 1
@@ -630,6 +604,25 @@ async def executioner(state: AgentV3State, config: RunnableConfig) -> dict[str, 
             last_error_message = f"Unknown proposed tool: {tool_name}"
             allowed_tool_switch = True
             continue
+
+        if tool_name == "execute_sql" and not schema_grounded_runtime:
+            preflight = await _invoke_tool(
+                "read_file", {"path": "artifacts/DB_SCHEMA_REFERENCE.yaml"}
+            )
+            if not bool(preflight.get("ok")):
+                step.status = "failed"
+                step.last_error_code = "SCHEMA_GROUNDING_FAILED"
+                step.error = "Failed to read artifacts/DB_SCHEMA_REFERENCE.yaml before SQL."
+                step.result_payload = _safe_json_loads(json.dumps(preflight, default=str))
+                step.result_summary = json.dumps(preflight, default=str)
+                steps[idx] = step
+                return {
+                    "steps": steps,
+                    "failed_step_index": idx,
+                    "current_step_index": idx,
+                    "terminal_error": step.error,
+                }
+            schema_grounded_runtime = True
 
         if tool_name == "analyze_current_alert":
             target_alert_id = _normalize_alert_id((tool_args or {}).get("alert_id"))

@@ -13,8 +13,6 @@ from ts_pit.agent_v3.planning import planner
 from ts_pit.agent_v3.prompts import load_chat_prompt
 from ts_pit.agent_v3.execution import executioner
 from ts_pit.agent_v3.responding import respond_node
-from ts_pit.agent_v3.validation import answer_validator_node
-from ts_pit.agent_v3.rewriting import answer_rewriter_node
 from ts_pit.agent_v3.utils import build_prompt_messages
 from ts_pit.config import get_config
 from ts_pit.llm import get_llm_model
@@ -128,10 +126,6 @@ ALERT_ANALYSIS_PATTERNS = (
     "analyse current alert",
     "analyze the current alert",
     "analyse the current alert",
-    "investigate this alert",
-    "review this alert",
-    "explain this alert",
-    "explain the alert",
 )
 ANOTHER_ALERT_PATTERNS = (
     "another alert",
@@ -983,23 +977,8 @@ def intent_router(state: AgentV3State) -> str:
     return "master"
 
 
-def route_after_respond(
-    state: AgentV3State,
-) -> Literal["answer_validator", "__end__"]:
-    if RESPONSE_QUALITY_ENABLED:
-        return "answer_validator"
-    return "__end__"
-
-
-def route_after_validation(
-    state: AgentV3State,
-) -> Literal["answer_rewriter", "master", "__end__"]:
-    feedback = state.last_answer_feedback
-    decision = str(getattr(feedback, "decision", "accept") or "accept")
-    if decision == "rewrite":
-        return "answer_rewriter"
-    if decision == "escalate":
-        return "master"
+def route_after_respond(state: AgentV3State) -> Literal["__end__"]:
+    _ = state
     return "__end__"
 
 
@@ -1013,8 +992,6 @@ def build_graph():
     workflow.add_node("master", master)
     workflow.add_node("planner", planner)
     workflow.add_node("respond", respond_node)
-    workflow.add_node("answer_validator", answer_validator_node)
-    workflow.add_node("answer_rewriter", answer_rewriter_node)
     workflow.add_node("executioner", executioner)
 
     workflow.add_edge(START, "ensure_system_prompt")
@@ -1043,8 +1020,6 @@ def build_graph():
     workflow.add_edge("executioner", "master")
     workflow.add_edge("context_metrics", "respond")
     workflow.add_conditional_edges("respond", route_after_respond)
-    workflow.add_conditional_edges("answer_validator", route_after_validation)
-    workflow.add_edge("answer_rewriter", "answer_validator")
 
     return workflow
 

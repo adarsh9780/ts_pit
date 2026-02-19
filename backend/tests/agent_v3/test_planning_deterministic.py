@@ -65,6 +65,28 @@ class _ReuseNoStepsModelStub:
         }
 
 
+class _PlannerToolArgsModelStub:
+    def with_structured_output(self, _schema):
+        return self
+
+    def invoke(self, _messages):
+        return {
+            "plan_action": "append",
+            "requires_execution": True,
+            "requires_execution_reason": "Need web search",
+            "steps": [
+                {
+                    "instruction": "Search recent web/news coverage for ticker.",
+                    "goal": "Collect relevant headlines",
+                    "success_criteria": "At least one result is available",
+                    "constraints": [],
+                    "tool_name": "search_web",
+                    "tool_args_json": '{"query":"NVDA latest company news","max_results":5}',
+                }
+            ],
+        }
+
+
 class PlanningDeterministicTests(unittest.TestCase):
     def test_planner_skips_execution_while_waiting_for_clarification(self):
         state = AgentV3State(
@@ -77,10 +99,11 @@ class PlanningDeterministicTests(unittest.TestCase):
         self.assertFalse(out["plan_requires_execution"])
         self.assertIn("clarification", str(out["plan_requires_execution_reason"]).lower())
 
-    def test_injects_analysis_first_for_alert_investigation_query(self):
+    def test_injects_analysis_first_for_explicit_analysis_intent(self):
         state = AgentV3State(
             messages=[HumanMessage(content="[USER QUESTION]\nPlease investigate this alert.")],
             current_alert=CurrentAlertContext(alert_id=123, ticker="NVDA"),
+            intent_class="analyze_current_alert",
         )
 
         with patch.object(planning, "load_chat_prompt", return_value=_PromptStub()), patch.object(
@@ -92,6 +115,23 @@ class PlanningDeterministicTests(unittest.TestCase):
         self.assertGreaterEqual(len(pending_steps), 1)
         joined = "\n".join(step.instruction for step in pending_steps)
         self.assertIn("Run deterministic analysis for the current alert", joined)
+
+    def test_does_not_inject_analysis_for_investigate_text_without_explicit_analysis_intent(self):
+        state = AgentV3State(
+            messages=[HumanMessage(content="[USER QUESTION]\nPlease investigate this alert.")],
+            current_alert=CurrentAlertContext(alert_id=123, ticker="NVDA"),
+            intent_class="task",
+        )
+
+        with patch.object(planning, "load_chat_prompt", return_value=_PromptStub()), patch.object(
+            planning, "get_llm_model", return_value=_ModelStub()
+        ):
+            out = planning.planner(state, config={})
+
+        pending_steps = [s for s in out["steps"] if s.status in {"pending", "running"}]
+        self.assertGreaterEqual(len(pending_steps), 1)
+        joined = "\n".join(step.instruction for step in pending_steps)
+        self.assertNotIn("Run deterministic analysis for the current alert", joined)
 
     def test_does_not_inject_when_analysis_already_done_for_current_alert(self):
         state = AgentV3State(
@@ -172,6 +212,25 @@ class PlanningDeterministicTests(unittest.TestCase):
         joined = "\n".join(step.instruction for step in pending_steps)
         self.assertIn("Tool hint: search_web", joined)
         self.assertTrue(out["plan_requires_execution"])
+
+    def test_planner_tool_args_are_carried_into_runtime_steps(self):
+        state = AgentV3State(
+            messages=[HumanMessage(content="[USER QUESTION]\nFind latest news for NVDA")],
+            current_alert=CurrentAlertContext(alert_id=123, ticker="NVDA"),
+        )
+
+        with patch.object(planning, "load_chat_prompt", return_value=_PromptStub()), patch.object(
+            planning, "get_llm_model", return_value=_PlannerToolArgsModelStub()
+        ):
+            out = planning.planner(state, config={})
+
+        pending_steps = [s for s in out["steps"] if s.status in {"pending", "running"}]
+        self.assertGreaterEqual(len(pending_steps), 1)
+        self.assertEqual(pending_steps[0].selected_tool, "search_web")
+        self.assertEqual(
+            pending_steps[0].tool_args,
+            {"query": "NVDA latest company news", "max_results": 5},
+        )
 
 
 if __name__ == "__main__":

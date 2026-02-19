@@ -1,10 +1,13 @@
 from langchain.chat_models import init_chat_model, BaseChatModel
 from langchain_core.messages import BaseMessage
-from langchain_core.callbacks import CallbackManagerForLLMRun
-from langchain_core.outputs import ChatResult
+from langchain_core.callbacks import (
+    CallbackManagerForLLMRun,
+    AsyncCallbackManagerForLLMRun,
+)
+from langchain_core.outputs import ChatResult, ChatGenerationChunk
 from azure.identity import CertificateCredential
 import time
-from typing import Any
+from typing import Any, Iterator, AsyncIterator
 from pathlib import Path
 
 AZURE_SCOPE = "https://cognitiveservices.azure.com/.default"
@@ -205,6 +208,49 @@ class AzureOpenAIModel(BaseChatModel):
 
                 # Re-raise other errors
                 raise
+
+    def _stream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> Iterator[ChatGenerationChunk]:
+        """
+        Stream chat chunks so LangGraph can emit `on_chat_model_stream` events.
+        """
+        self._refresh_model_if_needed()
+        stream_impl = getattr(self._model, "_stream", None)
+        if callable(stream_impl):
+            yield from stream_impl(messages, stop=stop, run_manager=run_manager, **kwargs)
+            return
+        # Fallback to default behavior if the wrapped model does not expose stream.
+        yield from super()._stream(
+            messages, stop=stop, run_manager=run_manager, **kwargs
+        )
+
+    async def _astream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[ChatGenerationChunk]:
+        """
+        Async streaming path used by LangGraph `astream_events`.
+        """
+        self._refresh_model_if_needed()
+        astream_impl = getattr(self._model, "_astream", None)
+        if callable(astream_impl):
+            async for chunk in astream_impl(
+                messages, stop=stop, run_manager=run_manager, **kwargs
+            ):
+                yield chunk
+            return
+        async for chunk in super()._astream(
+            messages, stop=stop, run_manager=run_manager, **kwargs
+        ):
+            yield chunk
 
     def bind_tools(
         self,

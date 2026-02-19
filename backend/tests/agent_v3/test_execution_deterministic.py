@@ -20,10 +20,11 @@ class ExecutionDeterministicTests(unittest.TestCase):
         out = asyncio.run(execution.executioner(state, config={}))
         self.assertIn("clarification", str(out.get("terminal_error", "")).lower())
 
-    def test_forces_analyze_current_alert_before_drilldown(self):
+    def test_forces_analyze_current_alert_before_drilldown_when_intent_is_explicit_analysis(self):
         state = AgentV3State(
-            messages=[HumanMessage(content="[USER QUESTION]\nInvestigate this alert.")],
+            messages=[HumanMessage(content="[USER QUESTION]\nAnalyze this alert.")],
             current_alert=CurrentAlertContext(alert_id=321, ticker="NVDA"),
+            intent_class="analyze_current_alert",
             steps=[
                 StepState(
                     id="v1_s1",
@@ -176,6 +177,65 @@ class ExecutionDeterministicTests(unittest.TestCase):
         self.assertEqual(updated.status, "skipped")
         self.assertEqual(out["current_step_index"], 1)
         self.assertIn("deterministically skipped", str(updated.result_summary))
+
+    def test_uses_planner_provided_tool_and_args_without_proposal_call(self):
+        state = AgentV3State(
+            messages=[HumanMessage(content="[USER QUESTION]\nFetch latest related rows.")],
+            current_alert=CurrentAlertContext(alert_id=321, ticker="NVDA"),
+            steps=[
+                StepState(
+                    id="v1_s1",
+                    instruction="Fetch rows",
+                    selected_tool="search_web",
+                    tool_args={"query": "NVDA company news", "max_results": 5},
+                )
+            ],
+        )
+
+        invoke_mock = AsyncMock(
+            return_value={"ok": True, "data": {"combined": [{"url": "u1"}], "web": [], "news": []}}
+        )
+        with patch.object(execution, "_invoke_tool", invoke_mock), patch.object(
+            execution, "_propose_execution", side_effect=AssertionError("should not propose")
+        ):
+            out = asyncio.run(execution.executioner(state, config={}))
+
+        updated = out["steps"][0]
+        self.assertEqual(updated.status, "done")
+        self.assertEqual(updated.selected_tool, "search_web")
+        self.assertEqual(invoke_mock.await_count, 1)
+
+    def test_sql_preflight_reads_schema_before_execute_sql(self):
+        state = AgentV3State(
+            messages=[HumanMessage(content="[USER QUESTION]\nRun SQL for alerts table.")],
+            current_alert=CurrentAlertContext(alert_id=321, ticker="NVDA"),
+            steps=[
+                StepState(
+                    id="v1_s1",
+                    instruction="Query alerts",
+                    selected_tool="execute_sql",
+                    tool_args={"query": "SELECT id FROM alerts LIMIT 5"},
+                )
+            ],
+        )
+
+        invoke_mock = AsyncMock(
+            side_effect=[
+                {"ok": True, "data": {"content": "schema text"}},
+                {"ok": True, "data": [{"id": "1"}], "meta": {"row_count": 1}},
+            ]
+        )
+        with patch.object(execution, "_invoke_tool", invoke_mock), patch.object(
+            execution, "_propose_execution", side_effect=AssertionError("should not propose")
+        ):
+            out = asyncio.run(execution.executioner(state, config={}))
+
+        self.assertEqual(invoke_mock.await_count, 2)
+        first_call = invoke_mock.await_args_list[0]
+        second_call = invoke_mock.await_args_list[1]
+        self.assertEqual(first_call.args[0], "read_file")
+        self.assertEqual(second_call.args[0], "execute_sql")
+        self.assertEqual(out["steps"][0].status, "done")
 
 
 if __name__ == "__main__":

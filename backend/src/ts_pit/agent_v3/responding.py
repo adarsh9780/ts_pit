@@ -70,6 +70,58 @@ def _step_plan_version(step_id: str) -> int | None:
         return None
 
 
+def _is_near_empty(answer: str) -> bool:
+    compact = " ".join(str(answer or "").split()).strip()
+    if not compact:
+        return True
+    if len(compact) < 24:
+        return True
+    return compact.lower() in {
+        "no data",
+        "no results",
+        "not sure",
+        "i don't know",
+        "unable to answer",
+    }
+
+
+def _has_limitation_note(answer: str) -> bool:
+    lowered = str(answer or "").lower()
+    markers = (
+        "limitation",
+        "could not",
+        "unable",
+        "partial",
+        "incomplete",
+        "not available",
+    )
+    return any(marker in lowered for marker in markers)
+
+
+def _table_opportunity_exists(completed: list[dict[str, Any]]) -> bool:
+    for item in completed:
+        result = item.get("result") if isinstance(item, dict) else None
+        if not isinstance(result, dict):
+            continue
+        data = result.get("data")
+        if not isinstance(data, list) or len(data) < 3:
+            continue
+        if all(isinstance(row, dict) for row in data[:3]):
+            return True
+    return False
+
+
+def _quality_issues(answer: str, completed: list[dict[str, Any]], failed: list[dict[str, Any]]) -> list[str]:
+    issues: list[str] = []
+    if _is_near_empty(answer):
+        issues.append("Answer is empty or near-empty.")
+    if failed and not _has_limitation_note(answer):
+        issues.append("Answer omits a concise limitation note despite failed steps.")
+    if _table_opportunity_exists(completed) and "|" not in answer:
+        issues.append("Likely table opportunity missed for comparable rows.")
+    return issues
+
+
 def completed_step_payloads(state: AgentV3State) -> list[dict[str, Any]]:
     payloads: list[dict[str, Any]] = []
     for step in state.steps:
@@ -132,6 +184,11 @@ def respond_node(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
     user_question = _latest_user_question(state.messages)
     completed = completed_step_payloads(state)
     failed = failed_step_payloads(state)
+    quality_hint = (
+        "Before finalizing, ensure the answer is concrete and not generic. "
+        "If failed steps exist, include one short limitation note. "
+        "If comparable multi-row data exists, use a markdown table."
+    )
 
     prompt = load_chat_prompt("respond").invoke(
         {
@@ -146,11 +203,38 @@ def respond_node(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
             "current_alert": state.current_alert.model_dump_json(),
             "terminal_error": state.terminal_error or "",
             "conversation_summary": state.conversation_summary or "(none)",
+            "quality_hint": quality_hint,
         }
     )
 
     ai_msg = llm.invoke(prompt)
     answer_text = _content_to_text(getattr(ai_msg, "content", "")).strip()
+    issues = _quality_issues(answer_text, completed, failed)
+    if issues:
+        repair_prompt = load_chat_prompt("respond").invoke(
+            {
+                "messages": build_prompt_messages(
+                    state.messages,
+                    conversation_summary=state.conversation_summary,
+                    recent_window=RESPOND_RECENT_WINDOW,
+                ),
+                "query": user_question or "(missing user request)",
+                "completed_step_outputs": json.dumps(completed, default=str),
+                "failed_steps": json.dumps(failed, default=str),
+                "current_alert": state.current_alert.model_dump_json(),
+                "terminal_error": state.terminal_error or "",
+                "conversation_summary": state.conversation_summary or "(none)",
+                "quality_hint": (
+                    quality_hint
+                    + " Fix these issues now: "
+                    + " ".join(f"- {issue}" for issue in issues)
+                ),
+            }
+        )
+        repaired = llm.invoke(repair_prompt)
+        repaired_text = _content_to_text(getattr(repaired, "content", "")).strip()
+        if repaired_text:
+            answer_text = repaired_text
 
     msg = AIMessage(content=answer_text)
     if ephemeral_marker:
@@ -158,7 +242,7 @@ def respond_node(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
             content=answer_text,
             additional_kwargs={"ephemeral_node_output": ephemeral_marker},
         )
-    return {"draft_answer": answer_text, "messages": [msg]}
+    return {"draft_answer": answer_text, "messages": [msg], "last_answer_feedback": None}
 
 
 __all__ = [

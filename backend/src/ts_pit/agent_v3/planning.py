@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from uuid import uuid4
 
@@ -20,6 +21,8 @@ class PlannerStep(BaseModel):
     goal: str | None = None
     success_criteria: str | None = None
     constraints: list[str] = Field(default_factory=list)
+    tool_name: str | None = None
+    tool_args_json: str | None = None
 
 
 class Plan(BaseModel):
@@ -53,6 +56,8 @@ PLAN_RESPONSE_SCHEMA: dict[str, Any] = {
                         "type": "array",
                         "items": {"type": "string"},
                     },
+                    "tool_name": {"type": "string"},
+                    "tool_args_json": {"type": "string"},
                 },
                 "required": ["instruction"],
             },
@@ -96,21 +101,6 @@ DIRECT_STATE_QUESTION_KEYWORDS = {
     "selected alert",
     "current alert",
 }
-
-ALERT_INVESTIGATION_PATTERNS = (
-    "investigate",
-    "investigation",
-    "explain",
-    "disposition",
-    "justify",
-    "why flagged",
-    "why this alert",
-    "review this alert",
-    "analyze this alert",
-    "analyse this alert",
-    "escalate",
-    "dismiss",
-)
 
 FORCED_ANALYSIS_STEP_INSTRUCTION = (
     "Run deterministic analysis for the current alert before any drill-down."
@@ -174,6 +164,15 @@ def _planner_steps_to_runtime(
     runtime_steps: list[StepState] = []
     for offset, step in enumerate(planner_steps, start=1):
         instruction = _instruction_with_tool_hint(step)
+        preselected_tool = str(step.tool_name or "").strip() or None
+        preselected_args: dict[str, Any] | None = None
+        if preselected_tool:
+            try:
+                parsed = json.loads(str(step.tool_args_json or "{}"))
+                if isinstance(parsed, dict):
+                    preselected_args = parsed
+            except Exception:
+                preselected_args = None
         runtime_steps.append(
             StepState(
                 id=_make_step_id(plan_version, start_index + offset),
@@ -181,6 +180,8 @@ def _planner_steps_to_runtime(
                 goal=step.goal,
                 success_criteria=step.success_criteria,
                 constraints=step.constraints,
+                selected_tool=preselected_tool,
+                tool_args=preselected_args,
             )
         )
     return runtime_steps
@@ -284,18 +285,6 @@ def _build_fallback_execution_step(query: str) -> PlannerStep:
 
 def _state_has_current_alert(state: AgentV3State) -> bool:
     return getattr(state.current_alert, "alert_id", None) is not None
-
-
-def _is_alert_investigation_query(state: AgentV3State, query: str) -> bool:
-    if not _state_has_current_alert(state):
-        return False
-    lowered = str(query or "").lower()
-    if not lowered:
-        return False
-    if any(pattern in lowered for pattern in ALERT_INVESTIGATION_PATTERNS):
-        return True
-    # Cover "explain alert #123" style phrasing.
-    return bool(re.search(r"\b(alert|case)\b", lowered) and "explain" in lowered)
 
 
 def _extract_alert_id_from_step(step: StepState) -> str | None:
@@ -525,9 +514,10 @@ def planner(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
         plan = Plan()
 
     # Deterministic direct-answer fallback for state-only questions.
-    if _is_direct_state_question(user_query) and not _is_alert_investigation_query(
-        state, user_query
-    ):
+    if _is_direct_state_question(user_query) and state.intent_class not in {
+        "analyze_current_alert",
+        "analyze_other_alert",
+    }:
         plan = plan.model_copy(
             update={
                 "requires_execution": False,
@@ -563,9 +553,10 @@ def planner(state: AgentV3State, config: RunnableConfig) -> dict[str, Any]:
             }
         )
 
-    investigation_query = _is_alert_investigation_query(state, user_query) or (
-        state.intent_class in {"analyze_current_alert", "analyze_other_alert"}
-    )
+    investigation_query = state.intent_class in {
+        "analyze_current_alert",
+        "analyze_other_alert",
+    }
     if (
         investigation_query
         and not _has_completed_analysis_for_current_alert(state)

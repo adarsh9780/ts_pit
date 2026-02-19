@@ -1,5 +1,5 @@
 import os
-from typing import Dict
+from typing import Any, Dict
 from langchain_core.messages import SystemMessage, HumanMessage
 from dotenv import load_dotenv
 from .config import get_config
@@ -87,6 +87,30 @@ def _safe_abs_impact(value) -> float:
         return abs(float(value))
     except (TypeError, ValueError):
         return 0.0
+
+
+def _coerce_recommendation_reason(value: Any) -> str:
+    """Normalize recommendation_reason into a plain string for schema safety."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        lines: list[str] = []
+        for item in value:
+            txt = str(item or "").strip()
+            if txt:
+                lines.append(txt)
+        return "\n".join(lines).strip()
+    return str(value).strip()
+
+
+def _sanitize_cluster_summary_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    sanitized = dict(payload)
+    sanitized["recommendation_reason"] = _coerce_recommendation_reason(
+        sanitized.get("recommendation_reason")
+    )
+    return sanitized
 
 
 def get_llm_model():
@@ -243,9 +267,14 @@ def generate_cluster_summary(
         # return a dict or a typed object; normalize defensively.
         result = structured_llm.invoke(messages)
         if isinstance(result, dict):
-            result_obj = ClusterSummaryOutput.model_validate(result)
+            result_obj = ClusterSummaryOutput.model_validate(
+                _sanitize_cluster_summary_payload(result)
+            )
         else:
             result_obj = result
+        recommendation_reason = _coerce_recommendation_reason(
+            getattr(result_obj, "recommendation_reason", "")
+        )
         return {
             "narrative_theme": result_obj.narrative_theme,
             "narrative_summary": result_obj.narrative_summary,
@@ -253,7 +282,7 @@ def generate_cluster_summary(
             "bearish_events": result_obj.bearish_events or [],
             "neutral_events": result_obj.neutral_events or [],
             "recommendation": _normalize_recommendation(result_obj.recommendation),
-            "recommendation_reason": result_obj.recommendation_reason
+            "recommendation_reason": recommendation_reason
             or "No recommendation generated. Manual review required.",
         }
     except Exception as e:
