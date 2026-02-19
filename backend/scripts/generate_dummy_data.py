@@ -351,6 +351,9 @@ except ImportError:
 
 print("DEBUG: All imports done", flush=True)
 
+# Initialize global config
+config = get_config()
+
 # Initialize Colorama and Faker
 init(autoreset=True)
 fake = Faker()
@@ -501,7 +504,14 @@ def main():
     print(f"{Fore.GREEN}[✓] Schema Created: alert_analysis")
 
     # 2. Market Data Processing
-    tickers = ["AAPL", "TSLA", "MSFT", "NVDA", "JPM"]
+    TICKER_MAP = {
+        "AAPL": "Apple Inc.",
+        "TSLA": "Tesla, Inc.",
+        "MSFT": "Microsoft Corporation",
+        "NVDA": "NVIDIA Corporation",
+        "JPM": "JPMorgan Chase & Co.",
+    }
+    tickers = list(TICKER_MAP.keys())
     if any(k in selected_keys for k in ["prices", "prices_hourly"]):
         for ticker in tickers:
             print(f"{Fore.CYAN}Fetching prices for {ticker}...")
@@ -549,6 +559,7 @@ def main():
                 {
                     alt["columns"]["id"]: i,
                     alt["columns"]["ticker"]: ticker,
+                    alt["columns"]["company_name"]: TICKER_MAP[ticker],
                     alt["columns"]["isin"]: isin,
                     alt["columns"]["status"]: random.choice(cfg["valid_statuses"]),
                     alt["columns"]["start_date"]: a_start.strftime("%Y-%m-%d"),

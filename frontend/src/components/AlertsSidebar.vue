@@ -114,7 +114,7 @@ const getTypeClass = (type) => {
           v-model="searchQuery" 
           @input="onSearch"
           type="text" 
-          placeholder="Search Ticker..." 
+          placeholder="Search Ticker or Company..." 
           class="input-search"
         />
       </div>

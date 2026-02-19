@@ -20,6 +20,7 @@ tables:
       # Required columns - these must exist in your database
       id: "Alert ID"                     # Unique identifier for each alert
       ticker: "Ticker"                   # Stock ticker symbol
+      company_name: "Company Name"       # Company Name
       status: "status"                   # Current status (canonical default: NEEDS_REVIEW/ESCALATE_L2/DISMISS)
       
       # Optional columns - leave empty string "" if not available

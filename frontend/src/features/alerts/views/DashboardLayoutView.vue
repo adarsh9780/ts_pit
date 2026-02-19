@@ -175,7 +175,10 @@ const applyFilters = () => {
 
     if (search) {
         const q = search.toLowerCase();
-        result = result.filter(a => String(a.ticker || '').toLowerCase().includes(q));
+        result = result.filter(a => 
+            String(a.ticker || '').toLowerCase().includes(q) || 
+            String(a.company_name || '').toLowerCase().includes(q)
+        );
     }
     
     if (status) {
