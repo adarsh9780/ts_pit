@@ -106,3 +106,63 @@ fix(streaming): remove in-node second-pass rewrite to prevent duplicated final o
   - removed the second `llm.invoke(...)` "repair" pass inside `respond_node`
   - `respond_node` now emits a single final-generation stream per turn
 - This avoids draft+repair concatenation in the frontend when token streaming is enabled.
+
+feat(observability): integrate optional Langfuse tracing for LLM calls with safe fallback behavior
+
+- Added `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/src/ts_pit/observability.py`:
+  - `get_langfuse_callbacks()` builds Langfuse callback handlers from env vars.
+  - Tracing is opt-in via `LANGFUSE_ENABLED` (or auto-enabled when keys exist).
+  - Missing SDK/config now degrades gracefully without breaking model calls.
+- Updated `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/src/ts_pit/llm.py`:
+  - wires Langfuse callbacks into both Gemini (`init_chat_model`) and Azure (`AzureOpenAIModel`) model setup.
+- Updated `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/src/ts_pit/azure_llm.py`:
+  - accepts optional `callbacks` and forwards them into `init_chat_model`.
+- Updated `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/pyproject.toml` and `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/uv.lock`:
+  - adds `langfuse` dependency.
+- Updated `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/README.md`:
+  - documents Langfuse env-based setup and unauth local mode option.
+
+Tests added:
+- `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/tests/test_observability_langfuse.py`
+- `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/tests/test_llm_langfuse_wiring.py`
+
+Validation run:
+- `uv run --project backend pytest backend/tests/test_observability_langfuse.py backend/tests/test_llm_langfuse_wiring.py backend/tests/test_azure_llm_streaming.py backend/tests/test_llm_cluster_summary.py`
+
+fix(observability): support Langfuse v3 callback import path so traces are emitted
+
+- Root cause: installed Langfuse SDK exposes callback handler at `langfuse.langchain.CallbackHandler`, while implementation only attempted legacy `langfuse.callback.CallbackHandler`.
+- Updated `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/src/ts_pit/observability.py`:
+  - `_resolve_langfuse_handler_class()` now tries both module paths in order:
+    1. `langfuse.langchain` (new)
+    2. `langfuse.callback` (legacy fallback)
+- Added regression tests in `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/tests/test_observability_langfuse.py`:
+  - verifies new module path resolution
+  - verifies fallback to legacy module path
+
+Validation run:
+- `uv run --project backend pytest backend/tests/test_observability_langfuse.py backend/tests/test_llm_langfuse_wiring.py`
+
+fix(observability): handle Langfuse callback constructor signature differences (v3)
+
+- Root cause: installed `langfuse.langchain.CallbackHandler` constructor does not accept `secret_key`/`host` kwargs, causing callback creation failure and zero traces.
+- Updated `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/src/ts_pit/observability.py`:
+  - inspects callback constructor signature and passes only supported kwargs
+  - preserves all kwargs when handler accepts `**kwargs`
+- Added regression test in `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/tests/test_observability_langfuse.py`:
+  - `test_handler_kwargs_are_filtered_by_constructor_signature`
+
+Validation run:
+- `uv run --project backend pytest backend/tests/test_observability_langfuse.py backend/tests/test_llm_langfuse_wiring.py`
+
+fix(observability): initialize Langfuse client before creating callback handler
+
+- Root cause: SDK warning `No Langfuse client with public key ... has been initialized` indicates callback looked up a client that was never initialized.
+- Updated `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/src/ts_pit/observability.py`:
+  - added `_resolve_langfuse_client_class()` and `_initialize_langfuse_client(...)`
+  - `get_langfuse_callbacks()` now initializes `Langfuse(...)` (when keys are present) before constructing callback handler.
+- Added regression test in `/Users/adarshmaurya/Downloads/Projects/ts_pit/backend/tests/test_observability_langfuse.py`:
+  - `test_initializes_langfuse_client_before_callback`
+
+Validation run:
+- `uv run --project backend pytest backend/tests/test_observability_langfuse.py backend/tests/test_llm_langfuse_wiring.py`
