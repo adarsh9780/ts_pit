@@ -51,7 +51,7 @@ class TokenManager:
                 flush=True,
             )
             self._refresh_token()
-            print(f"Token generated successfully", flush=True)
+            print("Token generated successfully", flush=True)
 
         return self.token
 
@@ -86,6 +86,7 @@ class AzureOpenAIModel(BaseChatModel):
     endpoint: str = AZURE_ENDPOINT
     api_version: str = API_VERSION
     api_key: str = AZURE_OPENAI_API_KEY
+    langchain_callbacks: Any = None
 
     _token_manager: Any = None
     _model: Any = None
@@ -103,6 +104,7 @@ class AzureOpenAIModel(BaseChatModel):
         endpoint: str = AZURE_ENDPOINT,
         api_version: str = API_VERSION,
         api_key: str = AZURE_OPENAI_API_KEY,
+        callbacks: list[Any] | None = None,
         token_refresh_buffer: int = 3600,
         **kwargs,
     ):
@@ -119,6 +121,7 @@ class AzureOpenAIModel(BaseChatModel):
         self.endpoint = endpoint
         self.api_version = api_version
         self.api_key = api_key
+        self.langchain_callbacks = callbacks
 
         self._token_manager = TokenManager(
             client_id=self.client_id,
@@ -142,6 +145,7 @@ class AzureOpenAIModel(BaseChatModel):
             azure_deployment=self.deployment,
             max_retries=1,
             temperature=0,
+            callbacks=self.langchain_callbacks,
             default_headers={
                 "Authorization": f"Bearer {access_token}",
                 "user_sid": "o739240",
@@ -222,7 +226,9 @@ class AzureOpenAIModel(BaseChatModel):
         self._refresh_model_if_needed()
         stream_impl = getattr(self._model, "_stream", None)
         if callable(stream_impl):
-            yield from stream_impl(messages, stop=stop, run_manager=run_manager, **kwargs)
+            yield from stream_impl(
+                messages, stop=stop, run_manager=run_manager, **kwargs
+            )
             return
         # Fallback to default behavior if the wrapped model does not expose stream.
         yield from super()._stream(

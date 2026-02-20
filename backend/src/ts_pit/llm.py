@@ -3,6 +3,7 @@ from typing import Any, Dict
 from langchain_core.messages import SystemMessage, HumanMessage
 from dotenv import load_dotenv
 from .config import get_config
+from .observability import get_langfuse_callbacks
 from .prompts import CLUSTER_SUMMARY_SYSTEM_PROMPT
 from .schemas import ClusterSummaryOutput
 
@@ -127,6 +128,7 @@ def get_llm_model():
     provider = llm_config.get("provider", "gemini")
 
     model_instance = None
+    callbacks = list(get_langfuse_callbacks())
 
     if provider == "azure":
         # Use user's custom class logic
@@ -142,6 +144,7 @@ def get_llm_model():
             endpoint=azure_conf.get("endpoint"),
             api_version=azure_conf.get("api_version"),
             api_key=_resolve_env_var(azure_conf.get("api_key")),
+            callbacks=callbacks or None,
         )
 
     elif provider == "gemini":
@@ -156,7 +159,10 @@ def get_llm_model():
 
         # Use init_chat_model as requested
         model_instance = init_chat_model(
-            model_name, model_provider="google_genai", google_api_key=api_key
+            model_name,
+            model_provider="google_genai",
+            google_api_key=api_key,
+            callbacks=callbacks or None,
         )
 
     else:

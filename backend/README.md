@@ -153,3 +153,25 @@ tables:
       status: "status"
       isin: "ISIN"
 ```
+
+## Langfuse Observability
+
+Langfuse tracing is now wired into model calls and is opt-in.
+
+1. Install backend deps:
+   ```bash
+   uv sync
+   ```
+2. Enable Langfuse in environment:
+   ```bash
+   LANGFUSE_ENABLED=true
+   LANGFUSE_HOST=http://localhost:3000
+   LANGFUSE_PUBLIC_KEY=pk_...
+   LANGFUSE_SECRET_KEY=sk_...
+   ```
+3. Optional local unauth mode (self-hosted only):
+   ```bash
+   LANGFUSE_ALLOW_UNAUTH=true
+   ```
+
+If Langfuse is not configured or unavailable, the app continues normally without tracing.

@@ -26,6 +26,7 @@ dependencies = [
     "faker>=40.1.2",
     "loguru>=0.7.3",
     "sqlalchemy>=2.0.43",
+    "langfuse>=2.59.3",
     "safe-py-runner",
 ]
 
